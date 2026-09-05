@@ -1,45 +1,50 @@
 # Folio (Tax-Build-Alpha)
 
-Evidence-first bookkeeping and tax-workspace alpha for professional firms. The product rule is simple: AI proposes, evidence verifies, and the professional decides what becomes part of the books.
+Evidence-first bookkeeping and tax workspace alpha for professional firms. The operating rule is simple: software prepares, evidence verifies, and the professional decides what becomes part of the books.
 
-## Married architecture
-
-This branch keeps the Cloudflare chassis that already shipped and replaces the accounting spine.
+## Paid-alpha architecture
 
 | Layer | Choice |
 |---|---|
-| Frontend | Cloudflare Pages, Vite, React, TypeScript, Tailwind |
+| Client | React, Vite, TypeScript, Tailwind |
+| Production delivery | Cloudflare Worker Static Assets, same origin as the API |
 | API | Cloudflare Workers, Hono |
 | Auth state | Better Auth on Cloudflare D1 |
 | Business database | Neon Postgres |
 | Source documents | Private Cloudflare R2 |
 | Primary extraction | Workers AI, `@cf/qwen/qwen3.8-27b` |
 | PDF preparation | Workers AI `toMarkdown()` |
-| AI fallback | Gemini Flash when `GEMINI_API_KEY` is configured |
+| AI fallback | Gemini Flash only when `GEMINI_API_KEY` is configured |
 | Local development | Deterministic mock provider only when explicitly selected |
 
-D1 is now intentionally auth-only. Firm, client, receipt, line-item, validation, audit, correction-memory, bank, and reporting data live in Neon.
+D1 is auth-only. Firm, client, receipt, line-item, validation, audit, correction-memory, bank, and reporting data live in Neon.
 
-## What changed in the married spine
+The paid alpha intentionally serves the React app and API from one Worker origin. This removes the Pages-to-Workers third-party cookie path, keeps Better Auth first-party, reduces CORS complexity, and removes one production moving part. Cloudflare Pages can still be reintroduced later if there is a product reason for a separate frontend origin.
 
-- Receipt truth moved from one header-level transaction to receipt header plus line items.
+## What the alpha proves
+
+- Receipt truth is a receipt header plus purchased line items, not one guessed transaction.
 - Every extraction runs deterministic arithmetic validation before review.
-- Review is evidence-first: source document on one side, editable extracted facts and validation on the other.
+- Review is evidence-first. The source document is visible beside editable extracted facts and validation results.
+- Clicking Approve always saves the visible draft first, reruns validation, and only then files the receipt.
 - Failed validation cannot be filed without an explicit professional override.
-- Filed line items feed the P&L. Unreviewed AI output does not.
-- Every P&L category drills down to the exact line items and source receipts behind the number.
-- Per-client merchant category corrections are remembered and applied to future extracts.
-- A client business profile is available to give extraction client-specific context.
-- Extraction failures are real failures. Production never silently substitutes fabricated mock data.
+- Only filed evidence enters the P&L.
+- Receipt-level tax, tip, discounts, shipping, and rounding are kept as visible adjustment lines so the P&L reconciles to the approved receipt total.
+- Every P&L category drills down to the contributing lines and exact source receipts.
+- Per-client merchant category corrections are remembered for future extracts.
+- Client business profile data can inform extraction without leaking rules between clients.
+- Production extraction failures are real failures. Production never silently substitutes mock data.
 
 ## Repository layout
 
 ```text
-apps/web/                         React app
-apps/api/                         Worker API
-migrations/                       Legacy D1 auth migration
-migrations/neon/                 Neon business-data schema
-scripts/neon-migrate.mjs          Dependency-free Neon migration runner
+apps/web/                         React client
+apps/api/                         Hono Worker, auth, R2, Workers AI
+migrations/                       D1 auth schema
+migrations/neon/                 Neon business schema
+scripts/neon-migrate.mjs          Neon migration runner
+scripts/bootstrap-production.ps1  Cloudflare production bootstrap
+scripts/smoke-production.ps1      End-to-end paid-alpha verification
 ```
 
 ## Local setup
@@ -49,7 +54,7 @@ Requirements:
 - Node 20+
 - Cloudflare account
 - Neon project
-- R2 bucket named `folio-receipts`
+- Windows PowerShell for the production bootstrap scripts
 
 Install dependencies:
 
@@ -59,34 +64,21 @@ npm install
 
 Copy the Worker environment template:
 
-```bash
-cp apps/api/.dev.vars.example apps/api/.dev.vars
-```
-
-For PowerShell:
-
 ```powershell
 Copy-Item apps/api/.dev.vars.example apps/api/.dev.vars
 ```
 
-Set a real `DATABASE_URL` in `apps/api/.dev.vars`. Use the pooled Neon PostgreSQL connection string from Neon.
-
-Apply the Neon schema. PowerShell example:
+Set a real pooled Neon `DATABASE_URL` in `apps/api/.dev.vars`, then apply the business schema:
 
 ```powershell
 $env:DATABASE_URL="postgresql://..."
 npm run db:migrate:neon
 ```
 
-Apply the existing D1 migration for Better Auth when setting up a fresh local auth database:
+Apply the local D1 auth migration and run both apps:
 
-```bash
+```powershell
 npm run auth:migrate:local
-```
-
-Run both apps:
-
-```bash
 npm run dev
 ```
 
@@ -96,45 +88,83 @@ Local URLs:
 - API: `http://localhost:8787`
 - Health: `http://localhost:8787/api/health`
 
-Local development defaults to `LLM_PROVIDER=mock`. This keeps development free and deterministic. The mock is never used as an automatic production fallback.
+Local development defaults to `LLM_PROVIDER=mock`. Mock output is never an automatic production fallback.
 
-## Cloudflare production setup
+## One-command production bootstrap
 
-The active Worker config is `apps/api/wrangler.toml`.
+The production bootstrap creates or reuses the Cloudflare resources, applies both database schemas, generates the Better Auth secret, stores Worker secrets, builds the SPA, deploys the single-origin Worker, and verifies `/api/health`.
 
-1. Create or reuse the D1 database for Better Auth and replace the placeholder `database_id` in `apps/api/wrangler.toml`.
-2. Create the private R2 bucket `folio-receipts`.
-3. Create a Neon project and apply `migrations/neon/0001_married_spine.sql` with `npm run db:migrate:neon`.
-4. Set Worker secrets:
+From the repository root:
 
-```bash
-cd apps/api
-npx wrangler secret put BETTER_AUTH_SECRET
-npx wrangler secret put DATABASE_URL
-npx wrangler secret put GEMINI_API_KEY
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\bootstrap-production.ps1
 ```
 
-`GEMINI_API_KEY` is optional. It is only the fallback behind Workers AI.
+The script will:
 
-5. Set `BETTER_AUTH_URL` to the deployed Worker URL and `APP_ORIGIN` to the Pages origin.
-6. Keep `LLM_PROVIDER=workers-ai` in production.
-7. Deploy the Worker and Pages app.
+1. Run `npm ci`.
+2. Verify Wrangler authentication and open `wrangler login` if required.
+3. Create or reuse D1 `folio-db` for Better Auth.
+4. Patch the local Wrangler config with the real D1 database ID.
+5. Create or reuse private R2 bucket `folio-receipts`.
+6. Apply the D1 auth migration.
+7. Read `DATABASE_URL` from the environment or securely prompt for the pooled Neon connection string.
+8. Apply `migrations/neon/0001_married_spine.sql`.
+9. Build the React client.
+10. Deploy the Worker with the client as static assets.
+11. Generate and upload `BETTER_AUTH_SECRET`.
+12. Upload `DATABASE_URL` as a Worker secret.
+13. Upload `GEMINI_API_KEY` only when it is already present in the environment.
+14. Set production `BETTER_AUTH_URL` and `APP_ORIGIN` to the same Worker origin.
+15. Redeploy and verify Neon plus Workers AI through the health endpoint.
 
-Workers AI is bound as `AI` in `apps/api/wrangler.toml`. Receipt photos are sent to Qwen 3.8 27B. PDFs first use Cloudflare document conversion, then Qwen receives the extracted document text. If that path fails and Gemini is configured, the provider adapter falls back to Gemini.
+No database credential or auth secret is written into the repository.
+
+## End-to-end production proof
+
+After bootstrap, run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\smoke-production.ps1 -BaseUrl "https://folio-api.<your-subdomain>.workers.dev"
+```
+
+By default, the smoke script generates a receipt image with two purchased items, subtotal, tax, and grand total. You can instead pass a real receipt image or PDF:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\smoke-production.ps1 `
+  -BaseUrl "https://folio-api.<your-subdomain>.workers.dev" `
+  -ReceiptPath "C:\path\to\receipt.jpg"
+```
+
+The smoke test exercises the complete production path:
+
+```text
+receipt file
+  -> private R2 source
+  -> Workers AI extraction
+  -> receipt header + line items
+  -> arithmetic validation
+  -> professional review state
+  -> filed ledger
+  -> reconciled P&L
+  -> source drill-down
+```
+
+The script never auto-overrides failed validation. If deterministic validation fails, it stops in review and prints the failed checks.
 
 ## Receipt lifecycle
 
 ```text
 upload
   -> private R2 source
-  -> Workers AI or Gemini extraction
+  -> Workers AI or configured Gemini fallback
   -> receipt header + line items
   -> arithmetic validation
   -> review queue
   -> professional edit or approval
   -> audit event + correction memory
   -> filed ledger
-  -> P&L
+  -> reconciled P&L
   -> source drill-down
 ```
 
@@ -146,19 +176,27 @@ Validation currently checks:
 - subtotal plus tax plus tip reconciles to total
 - receipt and line-item confidence signals
 
-The tolerance for receipt arithmetic is two cents to allow normal rounding differences.
-
-## Client correction memory
-
-When a reviewer changes a merchant's top-level category, Folio stores a client-scoped `merchant_category` rule. Future receipts from the normalized merchant can inherit that client's remembered category without leaking a rule to another client.
-
-This is the first institutional-memory path. More granular item-level and vendor-specific correction learning can be added after the alpha proves the review loop.
+The arithmetic tolerance is two cents for normal rounding differences.
 
 ## P&L traceability
 
-Only receipts in `filed` status enter the P&L. When line items exist, the P&L is built from those line items. A receipt with no line items falls back to its reviewed receipt total so evidence is not silently dropped.
+Only receipts in `filed` status enter the P&L. Purchased line items remain their own ledger entries. When the approved receipt total differs from the item sum, Folio creates a visible receipt-level adjustment entry for the difference. This captures tax, tip, discounts, shipping, or rounding without hiding those amounts inside item rows.
 
-`GET /api/clients/:clientId/pnl/drilldown?category=...` returns every contributing line with a source URL. The UI exposes the same drill-down next to the report.
+A filed receipt with no line items falls back to its approved receipt total so evidence is not silently dropped.
+
+`GET /api/clients/:clientId/pnl/drilldown?category=...` returns every contributing entry with its source receipt URL.
+
+## Client correction memory
+
+When a reviewer changes a merchant's top-level category, Folio stores a client-scoped `merchant_category` rule. Future receipts from the normalized merchant can inherit that client's remembered category. Rules are never shared across clients.
+
+This is the first institutional-memory path. Item-level and vendor-specific learning can follow after the alpha proves the review loop.
+
+## Cost guardrail
+
+Workers AI currently includes a 10,000 Neuron daily free allocation on the Workers Free plan. Qwen 3.8 27B is available on Workers AI and uses the account's neuron allocation. The paid alpha should measure actual receipt usage before any volume commitment or model change.
+
+The bootstrap does not upgrade the Cloudflare account or enable paid inference.
 
 ## Deliberately deferred
 
@@ -172,7 +210,7 @@ To protect the paid-alpha timeline, this milestone does not add:
 - PDF or Excel report export
 - item-level machine learning beyond correction rules
 
-Those should follow only after the line-item review and evidence drill-down are working with real Phyllis documents.
+Those follow only after the real receipt review and evidence drill-down loop is proven with Phyllis's workflow.
 
 ## Verification commands
 
@@ -181,14 +219,14 @@ npm run typecheck
 npm run build
 ```
 
-A build is not considered production-ready until the Neon schema has been applied and real Cloudflare bindings and secrets are present.
+A build is not considered production-ready until the Neon schema has been applied, real Cloudflare bindings and secrets are present, and the production smoke test passes.
 
 ## Security notes
 
 - Receipt sources remain private in R2.
 - `DATABASE_URL`, `BETTER_AUTH_SECRET`, and optional `GEMINI_API_KEY` are Worker secrets only.
 - No secret belongs in a `VITE_*` browser variable.
-- Production auth cookies use `Secure` and `SameSite=None` when `BETTER_AUTH_URL` is HTTPS so Pages can authenticate to the Worker across origins.
+- Production auth cookies are `Secure`, first-party, and `SameSite=Lax` because the SPA and API share one Worker origin.
 - Source endpoints enforce the same authenticated client boundary as receipt and P&L endpoints.
 - Audit events record extraction, review edits, filing, and validation override state.
 
