@@ -80,6 +80,23 @@ receiptRoutes.post("/:clientId/receipts", async (c) => {
   const file = entry as File;
   if (file.size <= 0) return c.json({ error: "file is empty" }, 400);
 
+  const bankTransactionValue = form.get("bankTransactionId");
+  const bankTransactionId = typeof bankTransactionValue === "string" && bankTransactionValue.trim()
+    ? bankTransactionValue.trim()
+    : null;
+  let bankTransactionBefore: Record<string, unknown> | null = null;
+  if (bankTransactionId) {
+    const [bankTransaction] = await db.query<Record<string, unknown>>(
+      `SELECT * FROM bank_transactions WHERE id = $1 AND client_id = $2`,
+      [bankTransactionId, client.id],
+    );
+    if (!bankTransaction) return c.json({ error: "Bank transaction was not found" }, 404);
+    if (bankTransaction.triage === "matched" || bankTransaction.triage === "no_receipt_required") {
+      return c.json({ error: "This bank transaction is already resolved" }, 409);
+    }
+    bankTransactionBefore = bankTransaction;
+  }
+
   const receiptId = newId("rcp");
   const jobId = newId("job");
   const key = `${client.firm_id}/${client.id}/${receiptId}/${file.name}`;
@@ -157,9 +174,38 @@ receiptRoutes.post("/:clientId/receipts", async (c) => {
         params: [newId("aud"), client.id, receiptId, c.get("userId"), { extraction, validation }],
       },
     ];
+
+    if (bankTransactionId && bankTransactionBefore) {
+      statements.push(
+        {
+          query: `UPDATE bank_transactions SET
+            triage = 'receipt_pending', pending_receipt_id = $1,
+            suggested_receipt_id = NULL, suggested_score = NULL, suggested_reason = NULL,
+            matched_receipt_id = NULL, resolution_reason = NULL,
+            resolved_at = NULL, resolved_by_user_id = NULL,
+            reviewed_at = NOW(), reviewed_by_user_id = $2
+            WHERE id = $3 AND client_id = $4`,
+          params: [receiptId, c.get("userId"), bankTransactionId, client.id],
+        },
+        {
+          query: `INSERT INTO audit_events
+            (id, client_id, receipt_id, actor_user_id, action, before_json, after_json)
+            VALUES ($1, $2, $3, $4, 'bank_receipt_uploaded', $5::jsonb, $6::jsonb)`,
+          params: [
+            newId("aud"),
+            client.id,
+            receiptId,
+            c.get("userId"),
+            bankTransactionBefore,
+            { id: bankTransactionId, transactionId: bankTransactionId, triage: "receipt_pending", pending_receipt_id: receiptId },
+          ],
+        },
+      );
+    }
+
     await db.transaction(statements);
 
-    return c.json({ receipt: await getReceiptDetails(db, receiptId, client.id), jobId }, 201);
+    return c.json({ receipt: await getReceiptDetails(db, receiptId, client.id), jobId, bankTransactionId }, 201);
   } catch (error) {
     const message = error instanceof Error ? error.message : "extract failed";
     await db.transaction([
@@ -295,7 +341,13 @@ receiptRoutes.post("/:clientId/receipts/:receiptId/approve", async (c) => {
     categoryId = category?.id ?? null;
   }
 
-  await db.transaction([
+  const pendingBankTransactions = await db.query<Record<string, unknown>>(
+    `SELECT * FROM bank_transactions
+     WHERE client_id = $1 AND pending_receipt_id = $2 AND triage = 'receipt_pending'`,
+    [client.id, receiptId],
+  );
+
+  const statements: DbStatement[] = [
     {
       query: `UPDATE receipts SET status = 'filed', category_id = $1, reviewed_at = NOW(),
               reviewed_by_user_id = $2, updated_at = NOW()
@@ -314,9 +366,48 @@ receiptRoutes.post("/:clientId/receipts/:receiptId/approve", async (c) => {
         { validation_status: receipt.validation_status, override: Boolean(body.confirmOverride) },
       ],
     },
-  ]);
+  ];
 
-  return c.json({ receipt: await getReceiptDetails(db, receiptId, client.id) });
+  for (const bankTransaction of pendingBankTransactions) {
+    const transactionId = String(bankTransaction.id);
+    statements.push(
+      {
+        query: `UPDATE bank_transactions SET
+          triage = 'matched', matched_receipt_id = $1, pending_receipt_id = NULL,
+          suggested_receipt_id = NULL, suggested_score = NULL, suggested_reason = NULL,
+          resolution_reason = NULL, resolved_at = NOW(), resolved_by_user_id = $2,
+          reviewed_at = NOW(), reviewed_by_user_id = $2
+          WHERE id = $3 AND client_id = $4 AND pending_receipt_id = $1`,
+        params: [receiptId, c.get("userId"), transactionId, client.id],
+      },
+      {
+        query: `INSERT INTO audit_events
+          (id, client_id, receipt_id, actor_user_id, action, before_json, after_json)
+          VALUES ($1, $2, $3, $4, 'bank_match_confirmed', $5::jsonb, $6::jsonb)`,
+        params: [
+          newId("aud"),
+          client.id,
+          receiptId,
+          c.get("userId"),
+          bankTransaction,
+          {
+            id: transactionId,
+            transactionId,
+            triage: "matched",
+            matched_receipt_id: receiptId,
+            resolutionSource: "pending_receipt_filed",
+          },
+        ],
+      },
+    );
+  }
+
+  await db.transaction(statements);
+
+  return c.json({
+    receipt: await getReceiptDetails(db, receiptId, client.id),
+    resolvedBankTransactions: pendingBankTransactions.map((transaction) => String(transaction.id)),
+  });
 });
 
 async function authorizedClient(c: {
