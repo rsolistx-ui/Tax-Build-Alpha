@@ -5,8 +5,8 @@ compatibility_flags = ["nodejs_compat"]
 
 [vars]
 LLM_PROVIDER = "workers-ai"
-BETTER_AUTH_URL = "http://localhost:8787"
-APP_ORIGIN = "http://localhost:5173"
+BETTER_AUTH_URL = "https://folio-api.rsolistx.workers.dev"
+APP_ORIGIN = "https://folio-api.rsolistx.workers.dev"
 
 # Secrets:
 #   BETTER_AUTH_SECRET   Better Auth encryption/session secret
@@ -18,7 +18,7 @@ APP_ORIGIN = "http://localhost:5173"
 [[d1_databases]]
 binding = "AUTH_DB"
 database_name = "folio-db"
-database_id = "00000000-0000-0000-0000-000000000001"
+database_id = "e6893c3a-8ea4-4242-96b2-8b18adc543af"
 migrations_dir = "../../migrations"
 
 [[r2_buckets]]
