@@ -27,7 +27,10 @@ export function createAuth(env: Env) {
     trustedOrigins,
     advanced: {
       defaultCookieAttributes: {
-        sameSite: production ? "none" : "lax",
+        // Production serves the SPA and API from the same Worker origin, so
+        // the auth cookie stays first-party instead of relying on cross-site
+        // Pages-to-Workers cookie behavior.
+        sameSite: "lax",
         secure: production,
       },
     },
