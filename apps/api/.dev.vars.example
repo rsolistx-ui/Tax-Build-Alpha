@@ -1,0 +1,4 @@
+BETTER_AUTH_SECRET=dev-local-secret-change-me-32chars-min
+BETTER_AUTH_URL=http://localhost:8787
+LLM_PROVIDER=mock
+GEMINI_API_KEY=

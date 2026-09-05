@@ -1,0 +1,26 @@
+{
+  "name": "folio",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Folio \u2014 zero-cost B2B bookkeeping alpha",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n web,api -c cyan,magenta \"npm run dev -w @folio/web\" \"npm run dev -w @folio/api\"",
+    "dev:web": "npm run dev -w @folio/web",
+    "dev:api": "npm run dev -w @folio/api",
+    "build": "npm run build -w @folio/web && npm run build -w @folio/api",
+    "typecheck": "npm run typecheck -w @folio/web && npm run typecheck -w @folio/api",
+    "db:migrate:local": "npm run db:migrate:local -w @folio/api",
+    "deploy:api": "npm run deploy -w @folio/api",
+    "deploy:web": "npm run deploy -w @folio/web"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "typescript": "^5.8.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

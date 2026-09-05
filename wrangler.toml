@@ -1,0 +1,5 @@
+# Root pointer — active Worker config: apps/api/wrangler.toml
+# Pages: connect apps/web Vite build (dist/) to Cloudflare Pages.
+name = "folio"
+compatibility_date = "2025-03-01"
+compatibility_flags = ["nodejs_compat"]

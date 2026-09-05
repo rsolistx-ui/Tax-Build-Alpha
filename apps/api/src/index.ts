@@ -1,0 +1,66 @@
+import { Hono } from "hono";
+import { cors } from "hono/cors";
+import type { Env } from "./env";
+import { createAuth } from "./auth";
+import { clientRoutes } from "./routes/clients";
+import { categoryRoutes } from "./routes/categories";
+import { receiptRoutes } from "./routes/receipts";
+import { pnlRoutes } from "./routes/pnl";
+import { requireSession, type AuthedVars } from "./middleware/session";
+import { ensureFirm } from "./services/firm";
+
+const app = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
+
+app.use(
+  "*",
+  cors({
+    origin: (origin) => origin || "http://localhost:5173",
+    allowHeaders: ["Content-Type", "Authorization"],
+    allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    credentials: true,
+  }),
+);
+
+app.get("/api/health", (c) =>
+  c.json({
+    ok: true,
+    service: "folio-api",
+    llm: c.env.LLM_PROVIDER || "mock",
+    queues: Boolean(c.env.JOBS_QUEUE),
+  }),
+);
+
+// Better Auth handler
+app.on(["POST", "GET"], "/api/auth/*", (c) => {
+  const auth = createAuth(c.env);
+  return auth.handler(c.req.raw);
+});
+
+app.get("/api/me", requireSession, async (c) => {
+  const firm = await ensureFirm(c.env.DB, c.get("userId"), c.get("userName"));
+  return c.json({
+    user: {
+      id: c.get("userId"),
+      email: c.get("userEmail"),
+      name: c.get("userName"),
+    },
+    firm,
+  });
+});
+
+app.route("/api/clients", clientRoutes);
+app.route("/api/clients", categoryRoutes);
+app.route("/api/clients", receiptRoutes);
+app.route("/api/clients", pnlRoutes);
+
+app.notFound((c) => c.json({ error: "Not found" }, 404));
+app.onError((err, c) => {
+  console.error(err);
+  const message = err instanceof Error ? err.message : "Internal error";
+  if (message.includes("ZodError") || err?.name === "ZodError") {
+    return c.json({ error: "Validation failed", detail: message }, 400);
+  }
+  return c.json({ error: message }, 500);
+});
+
+export default app;
