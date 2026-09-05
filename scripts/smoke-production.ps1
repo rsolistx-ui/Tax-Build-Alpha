@@ -49,6 +49,13 @@ function Invoke-CurlJson([string[]]$CurlArgs) {
   }
 }
 
+function New-JsonPayloadFile([string]$Json) {
+  $path = Join-Path $env:TEMP "folio-smoke-json-$([guid]::NewGuid().ToString('N')).json"
+  $utf8 = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllText($path, $Json, $utf8)
+  return $path
+}
+
 function New-SampleReceiptPng([string]$Path) {
   Add-Type -AssemblyName System.Drawing
   $bitmap = New-Object System.Drawing.Bitmap 900, 1200
@@ -88,6 +95,9 @@ function New-SampleReceiptPng([string]$Path) {
 
 $cookieJar = Join-Path $env:TEMP "folio-smoke-cookies-$([guid]::NewGuid().ToString('N')).txt"
 $generatedReceipt = $false
+$signupPayloadPath = ""
+$clientPayloadPath = ""
+$approvePayloadPath = ""
 
 try {
   if (-not $ReceiptPath) {
@@ -107,6 +117,7 @@ try {
   $email = "folio-smoke-$([guid]::NewGuid().ToString('N'))@example.com"
   $password = "Smoke!$([guid]::NewGuid().ToString('N').Substring(0, 18))"
   $signupBody = @{ name = "Folio Smoke Test"; email = $email; password = $password } | ConvertTo-Json -Compress
+  $signupPayloadPath = New-JsonPayloadFile $signupBody
 
   Write-Host "Creating an isolated smoke-test firm..."
   $null = Invoke-CurlJson @(
@@ -114,7 +125,7 @@ try {
     "-b", $cookieJar,
     "-H", "Content-Type: application/json",
     "-H", "Origin: $BaseUrl",
-    "--data-binary", $signupBody,
+    "--data-binary", "@$signupPayloadPath",
     "$BaseUrl/api/auth/sign-up/email"
   )
 
@@ -128,12 +139,13 @@ try {
     legal_name = "Folio Smoke Test LLC"
     notes = "Automated end-to-end production verification."
   } | ConvertTo-Json -Compress
+  $clientPayloadPath = New-JsonPayloadFile $clientBody
 
   $clientResponse = Invoke-CurlJson @(
     "-c", $cookieJar,
     "-b", $cookieJar,
     "-H", "Content-Type: application/json",
-    "--data-binary", $clientBody,
+    "--data-binary", "@$clientPayloadPath",
     "$BaseUrl/api/clients"
   )
   $clientId = [string]$clientResponse.client.id
@@ -177,11 +189,12 @@ try {
 
   Write-Host "Filing the validated receipt..."
   $approveBody = @{ confirmOverride = $false } | ConvertTo-Json -Compress
+  $approvePayloadPath = New-JsonPayloadFile $approveBody
   $filed = Invoke-CurlJson @(
     "-c", $cookieJar,
     "-b", $cookieJar,
     "-H", "Content-Type: application/json",
-    "--data-binary", $approveBody,
+    "--data-binary", "@$approvePayloadPath",
     "$BaseUrl/api/clients/$clientId/receipts/$receiptId/approve"
   )
   if ($filed.receipt.status -ne "filed") {
@@ -231,6 +244,9 @@ try {
   Write-Host "P&L expenses: $pnlExpenses"
 } finally {
   Remove-Item $cookieJar -Force -ErrorAction SilentlyContinue
+  Remove-Item $signupPayloadPath -Force -ErrorAction SilentlyContinue
+  Remove-Item $clientPayloadPath -Force -ErrorAction SilentlyContinue
+  Remove-Item $approvePayloadPath -Force -ErrorAction SilentlyContinue
   if ($generatedReceipt -and $ReceiptPath) {
     Remove-Item $ReceiptPath -Force -ErrorAction SilentlyContinue
   }
