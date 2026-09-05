@@ -90,9 +90,9 @@ Local URLs:
 
 Local development defaults to `LLM_PROVIDER=mock`. Mock output is never an automatic production fallback.
 
-## One-command production bootstrap
+## One-command production bootstrap and proof
 
-The production bootstrap provisions or reuses Neon and Cloudflare resources, applies both database schemas, generates the Better Auth secret, stores Worker secrets, builds the SPA, deploys the single-origin Worker, and verifies `/api/health`.
+The production bootstrap provisions or reuses Neon and Cloudflare resources, applies both database schemas, generates the Better Auth secret, stores Worker secrets, builds the SPA, deploys the single-origin Worker, verifies `/api/health`, and then runs the complete receipt-to-P&L production smoke test. A normal production setup is one command.
 
 From the repository root:
 
@@ -126,12 +126,20 @@ The script will:
 16. Upload `GEMINI_API_KEY` only when it is already present in the environment.
 17. Set production `BETTER_AUTH_URL` and `APP_ORIGIN` to the same Worker origin.
 18. Redeploy and verify Neon plus Workers AI through the health endpoint.
+19. Generate a controlled test receipt and exercise the live production path through R2, Workers AI, line items, validation, filing, P&L reconciliation, and source drill-down.
+20. Stop with an error instead of silently overriding any failed deterministic validation.
 
 No database credential or auth secret is written into the repository. The Neon CLI may create a local `.neon` context when its guided fallback is needed. Neon manages that file as local project context and adds it to git ignore.
 
-## End-to-end production proof
+If infrastructure needs to be deployed without running the smoke test immediately, use `-SkipSmokeTest`. That should be the exception rather than the paid-alpha release path:
 
-After bootstrap, run:
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\bootstrap-production.ps1 -SkipSmokeTest
+```
+
+## Standalone end-to-end production proof
+
+The bootstrap runs this automatically by default. It can also be rerun independently against the deployed Worker:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\smoke-production.ps1 -BaseUrl "https://folio-api.<your-subdomain>.workers.dev"
@@ -159,7 +167,7 @@ receipt file
   -> source drill-down
 ```
 
-The script never auto-overrides failed validation. If deterministic validation fails, it stops in review and prints the failed checks.
+The smoke test never auto-overrides failed validation. If deterministic validation fails, it stops in review and prints the failed checks.
 
 ## Receipt lifecycle
 
