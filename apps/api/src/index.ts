@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { createDb } from "./db";
 import type { Env } from "./env";
 import { createAuth } from "./auth";
 import { clientRoutes } from "./routes/clients";
@@ -14,7 +15,14 @@ const app = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 app.use(
   "*",
   cors({
-    origin: (origin) => origin || "http://localhost:5173",
+    origin: (origin, c) => {
+      const allowed = new Set([
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        c.env.APP_ORIGIN,
+      ].filter(Boolean));
+      return allowed.has(origin) ? origin : c.env.APP_ORIGIN || "http://localhost:5173";
+    },
     allowHeaders: ["Content-Type", "Authorization"],
     allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     credentials: true,
@@ -25,19 +33,18 @@ app.get("/api/health", (c) =>
   c.json({
     ok: true,
     service: "folio-api",
-    llm: c.env.LLM_PROVIDER || "mock",
+    appDatabase: c.env.DATABASE_URL ? "neon-postgres" : "missing",
+    authDatabase: "cloudflare-d1",
+    llm: c.env.LLM_PROVIDER || "workers-ai",
+    workersAi: Boolean(c.env.AI),
     queues: Boolean(c.env.JOBS_QUEUE),
   }),
 );
 
-// Better Auth handler
-app.on(["POST", "GET"], "/api/auth/*", (c) => {
-  const auth = createAuth(c.env);
-  return auth.handler(c.req.raw);
-});
+app.on(["POST", "GET"], "/api/auth/*", (c) => createAuth(c.env).handler(c.req.raw));
 
 app.get("/api/me", requireSession, async (c) => {
-  const firm = await ensureFirm(c.env.DB, c.get("userId"), c.get("userName"));
+  const firm = await ensureFirm(createDb(c.env), c.get("userId"), c.get("userName"));
   return c.json({
     user: {
       id: c.get("userId"),
