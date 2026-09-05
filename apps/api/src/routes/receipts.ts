@@ -35,6 +35,27 @@ const reviewSchema = z.object({
   lineItems: z.array(lineItemSchema).max(500),
 });
 
+type ReceiptRow = Record<string, unknown> & {
+  id: string;
+  status: string;
+  extracted_category: string | null;
+  validation_status: "pending" | "pass" | "warning" | "fail";
+};
+
+type ReceiptDetail = ReceiptRow & {
+  lineItems: Array<{
+    id: unknown;
+    lineNo: unknown;
+    description: unknown;
+    quantity: unknown;
+    unitPrice: unknown;
+    amount: unknown;
+    category: unknown;
+    confidence: unknown;
+  }>;
+  source_url: string;
+};
+
 receiptRoutes.get("/:clientId/receipts", async (c) => {
   const { db, client } = await authorizedClient(c);
   if (!client) return c.json({ error: "Not found" }, 404);
@@ -381,8 +402,8 @@ function correctionRuleStatement(clientId: string, merchant: string, category: s
   };
 }
 
-async function getReceiptDetails(db: Db, receiptId: string, clientId: string) {
-  const [receipt] = await db.query<Record<string, unknown>>(
+async function getReceiptDetails(db: Db, receiptId: string, clientId: string): Promise<ReceiptDetail | undefined> {
+  const [receipt] = await db.query<ReceiptRow>(
     `SELECT * FROM receipts WHERE id = $1 AND client_id = $2`,
     [receiptId, clientId],
   );
