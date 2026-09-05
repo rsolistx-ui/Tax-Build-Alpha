@@ -12,5 +12,6 @@ coverage
 .turbo
 *.log
 .vite
+.neon
 apps/web/dist
 apps/api/dist
