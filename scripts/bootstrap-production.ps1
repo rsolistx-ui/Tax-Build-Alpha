@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
   [string]$AuthDbName = "folio-db",
-  [string]$R2BucketName = "folio-receipts"
+  [string]$R2BucketName = "folio-receipts",
+  [string]$NeonProjectName = "folio-alpha"
 )
 
 $ErrorActionPreference = "Stop"
@@ -13,16 +14,6 @@ $configPath = Join-Path $repoRoot "apps\api\wrangler.toml"
 function Assert-ExitCode([string]$Step) {
   if ($LASTEXITCODE -ne 0) {
     throw "$Step failed with exit code $LASTEXITCODE."
-  }
-}
-
-function Read-SecretText([string]$Prompt) {
-  $secure = Read-Host $Prompt -AsSecureString
-  $ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
-  try {
-    return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr)
-  } finally {
-    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr)
   }
 }
 
@@ -47,6 +38,104 @@ function Get-D1Database([string]$Name) {
   Assert-ExitCode "Listing D1 databases"
   $items = @($json | ConvertFrom-Json)
   return $items | Where-Object { $_.name -eq $Name } | Select-Object -First 1
+}
+
+function Invoke-Neon([string[]]$Arguments, [switch]$Quiet) {
+  if ($Quiet) {
+    $output = @(& npx --yes neon@latest @Arguments 2>$null)
+  } else {
+    $output = @(& npx --yes neon@latest @Arguments 2>&1)
+    $output | ForEach-Object { Write-Host $_ }
+  }
+  return $output
+}
+
+function Get-NeonProjects {
+  $output = Invoke-Neon @("projects", "list", "--output", "json") -Quiet
+  if ($LASTEXITCODE -ne 0) {
+    return $null
+  }
+
+  $text = $output -join "`n"
+  if ([string]::IsNullOrWhiteSpace($text)) {
+    return @()
+  }
+
+  try {
+    $parsed = $text | ConvertFrom-Json
+  } catch {
+    throw "Neon returned non-JSON project output. Run 'npx --yes neon@latest projects list --output json' to inspect it."
+  }
+
+  if ($parsed -is [System.Array]) {
+    return @($parsed)
+  }
+  if ($parsed.PSObject.Properties.Name -contains "projects") {
+    return @($parsed.projects)
+  }
+  return @($parsed)
+}
+
+function Get-NeonDatabaseUrl([string]$ProjectId) {
+  $output = Invoke-Neon @("connection-string", "--project-id", $ProjectId, "--pooled") -Quiet
+  Assert-ExitCode "Getting pooled Neon connection string"
+  $text = ($output -join "`n").Trim()
+  $match = [regex]::Match($text, 'postgres(?:ql)?://[^\s]+')
+  if (-not $match.Success) {
+    throw "Neon did not return a PostgreSQL connection string for project '$ProjectId'."
+  }
+  return $match.Value.Trim()
+}
+
+function Ensure-NeonDatabase([string]$ProjectName) {
+  Write-Host "Checking Neon authentication and project access..."
+  $projects = Get-NeonProjects
+  if ($null -eq $projects) {
+    Write-Host "Neon login is required. Opening the Neon OAuth flow..."
+    Invoke-Neon @("auth") | Out-Null
+    Assert-ExitCode "Neon authentication"
+    $projects = Get-NeonProjects
+    if ($null -eq $projects) {
+      throw "Neon authentication succeeded but projects could not be listed."
+    }
+  }
+
+  $project = @($projects) | Where-Object { $_.name -eq $ProjectName } | Select-Object -First 1
+  if (-not $project) {
+    Write-Host "Creating Neon project '$ProjectName'..."
+    Invoke-Neon @("projects", "create", "--name", $ProjectName, "--output", "json") | Out-Null
+
+    if ($LASTEXITCODE -ne 0) {
+      Write-Host "Automatic project creation needs additional Neon account context. Opening the guided Neon linker..." -ForegroundColor Yellow
+      Invoke-Neon @("link") | Out-Null
+      Assert-ExitCode "Neon guided project link"
+
+      $contextPath = Join-Path $repoRoot ".neon"
+      if (-not (Test-Path $contextPath)) {
+        throw "Neon link completed but .neon context was not created."
+      }
+      $context = Get-Content -Raw $contextPath | ConvertFrom-Json
+      if (-not $context.projectId) {
+        throw "Neon context does not contain a projectId."
+      }
+      return Get-NeonDatabaseUrl ([string]$context.projectId)
+    }
+
+    $projects = Get-NeonProjects
+    $project = @($projects) | Where-Object { $_.name -eq $ProjectName } | Select-Object -First 1
+  }
+
+  if (-not $project) {
+    throw "Neon project '$ProjectName' could not be found after creation."
+  }
+
+  $projectId = if ($project.id) { [string]$project.id } elseif ($project.project_id) { [string]$project.project_id } else { "" }
+  if (-not $projectId) {
+    throw "Could not determine the Neon project ID for '$ProjectName'."
+  }
+
+  Write-Host "Using Neon project '$ProjectName' ($projectId)."
+  return Get-NeonDatabaseUrl $projectId
 }
 
 function Patch-WorkerConfig([string]$DatabaseId, [string]$WorkerUrl = "") {
@@ -106,7 +195,9 @@ try {
 
   $databaseUrl = $env:DATABASE_URL
   if ([string]::IsNullOrWhiteSpace($databaseUrl)) {
-    $databaseUrl = Read-SecretText "Paste the pooled Neon DATABASE_URL"
+    $databaseUrl = Ensure-NeonDatabase $NeonProjectName
+  } else {
+    Write-Host "Using DATABASE_URL already present in this PowerShell session."
   }
   if ($databaseUrl -notmatch '^postgres(ql)?://') {
     throw "DATABASE_URL must be a PostgreSQL connection string."
@@ -184,6 +275,7 @@ try {
   Write-Host "Folio paid-alpha infrastructure is live." -ForegroundColor Green
   Write-Host "App:    $workerUrl"
   Write-Host "Health: $workerUrl/api/health"
+  Write-Host "Neon:   $NeonProjectName"
   Write-Host "D1:     $AuthDbName ($databaseId)"
   Write-Host "R2:     $R2BucketName"
   Write-Host ""
