@@ -2,7 +2,8 @@
 param(
   [string]$AuthDbName = "folio-db",
   [string]$R2BucketName = "folio-receipts",
-  [string]$NeonProjectName = "folio-alpha"
+  [string]$NeonProjectName = "folio-alpha",
+  [switch]$SkipSmokeTest
 )
 
 $ErrorActionPreference = "Stop"
@@ -10,6 +11,7 @@ Set-StrictMode -Version Latest
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $configPath = Join-Path $repoRoot "apps\api\wrangler.toml"
+$smokeScriptPath = Join-Path $repoRoot "scripts\smoke-production.ps1"
 
 function Assert-ExitCode([string]$Step) {
   if ($LASTEXITCODE -ne 0) {
@@ -278,8 +280,23 @@ try {
   Write-Host "Neon:   $NeonProjectName"
   Write-Host "D1:     $AuthDbName ($databaseId)"
   Write-Host "R2:     $R2BucketName"
-  Write-Host ""
-  Write-Host "Next: run scripts\smoke-production.ps1 -BaseUrl '$workerUrl' to exercise the complete receipt-to-P&L path."
+
+  if (-not $SkipSmokeTest) {
+    if (-not (Test-Path $smokeScriptPath)) {
+      throw "Smoke test script is missing at $smokeScriptPath."
+    }
+    Write-Host ""
+    Write-Host "Running the complete receipt-to-P&L production smoke test..."
+    & $smokeScriptPath -BaseUrl $workerUrl
+    if ($LASTEXITCODE -ne 0) {
+      throw "Production smoke test failed with exit code $LASTEXITCODE."
+    }
+    Write-Host ""
+    Write-Host "DEPLOYMENT AND END-TO-END VERIFICATION COMPLETE" -ForegroundColor Green
+  } else {
+    Write-Host ""
+    Write-Host "Smoke test skipped by request. Run scripts\smoke-production.ps1 -BaseUrl '$workerUrl' before treating the alpha as verified." -ForegroundColor Yellow
+  }
 } finally {
   Pop-Location
 }
