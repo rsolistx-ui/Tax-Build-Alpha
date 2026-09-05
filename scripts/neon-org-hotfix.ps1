@@ -1,1 +1,0 @@
-Write-Host "Use the repository bootstrap-production.ps1 hotfix instructions from ChatGPT."
