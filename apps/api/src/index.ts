@@ -7,6 +7,7 @@ import { clientRoutes } from "./routes/clients";
 import { categoryRoutes } from "./routes/categories";
 import { receiptRoutes } from "./routes/receipts";
 import { pnlRoutes } from "./routes/pnl";
+import { bankRoutes } from "./routes/bank";
 import { requireSession, type AuthedVars } from "./middleware/session";
 import { ensureFirm } from "./services/firm";
 
@@ -59,6 +60,7 @@ app.route("/api/clients", clientRoutes);
 app.route("/api/clients", categoryRoutes);
 app.route("/api/clients", receiptRoutes);
 app.route("/api/clients", pnlRoutes);
+app.route("/api/clients", bankRoutes);
 
 app.notFound((c) => c.json({ error: "Not found" }, 404));
 app.onError((err, c) => {
