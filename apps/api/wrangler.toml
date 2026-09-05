@@ -1,6 +1,6 @@
 name = "folio-api"
 main = "src/index.ts"
-compatibility_date = "2025-03-01"
+compatibility_date = "2026-09-05"
 compatibility_flags = ["nodejs_compat"]
 
 [vars]
@@ -27,6 +27,15 @@ bucket_name = "folio-receipts"
 
 [ai]
 binding = "AI"
+
+# The paid alpha is served from one Worker origin. React/Vite assets are uploaded
+# with the API so Better Auth cookies remain first-party and no Pages-to-Worker
+# third-party cookie path is required.
+[assets]
+directory = "../web/dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*"]
 
 # Queues remain a scale-up option. Receipt extraction stays inline for the paid alpha
 # until the queue consumer is implemented and tested end-to-end.
