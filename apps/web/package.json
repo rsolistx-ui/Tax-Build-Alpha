@@ -8,7 +8,7 @@
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit --pretty false",
     "preview": "vite preview",
-    "deploy": "echo 'Connect apps/web to Cloudflare Pages (build: vite build, output: dist)'"
+    "deploy": "npm run build"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.6",
