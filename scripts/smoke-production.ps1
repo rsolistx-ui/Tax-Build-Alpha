@@ -105,6 +105,7 @@ $signupPayloadPath = ""
 $clientPayloadPath = ""
 $approvePayloadPath = ""
 $bankDecisionPayloadPath = ""
+$bankMappingPayloadPath = ""
 $bankCsvPath = ""
 
 try {
@@ -272,12 +273,13 @@ try {
     throw "Bank CSV preview did not auto-detect the expected mapping."
   }
 
-  $bankMapping = '{"date":"Date","description":"Description","amount":"Amount"}'
+  $bankMappingBody = @{ date = "Date"; description = "Description"; amount = "Amount" } | ConvertTo-Json -Compress
+  $bankMappingPayloadPath = New-JsonPayloadFile $bankMappingBody
   $bankImport = Invoke-CurlJson @(
     "-c", $cookieJar,
     "-b", $cookieJar,
     "-F", "file=@$bankCsvPath",
-    "-F", "mapping=$bankMapping",
+    "-F", "mapping=<$bankMappingPayloadPath",
     "$BaseUrl/api/clients/$clientId/bank-transactions/import"
   )
   if ($bankImport.insertedCount -ne 1 -or $bankImport.duplicateCount -ne 0) {
@@ -288,7 +290,7 @@ try {
     "-c", $cookieJar,
     "-b", $cookieJar,
     "-F", "file=@$bankCsvPath",
-    "-F", "mapping=$bankMapping",
+    "-F", "mapping=<$bankMappingPayloadPath",
     "$BaseUrl/api/clients/$clientId/bank-transactions/import"
   )
   if ($duplicateImport.insertedCount -ne 0 -or $duplicateImport.duplicateCount -ne 1) {
@@ -351,6 +353,7 @@ try {
   Remove-TempFile $clientPayloadPath
   Remove-TempFile $approvePayloadPath
   Remove-TempFile $bankDecisionPayloadPath
+  Remove-TempFile $bankMappingPayloadPath
   Remove-TempFile $bankCsvPath
   if ($generatedReceipt) {
     Remove-TempFile $ReceiptPath
