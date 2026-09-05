@@ -56,6 +56,12 @@ function New-JsonPayloadFile([string]$Json) {
   return $path
 }
 
+function Remove-TempFile([string]$Path) {
+  if (-not [string]::IsNullOrWhiteSpace($Path)) {
+    Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+  }
+}
+
 function New-SampleReceiptPng([string]$Path) {
   Add-Type -AssemblyName System.Drawing
   $bitmap = New-Object System.Drawing.Bitmap 900, 1200
@@ -129,6 +135,7 @@ try {
     "$BaseUrl/api/auth/sign-up/email"
   )
 
+  Write-Host "Verifying the Better Auth production session..."
   $me = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/me")
   if (-not $me.user.id) {
     throw "Better Auth did not establish a usable production session."
@@ -141,6 +148,7 @@ try {
   } | ConvertTo-Json -Compress
   $clientPayloadPath = New-JsonPayloadFile $clientBody
 
+  Write-Host "Creating the smoke-test client..."
   $clientResponse = Invoke-CurlJson @(
     "-c", $cookieJar,
     "-b", $cookieJar,
@@ -243,11 +251,11 @@ try {
   Write-Host "Test client:  $clientId"
   Write-Host "P&L expenses: $pnlExpenses"
 } finally {
-  Remove-Item $cookieJar -Force -ErrorAction SilentlyContinue
-  Remove-Item $signupPayloadPath -Force -ErrorAction SilentlyContinue
-  Remove-Item $clientPayloadPath -Force -ErrorAction SilentlyContinue
-  Remove-Item $approvePayloadPath -Force -ErrorAction SilentlyContinue
-  if ($generatedReceipt -and $ReceiptPath) {
-    Remove-Item $ReceiptPath -Force -ErrorAction SilentlyContinue
+  Remove-TempFile $cookieJar
+  Remove-TempFile $signupPayloadPath
+  Remove-TempFile $clientPayloadPath
+  Remove-TempFile $approvePayloadPath
+  if ($generatedReceipt) {
+    Remove-TempFile $ReceiptPath
   }
 }
