@@ -31,6 +31,11 @@ The paid alpha intentionally serves the React app and API from one Worker origin
 - Only filed evidence enters the P&L.
 - Receipt-level tax, tip, discounts, shipping, and rounding are kept as visible adjustment lines so the P&L reconciles to the approved receipt total.
 - Every P&L category drills down to the contributing lines and exact source receipts.
+- Bank CSVs are mapped, normalized, deduplicated, and stored in Neon without requiring a live bank integration.
+- Filed receipts can be deterministically suggested against bank transactions, but no suggested match becomes final without a professional decision.
+- Unmatched bank transactions become an exception inbox instead of a search problem.
+- Missing receipt evidence can be uploaded directly from the bank exception and is resolved only after the deliberately linked receipt is reviewed and filed.
+- A professional can link existing receipt evidence or explicitly document why a receipt is not required, with the decision preserved in the audit trail.
 - Per-client merchant category corrections are remembered for future extracts.
 - Client business profile data can inform extraction without leaking rules between clients.
 - Production extraction failures are real failures. Production never silently substitutes mock data.
@@ -92,7 +97,7 @@ Local development defaults to `LLM_PROVIDER=mock`. Mock output is never an autom
 
 ## One-command production bootstrap and proof
 
-The production bootstrap provisions or reuses Neon and Cloudflare resources, applies both database schemas, generates the Better Auth secret, stores Worker secrets, builds the SPA, deploys the single-origin Worker, verifies `/api/health`, and then runs the complete receipt-to-P&L production smoke test. A normal production setup is one command.
+The production bootstrap provisions or reuses Neon and Cloudflare resources, applies both database schemas, generates the Better Auth secret, stores Worker secrets, builds the SPA, deploys the single-origin Worker, verifies `/api/health`, and then runs the complete receipt, reporting, bank reconciliation, and exception-resolution production smoke test. A normal production setup is one command.
 
 From the repository root:
 
@@ -118,7 +123,7 @@ The script will:
 8. Patch the local Wrangler config with the real D1 database ID.
 9. Create or reuse private R2 bucket `folio-receipts`.
 10. Apply the D1 auth migration.
-11. Apply `migrations/neon/0001_married_spine.sql` to Neon.
+11. Apply all ordered Neon business migrations through `npm run db:migrate:neon`.
 12. Build the React client.
 13. Deploy the Worker with the client as static assets.
 14. Generate and upload `BETTER_AUTH_SECRET`.
@@ -126,7 +131,7 @@ The script will:
 16. Upload `GEMINI_API_KEY` only when it is already present in the environment.
 17. Set production `BETTER_AUTH_URL` and `APP_ORIGIN` to the same Worker origin.
 18. Redeploy and verify Neon plus Workers AI through the health endpoint.
-19. Generate a controlled test receipt and exercise the live production path through R2, Workers AI, line items, validation, filing, P&L reconciliation, and source drill-down.
+19. Generate controlled receipt and bank inputs and exercise the live production path through R2, Workers AI, line items, validation, filing, P&L reconciliation, source drill-down, bank normalization, duplicate protection, deterministic matching, explicit reconciliation, missing-receipt resolution, and audit history.
 20. Stop with an error instead of silently overriding any failed deterministic validation.
 
 No database credential or auth secret is written into the repository. The Neon CLI may create a local `.neon` context when its guided fallback is needed. Neon manages that file as local project context and adds it to git ignore.
@@ -165,6 +170,15 @@ receipt file
   -> filed ledger
   -> reconciled P&L
   -> source drill-down
+  -> bank CSV normalization
+  -> duplicate protection
+  -> deterministic match suggestion
+  -> explicit confirmation
+  -> unmatched exception inbox
+  -> missing receipt upload or documented no-receipt resolution
+  -> receipt review and filing
+  -> resolved bank relationship
+  -> audit history
 ```
 
 The smoke test never auto-overrides failed validation. If deterministic validation fails, it stops in review and prints the failed checks.
@@ -203,6 +217,21 @@ A filed receipt with no line items falls back to its approved receipt total so e
 
 `GET /api/clients/:clientId/pnl/drilldown?category=...` returns every contributing entry with its source receipt URL.
 
+## Bank reconciliation and exceptions
+
+Bank CSV intake detects common date, description, signed amount, debit, credit, and currency columns. The user can correct the mapping before import. Normalized transactions receive a client-scoped fingerprint so reimporting the same bank data does not silently duplicate the ledger workload.
+
+Receipt suggestions are deterministic and currently use absolute amount tolerance, date proximity, and merchant token similarity. Suggestions never create a final accounting relationship on their own.
+
+The bank exception workflow supports four deliberate outcomes:
+
+- confirm a prepared filed-receipt suggestion
+- link another existing filed receipt directly
+- attach a receipt that is still in professional review, then resolve the bank transaction when that deliberately linked receipt is filed
+- resolve the transaction without receipt evidence only when a professional records a reason
+
+Matched, rejected, pending-receipt, uploaded-receipt, and no-receipt-required decisions are recorded in `audit_events`.
+
 ## Client correction memory
 
 When a reviewer changes a merchant's top-level category, Folio stores a client-scoped `merchant_category` rule. Future receipts from the normalized merchant can inherit that client's remembered category. Rules are never shared across clients.
@@ -219,15 +248,17 @@ The bootstrap does not upgrade the Cloudflare account or enable paid inference.
 
 To protect the paid-alpha timeline, this milestone does not add:
 
-- bank CSV reconciliation
+- Plaid or any live bank feed
+- payroll execution
 - tax-year checklist UI
 - e-file
+- invoicing or accounts receivable
 - full MFA rollout
 - queue consumer and bulk async processing
 - PDF or Excel report export
 - item-level machine learning beyond correction rules
 
-Those follow only after the real receipt review and evidence drill-down loop is proven with Phyllis's workflow.
+Those follow only after the real receipt, bank, and exception workflow is tested against Phyllis's actual operating process.
 
 ## Verification commands
 
@@ -244,8 +275,8 @@ A build is not considered production-ready until the Neon schema has been applie
 - `DATABASE_URL`, `BETTER_AUTH_SECRET`, and optional `GEMINI_API_KEY` are Worker secrets only.
 - No secret belongs in a `VITE_*` browser variable.
 - Production auth cookies are `Secure`, first-party, and `SameSite=Lax` because the SPA and API share one Worker origin.
-- Source endpoints enforce the same authenticated client boundary as receipt and P&L endpoints.
-- Audit events record extraction, review edits, filing, and validation override state.
+- Source endpoints enforce the same authenticated client boundary as receipt, bank, and P&L endpoints.
+- Audit events record extraction, review edits, filing, reconciliation decisions, exception resolution, and validation override state.
 
 ## License
 
