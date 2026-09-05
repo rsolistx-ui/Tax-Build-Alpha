@@ -6,6 +6,7 @@ import {
   FileSpreadsheet,
   Folder,
   Inbox,
+  Landmark,
   LineChart,
   Upload,
 } from "lucide-react";
@@ -15,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/empty-state";
 import { ReceiptReview, type ReviewReceipt } from "@/components/receipt-review";
+import { BankReconciliation } from "@/components/bank-reconciliation";
 import { cn } from "@/lib/utils";
 
 type Category = {
@@ -25,7 +27,7 @@ type Category = {
 };
 
 type Client = { id: string; name: string };
-type Tab = "folders" | "upload" | "review" | "pnl";
+type Tab = "folders" | "upload" | "review" | "bank" | "pnl";
 
 type PnlRow = {
   category: string;
@@ -134,6 +136,7 @@ export function ClientWorkspacePage() {
       { id: "folders" as const, label: "Folders", icon: Folder },
       { id: "upload" as const, label: "Upload", icon: Upload },
       { id: "review" as const, label: "Review", icon: Inbox, count: review.length },
+      { id: "bank" as const, label: "Bank", icon: Landmark },
       { id: "pnl" as const, label: "P&L", icon: LineChart },
     ],
     [review.length],
@@ -148,7 +151,7 @@ export function ClientWorkspacePage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">{client?.name ?? "Workspace"}</h1>
           <p className="text-sm text-[var(--color-muted-foreground)]">
-            Source evidence · line-item review · validation · auditable P&amp;L
+            Source evidence · line-item review · bank reconciliation · auditable P&amp;L
           </p>
         </div>
       </div>
@@ -236,6 +239,8 @@ export function ClientWorkspacePage() {
           <ReceiptReview clientId={clientId} categories={categories} receipts={review} onReload={load} />
         )
       ) : null}
+
+      {tab === "bank" ? <BankReconciliation clientId={clientId} /> : null}
 
       {tab === "pnl" ? (
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(380px,0.8fr)]">
