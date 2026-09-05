@@ -63,6 +63,8 @@ type Draft = {
   lineItems: ReviewLineItem[];
 };
 
+type SaveResponse = { receipt: ReviewReceipt };
+
 export function ReceiptReview({
   clientId,
   categories,
@@ -79,9 +81,14 @@ export function ReceiptReview({
     () => receipts.find((receipt) => receipt.id === selectedId) ?? receipts[0],
     [receipts, selectedId],
   );
-  const [draft, setDraft] = useState<Draft | null>(selected ? toDraft(selected) : null);
+  const baseline = useMemo(() => selected ? toDraft(selected) : null, [selected]);
+  const [draft, setDraft] = useState<Draft | null>(baseline);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const dirty = useMemo(
+    () => Boolean(draft && baseline && JSON.stringify(draft) !== JSON.stringify(baseline)),
+    [draft, baseline],
+  );
 
   useEffect(() => {
     if (!selected && receipts[0]) setSelectedId(receipts[0].id);
@@ -97,15 +104,20 @@ export function ReceiptReview({
   const sourceUrl = apiUrl(selected.source_url);
   const checks = selected.validation_json?.checks ?? [];
 
+  async function persistDraft(currentDraft: Draft): Promise<ReviewReceipt> {
+    const result = await api<SaveResponse>(`/api/clients/${clientId}/receipts/${selected.id}`, {
+      method: "PATCH",
+      body: JSON.stringify(currentDraft),
+    });
+    return result.receipt;
+  }
+
   async function save() {
     if (!draft) return;
     setBusy(true);
     setMessage(null);
     try {
-      await api(`/api/clients/${clientId}/receipts/${selected.id}`, {
-        method: "PATCH",
-        body: JSON.stringify(draft),
-      });
+      await persistDraft(draft);
       setMessage("Review edits saved and validation rerun.");
       await onReload();
     } catch (error) {
@@ -116,19 +128,30 @@ export function ReceiptReview({
   }
 
   async function approve() {
-    const confirmOverride = selected.validation_status === "fail"
-      ? window.confirm("Validation is failing. File this receipt anyway after reviewing the source evidence?")
-      : false;
-    if (selected.validation_status === "fail" && !confirmOverride) return;
-
+    if (!draft) return;
     setBusy(true);
     setMessage(null);
+
     try {
+      // Approval always persists the visible draft first. This prevents a
+      // reviewer from filing stale database values after editing the form.
+      const saved = await persistDraft(draft);
+      const needsOverride = saved.validation_status === "fail";
+      const confirmOverride = needsOverride
+        ? window.confirm("Validation is failing. File this receipt anyway after reviewing the source evidence?")
+        : false;
+
+      if (needsOverride && !confirmOverride) {
+        setMessage("Edits were saved, but the receipt was not filed because validation is failing.");
+        await onReload();
+        return;
+      }
+
       await api(`/api/clients/${clientId}/receipts/${selected.id}/approve`, {
         method: "POST",
         body: JSON.stringify({ confirmOverride }),
       });
-      setMessage("Receipt filed. Its approved line items now feed the P&L.");
+      setMessage("Receipt filed. Its approved evidence now feeds the P&L.");
       await onReload();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Approval failed");
@@ -213,7 +236,10 @@ export function ReceiptReview({
       <section className="space-y-3 overflow-y-auto rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-card)] p-4 xl:max-h-[680px]">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <p className="text-sm font-semibold">Evidence review</p>
+            <div className="flex items-center gap-2">
+              <p className="text-sm font-semibold">Evidence review</p>
+              {dirty ? <Badge className="bg-stone-200 text-stone-700">Unsaved edits</Badge> : null}
+            </div>
             <p className="text-xs text-[var(--color-muted-foreground)]">
               AI proposes. Validation checks the math. You decide what gets filed.
             </p>
