@@ -71,6 +71,28 @@ bankRoutes.get("/:clientId/bank-transactions", async (c) => {
   return c.json({ transactions, counts });
 });
 
+bankRoutes.get("/:clientId/bank-transactions/:transactionId/audit", async (c) => {
+  const { db, client } = await authorizedClient(c);
+  if (!client) return c.json({ error: "Not found" }, 404);
+  const transactionId = c.req.param("transactionId");
+  const [transaction] = await db.query<{ id: string }>(
+    `SELECT id FROM bank_transactions WHERE id = $1 AND client_id = $2`,
+    [transactionId, client.id],
+  );
+  if (!transaction) return c.json({ error: "Not found" }, 404);
+
+  const events = await db.query<Record<string, unknown>>(
+    `SELECT id, receipt_id, actor_user_id, action, before_json, after_json, created_at
+     FROM audit_events
+     WHERE client_id = $1
+       AND action IN ('bank_match_confirmed', 'bank_match_rejected')
+       AND (before_json->>'id' = $2 OR after_json->>'id' = $2)
+     ORDER BY created_at ASC`,
+    [client.id, transactionId],
+  );
+  return c.json({ events });
+});
+
 bankRoutes.post("/:clientId/bank-transactions/preview", async (c) => {
   const { client } = await authorizedClient(c);
   if (!client) return c.json({ error: "Not found" }, 404);
