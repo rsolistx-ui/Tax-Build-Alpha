@@ -104,6 +104,8 @@ $generatedReceipt = $false
 $signupPayloadPath = ""
 $clientPayloadPath = ""
 $approvePayloadPath = ""
+$bankDecisionPayloadPath = ""
+$bankCsvPath = ""
 
 try {
   if (-not $ReceiptPath) {
@@ -243,18 +245,113 @@ try {
     throw "Source evidence endpoint failed with HTTP $sourceStatus."
   }
 
+  Write-Host "Verifying bank CSV normalization, duplicate protection, and deterministic receipt matching..."
+  $bankDate = [string]$filed.receipt.extracted_date
+  if ([string]::IsNullOrWhiteSpace($bankDate)) {
+    throw "Filed receipt has no extracted date for the bank reconciliation smoke test."
+  }
+  $bankDescription = [string]$filed.receipt.extracted_merchant
+  if ([string]::IsNullOrWhiteSpace($bankDescription)) {
+    $bankDescription = "FOLIO TEST SUPPLY"
+  }
+  $escapedDescription = '"' + $bankDescription.Replace('"', '""') + '"'
+  $bankAmount = -1 * [Math]::Abs($approvedTotal)
+  $bankAmountText = $bankAmount.ToString("0.00", [System.Globalization.CultureInfo]::InvariantCulture)
+  $bankCsvPath = Join-Path $env:TEMP "folio-smoke-bank-$([guid]::NewGuid().ToString('N')).csv"
+  $bankCsv = "Date,Description,Amount`r`n$bankDate,$escapedDescription,$bankAmountText`r`n"
+  $utf8 = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllText($bankCsvPath, $bankCsv, $utf8)
+
+  $bankPreview = Invoke-CurlJson @(
+    "-c", $cookieJar,
+    "-b", $cookieJar,
+    "-F", "file=@$bankCsvPath",
+    "$BaseUrl/api/clients/$clientId/bank-transactions/preview"
+  )
+  if (-not $bankPreview.ready -or $bankPreview.rowCount -ne 1) {
+    throw "Bank CSV preview did not auto-detect the expected mapping."
+  }
+
+  $bankMapping = '{"date":"Date","description":"Description","amount":"Amount"}'
+  $bankImport = Invoke-CurlJson @(
+    "-c", $cookieJar,
+    "-b", $cookieJar,
+    "-F", "file=@$bankCsvPath",
+    "-F", "mapping=$bankMapping",
+    "$BaseUrl/api/clients/$clientId/bank-transactions/import"
+  )
+  if ($bankImport.insertedCount -ne 1 -or $bankImport.duplicateCount -ne 0) {
+    throw "Initial bank CSV import did not insert exactly one normalized transaction."
+  }
+
+  $duplicateImport = Invoke-CurlJson @(
+    "-c", $cookieJar,
+    "-b", $cookieJar,
+    "-F", "file=@$bankCsvPath",
+    "-F", "mapping=$bankMapping",
+    "$BaseUrl/api/clients/$clientId/bank-transactions/import"
+  )
+  if ($duplicateImport.insertedCount -ne 0 -or $duplicateImport.duplicateCount -ne 1) {
+    throw "Bank CSV duplicate protection did not block the repeated transaction."
+  }
+
+  $bankQueue = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/bank-transactions")
+  $bankTransaction = @($bankQueue.transactions) | Where-Object {
+    [Math]::Abs([double]$_.amount - $bankAmount) -le 0.01
+  } | Select-Object -First 1
+  if (-not $bankTransaction) {
+    throw "Normalized bank transaction was not persisted."
+  }
+  $bankTransactionId = [string]$bankTransaction.id
+  if (-not $bankTransaction.suggestedReceipt -or $bankTransaction.suggestedReceipt.id -ne $receiptId) {
+    throw "Deterministic reconciliation did not suggest the filed receipt."
+  }
+  if ($bankTransaction.triage -notin @("likely_match", "needs_review")) {
+    throw "Suggested bank transaction did not enter an actionable review state."
+  }
+
+  Write-Host "Confirming the prepared bank-to-receipt relationship..."
+  $bankDecisionBody = @{ action = "confirm" } | ConvertTo-Json -Compress
+  $bankDecisionPayloadPath = New-JsonPayloadFile $bankDecisionBody
+  $null = Invoke-CurlJson @(
+    "-c", $cookieJar,
+    "-b", $cookieJar,
+    "-H", "Content-Type: application/json",
+    "--data-binary", "@$bankDecisionPayloadPath",
+    "$BaseUrl/api/clients/$clientId/bank-transactions/$bankTransactionId/decision"
+  )
+
+  $matchedQueue = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/bank-transactions")
+  $matchedTransaction = @($matchedQueue.transactions) | Where-Object { $_.id -eq $bankTransactionId } | Select-Object -First 1
+  if (-not $matchedTransaction -or $matchedTransaction.triage -ne "matched" -or $matchedTransaction.matchedReceipt.id -ne $receiptId) {
+    throw "Confirmed bank reconciliation was not persisted."
+  }
+
+  $bankAudit = Invoke-CurlJson @(
+    "-c", $cookieJar,
+    "-b", $cookieJar,
+    "$BaseUrl/api/clients/$clientId/bank-transactions/$bankTransactionId/audit"
+  )
+  $confirmedAudit = @($bankAudit.events) | Where-Object { $_.action -eq "bank_match_confirmed" } | Select-Object -First 1
+  if (-not $confirmedAudit -or $confirmedAudit.receipt_id -ne $receiptId) {
+    throw "Confirmed bank reconciliation did not create the expected audit event."
+  }
+
   Write-Host ""
   Write-Host "END-TO-END PAID-ALPHA SMOKE TEST PASSED" -ForegroundColor Green
-  Write-Host "Receipt -> R2 -> Workers AI -> line items -> validation -> review -> filed ledger -> P&L -> source drill-down"
+  Write-Host "Receipt -> R2 -> Workers AI -> line items -> validation -> review -> filed ledger -> P&L -> source drill-down -> CSV -> normalized bank transaction -> duplicate protection -> suggested match -> explicit confirmation -> audit"
   Write-Host "Test account: $email"
   Write-Host "Test password: $password"
   Write-Host "Test client:  $clientId"
   Write-Host "P&L expenses: $pnlExpenses"
+  Write-Host "Bank transaction: $bankTransactionId"
 } finally {
   Remove-TempFile $cookieJar
   Remove-TempFile $signupPayloadPath
   Remove-TempFile $clientPayloadPath
   Remove-TempFile $approvePayloadPath
+  Remove-TempFile $bankDecisionPayloadPath
+  Remove-TempFile $bankCsvPath
   if ($generatedReceipt) {
     Remove-TempFile $ReceiptPath
   }

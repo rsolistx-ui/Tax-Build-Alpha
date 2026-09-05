@@ -14,7 +14,7 @@
     "typecheck": "npm run typecheck -w @folio/web && npm run typecheck -w @folio/api",
     "auth:migrate:local": "npm run db:migrate:local -w @folio/api",
     "auth:migrate:remote": "npm run db:migrate:remote -w @folio/api",
-    "db:migrate:neon": "node scripts/neon-migrate.mjs migrations/neon/0001_married_spine.sql",
+    "db:migrate:neon": "node scripts/neon-migrate.mjs migrations/neon/0001_married_spine.sql && node scripts/neon-migrate.mjs migrations/neon/0002_bank_reconciliation.sql",
     "deploy:api": "npm run build -w @folio/web && npm run deploy -w @folio/api",
     "deploy:web": "npm run build -w @folio/web",
     "deploy:production": "powershell -ExecutionPolicy Bypass -File scripts/bootstrap-production.ps1"
