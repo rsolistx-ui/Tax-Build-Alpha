@@ -3,6 +3,7 @@ param(
   [string]$AuthDbName = "folio-db",
   [string]$R2BucketName = "folio-receipts",
   [string]$NeonProjectName = "folio-alpha",
+  [string]$NeonOrgId = $env:NEON_ORG_ID,
   [switch]$SkipSmokeTest
 )
 
@@ -52,8 +53,23 @@ function Invoke-Neon([string[]]$Arguments, [switch]$Quiet) {
   return $output
 }
 
-function Get-NeonProjects {
-  $output = Invoke-Neon @("projects", "list", "--output", "json") -Quiet
+function Convert-NeonCollection([object]$Parsed, [string[]]$PropertyNames) {
+  if ($null -eq $Parsed) {
+    return @()
+  }
+  if ($Parsed -is [System.Array]) {
+    return @($Parsed)
+  }
+  foreach ($propertyName in $PropertyNames) {
+    if ($Parsed.PSObject.Properties.Name -contains $propertyName) {
+      return @($Parsed.$propertyName)
+    }
+  }
+  return @($Parsed)
+}
+
+function Get-NeonOrganizations {
+  $output = Invoke-Neon @("orgs", "list", "--output", "json") -Quiet
   if ($LASTEXITCODE -ne 0) {
     return $null
   }
@@ -66,16 +82,78 @@ function Get-NeonProjects {
   try {
     $parsed = $text | ConvertFrom-Json
   } catch {
-    throw "Neon returned non-JSON project output. Run 'npx --yes neon@latest projects list --output json' to inspect it."
+    throw "Neon returned non-JSON organization output. Run 'npx --yes neon@latest orgs list --output json' to inspect it."
   }
 
-  if ($parsed -is [System.Array]) {
-    return @($parsed)
+  return Convert-NeonCollection $parsed @("organizations", "orgs")
+}
+
+function Resolve-NeonOrgId([string]$PreferredOrgId) {
+  if (-not [string]::IsNullOrWhiteSpace($PreferredOrgId)) {
+    Write-Host "Using Neon organization '$PreferredOrgId' from NEON_ORG_ID / parameter."
+    return $PreferredOrgId
   }
-  if ($parsed.PSObject.Properties.Name -contains "projects") {
-    return @($parsed.projects)
+
+  Write-Host "Resolving Neon organization..."
+  $organizations = Get-NeonOrganizations
+  if ($null -eq $organizations) {
+    Write-Host "Neon login is required. Opening the Neon OAuth flow..."
+    Invoke-Neon @("auth") | Out-Null
+    Assert-ExitCode "Neon authentication"
+    $organizations = Get-NeonOrganizations
   }
-  return @($parsed)
+
+  if ($null -eq $organizations -or @($organizations).Count -eq 0) {
+    throw "No Neon organizations are available to this account."
+  }
+
+  $organizations = @($organizations)
+  if ($organizations.Count -eq 1) {
+    $organization = $organizations[0]
+  } else {
+    Write-Host "Multiple Neon organizations are available:" -ForegroundColor Yellow
+    for ($i = 0; $i -lt $organizations.Count; $i++) {
+      $orgName = if ($organizations[$i].name) { [string]$organizations[$i].name } else { "Unnamed organization" }
+      $orgId = if ($organizations[$i].id) { [string]$organizations[$i].id } elseif ($organizations[$i].org_id) { [string]$organizations[$i].org_id } else { "unknown" }
+      Write-Host "[$($i + 1)] $orgName ($orgId)"
+    }
+
+    $selection = Read-Host "Select the Neon organization number to use for Folio"
+    $selectionNumber = 0
+    if (-not [int]::TryParse($selection, [ref]$selectionNumber) -or $selectionNumber -lt 1 -or $selectionNumber -gt $organizations.Count) {
+      throw "Invalid Neon organization selection."
+    }
+    $organization = $organizations[$selectionNumber - 1]
+  }
+
+  $resolvedOrgId = if ($organization.id) { [string]$organization.id } elseif ($organization.org_id) { [string]$organization.org_id } else { "" }
+  if ([string]::IsNullOrWhiteSpace($resolvedOrgId)) {
+    throw "Could not determine the Neon organization ID."
+  }
+
+  $resolvedOrgName = if ($organization.name) { [string]$organization.name } else { "Neon organization" }
+  Write-Host "Using Neon organization '$resolvedOrgName' ($resolvedOrgId)."
+  return $resolvedOrgId
+}
+
+function Get-NeonProjects([string]$OrgId) {
+  $output = Invoke-Neon @("projects", "list", "--org-id", $OrgId, "--output", "json") -Quiet
+  if ($LASTEXITCODE -ne 0) {
+    return $null
+  }
+
+  $text = $output -join "`n"
+  if ([string]::IsNullOrWhiteSpace($text)) {
+    return @()
+  }
+
+  try {
+    $parsed = $text | ConvertFrom-Json
+  } catch {
+    throw "Neon returned non-JSON project output. Run 'npx --yes neon@latest projects list --org-id <ORG_ID> --output json' to inspect it."
+  }
+
+  return Convert-NeonCollection $parsed @("projects")
 }
 
 function Get-NeonDatabaseUrl([string]$ProjectId) {
@@ -89,41 +167,28 @@ function Get-NeonDatabaseUrl([string]$ProjectId) {
   return $match.Value.Trim()
 }
 
-function Ensure-NeonDatabase([string]$ProjectName) {
+function Ensure-NeonDatabase([string]$ProjectName, [string]$PreferredOrgId) {
   Write-Host "Checking Neon authentication and project access..."
-  $projects = Get-NeonProjects
+  $orgId = Resolve-NeonOrgId $PreferredOrgId
+  $projects = Get-NeonProjects $orgId
+
   if ($null -eq $projects) {
-    Write-Host "Neon login is required. Opening the Neon OAuth flow..."
+    Write-Host "Neon authentication may have expired. Opening the Neon OAuth flow..."
     Invoke-Neon @("auth") | Out-Null
     Assert-ExitCode "Neon authentication"
-    $projects = Get-NeonProjects
+    $projects = Get-NeonProjects $orgId
     if ($null -eq $projects) {
-      throw "Neon authentication succeeded but projects could not be listed."
+      throw "Neon authentication succeeded but projects could not be listed for organization '$orgId'."
     }
   }
 
   $project = @($projects) | Where-Object { $_.name -eq $ProjectName } | Select-Object -First 1
   if (-not $project) {
     Write-Host "Creating Neon project '$ProjectName'..."
-    Invoke-Neon @("projects", "create", "--name", $ProjectName, "--output", "json") | Out-Null
+    Invoke-Neon @("projects", "create", "--org-id", $orgId, "--name", $ProjectName, "--output", "json") | Out-Null
+    Assert-ExitCode "Creating Neon project $ProjectName"
 
-    if ($LASTEXITCODE -ne 0) {
-      Write-Host "Automatic project creation needs additional Neon account context. Opening the guided Neon linker..." -ForegroundColor Yellow
-      Invoke-Neon @("link") | Out-Null
-      Assert-ExitCode "Neon guided project link"
-
-      $contextPath = Join-Path $repoRoot ".neon"
-      if (-not (Test-Path $contextPath)) {
-        throw "Neon link completed but .neon context was not created."
-      }
-      $context = Get-Content -Raw $contextPath | ConvertFrom-Json
-      if (-not $context.projectId) {
-        throw "Neon context does not contain a projectId."
-      }
-      return Get-NeonDatabaseUrl ([string]$context.projectId)
-    }
-
-    $projects = Get-NeonProjects
+    $projects = Get-NeonProjects $orgId
     $project = @($projects) | Where-Object { $_.name -eq $ProjectName } | Select-Object -First 1
   }
 
@@ -197,7 +262,7 @@ try {
 
   $databaseUrl = $env:DATABASE_URL
   if ([string]::IsNullOrWhiteSpace($databaseUrl)) {
-    $databaseUrl = Ensure-NeonDatabase $NeonProjectName
+    $databaseUrl = Ensure-NeonDatabase $NeonProjectName $NeonOrgId
   } else {
     Write-Host "Using DATABASE_URL already present in this PowerShell session."
   }
