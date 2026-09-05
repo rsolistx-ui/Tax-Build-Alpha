@@ -1,7 +1,9 @@
 # Copy to apps/api/.dev.vars
-# NEVER commit real secrets. GEMINI_API_KEY stays on the Worker only.
+# Never commit real secrets.
 
 BETTER_AUTH_SECRET=generate-a-long-random-string-at-least-32-chars
 BETTER_AUTH_URL=http://localhost:8787
-GEMINI_API_KEY=
+APP_ORIGIN=http://localhost:5173
+DATABASE_URL=postgresql://user:password@your-neon-host/neondb?sslmode=require
 LLM_PROVIDER=mock
+GEMINI_API_KEY=

@@ -1,134 +1,197 @@
 # Folio (Tax-Build-Alpha)
 
-Zero-cost B2B bookkeeping alpha for accounting firms with many clients.
-Working title **Folio** — calm, Linear/Stripe-quality UX. Not Wave.
+Evidence-first bookkeeping and tax-workspace alpha for professional firms. The product rule is simple: AI proposes, evidence verifies, and the professional decides what becomes part of the books.
 
-## Stack (locked)
+## Married architecture
+
+This branch keeps the Cloudflare chassis that already shipped and replaces the accounting spine.
 
 | Layer | Choice |
-|-------|--------|
-| Frontend | Cloudflare Pages · Vite · React · TypeScript · Tailwind v4 · shadcn/ui |
-| API | Cloudflare Workers · Hono |
-| DB | Cloudflare D1 |
-| Files | Cloudflare R2 |
-| Jobs | Cloudflare Queues (stubbed; inline LLM path works today) |
-| Auth | Better Auth on D1 (email/password) |
-| AI | Gemini Flash adapter + mock provider (`GEMINI_API_KEY` on Worker only) |
+|---|---|
+| Frontend | Cloudflare Pages, Vite, React, TypeScript, Tailwind |
+| API | Cloudflare Workers, Hono |
+| Auth state | Better Auth on Cloudflare D1 |
+| Business database | Neon Postgres |
+| Source documents | Private Cloudflare R2 |
+| Primary extraction | Workers AI, `@cf/qwen/qwen3.8-27b` |
+| PDF preparation | Workers AI `toMarkdown()` |
+| AI fallback | Gemini Flash when `GEMINI_API_KEY` is configured |
+| Local development | Deterministic mock provider only when explicitly selected |
 
-**Not in alpha:** IRS e-file, Wave API, native apps, local LLMs, Netlify, Supabase.
+D1 is now intentionally auth-only. Firm, client, receipt, line-item, validation, audit, correction-memory, bank, and reporting data live in Neon.
 
-## Repo layout
+## What changed in the married spine
 
+- Receipt truth moved from one header-level transaction to receipt header plus line items.
+- Every extraction runs deterministic arithmetic validation before review.
+- Review is evidence-first: source document on one side, editable extracted facts and validation on the other.
+- Failed validation cannot be filed without an explicit professional override.
+- Filed line items feed the P&L. Unreviewed AI output does not.
+- Every P&L category drills down to the exact line items and source receipts behind the number.
+- Per-client merchant category corrections are remembered and applied to future extracts.
+- A client business profile is available to give extraction client-specific context.
+- Extraction failures are real failures. Production never silently substitutes fabricated mock data.
+
+## Repository layout
+
+```text
+apps/web/                         React app
+apps/api/                         Worker API
+migrations/                       Legacy D1 auth migration
+migrations/neon/                 Neon business-data schema
+scripts/neon-migrate.mjs          Dependency-free Neon migration runner
 ```
-apps/web/          Vite + React UI (Pages)
-apps/api/          Hono Worker (API + Better Auth + R2 + LLM)
-migrations/        D1 SQL migrations
-wrangler.toml      Root pointer (active config: apps/api/wrangler.toml)
-```
 
-## Prerequisites
+## Local setup
+
+Requirements:
 
 - Node 20+
-- Cloudflare account (free)
-- Wrangler (installed via workspace)
-- Optional: free Google AI Studio key for Gemini Flash (https://aistudio.google.com/apikey)
+- Cloudflare account
+- Neon project
+- R2 bucket named `folio-receipts`
 
-## Local development
+Install dependencies:
 
 ```bash
-# Install
 npm install
+```
 
-# Copy Worker secrets
+Copy the Worker environment template:
+
+```bash
 cp apps/api/.dev.vars.example apps/api/.dev.vars
-# Edit BETTER_AUTH_SECRET (32+ chars). Leave LLM_PROVIDER=mock for offline.
+```
 
-# Apply D1 migrations locally
-npm run db:migrate:local
+For PowerShell:
 
-# Run API (:8787) + web (:5173) together
+```powershell
+Copy-Item apps/api/.dev.vars.example apps/api/.dev.vars
+```
+
+Set a real `DATABASE_URL` in `apps/api/.dev.vars`. Use the pooled Neon PostgreSQL connection string from Neon.
+
+Apply the Neon schema. PowerShell example:
+
+```powershell
+$env:DATABASE_URL="postgresql://..."
+npm run db:migrate:neon
+```
+
+Apply the existing D1 migration for Better Auth when setting up a fresh local auth database:
+
+```bash
+npm run auth:migrate:local
+```
+
+Run both apps:
+
+```bash
 npm run dev
 ```
 
-- Web: http://localhost:5173 (proxies `/api` → Worker)
-- API health: http://localhost:8787/api/health
+Local URLs:
 
-### Scripts
+- Web: `http://localhost:5173`
+- API: `http://localhost:8787`
+- Health: `http://localhost:8787/api/health`
 
-| Script | Purpose |
-|--------|---------|
-| `npm run dev` | Web + API |
-| `npm run typecheck` | TypeScript on both apps |
-| `npm run build` | Build web + dry-run Worker bundle |
-| `npm run db:migrate:local` | Apply D1 migrations to local D1 |
-| `npm run deploy:api` | Deploy Worker |
-| `npm run deploy:web` | Pages deploy notes |
+Local development defaults to `LLM_PROVIDER=mock`. This keeps development free and deterministic. The mock is never used as an automatic production fallback.
 
-## Cloudflare setup
+## Cloudflare production setup
 
-1. **Login:** `npx wrangler login`
-2. **D1:** `npx wrangler d1 create folio-db` → paste `database_id` into `apps/api/wrangler.toml`
-3. **R2:** `npx wrangler r2 bucket create folio-receipts`
-4. **Migrations (remote):** `npm run db:migrate:remote -w @folio/api`
-5. **Secrets (Worker only — never in the browser):**
-   ```bash
-   cd apps/api
-   npx wrangler secret put BETTER_AUTH_SECRET
-   npx wrangler secret put GEMINI_API_KEY   # optional if using mock
-   ```
-6. **Vars:** set `BETTER_AUTH_URL` to your Worker URL; set `LLM_PROVIDER=gemini` when key is present.
-7. **Pages:** create a Pages project from this repo
-   - Root directory / app: `apps/web`
-   - Build: `npm run build -w @folio/web` (from monorepo root) or `npm run build` inside `apps/web`
-   - Output directory: `dist`
-   - Env: `VITE_API_URL=https://<your-worker>.workers.dev`
-8. **CORS / auth:** add your Pages origin to `trustedOrigins` in `apps/api/src/auth.ts`.
+The active Worker config is `apps/api/wrangler.toml`.
 
-### Queues (optional Days 3+)
+1. Create or reuse the D1 database for Better Auth and replace the placeholder `database_id` in `apps/api/wrangler.toml`.
+2. Create the private R2 bucket `folio-receipts`.
+3. Create a Neon project and apply `migrations/neon/0001_married_spine.sql` with `npm run db:migrate:neon`.
+4. Set Worker secrets:
 
 ```bash
-npx wrangler queues create folio-jobs
+cd apps/api
+npx wrangler secret put BETTER_AUTH_SECRET
+npx wrangler secret put DATABASE_URL
+npx wrangler secret put GEMINI_API_KEY
 ```
 
-Uncomment the `[[queues.producers]]` / `[[queues.consumers]]` blocks in `apps/api/wrangler.toml`.
-Until then, receipt extract runs **inline** after upload (thin Worker → Gemini/mock).
+`GEMINI_API_KEY` is optional. It is only the fallback behind Workers AI.
 
-## Gemini (free tier)
+5. Set `BETTER_AUTH_URL` to the deployed Worker URL and `APP_ORIGIN` to the Pages origin.
+6. Keep `LLM_PROVIDER=workers-ai` in production.
+7. Deploy the Worker and Pages app.
 
-1. Create an API key at https://aistudio.google.com/apikey
-2. `wrangler secret put GEMINI_API_KEY` (or set in `.dev.vars`)
-3. Set `LLM_PROVIDER=gemini`
-4. Provider returns `{ date, merchant, amount, currency, category, confidence }`
+Workers AI is bound as `AI` in `apps/api/wrangler.toml`. Receipt photos are sent to Qwen 3.8 27B. PDFs first use Cloudflare document conversion, then Qwen receives the extracted document text. If that path fails and Gemini is configured, the provider adapter falls back to Gemini.
 
-Mock provider is the default so local/dev works with zero keys.
+## Receipt lifecycle
 
-## Alpha features (Days 1–2 foundation)
+```text
+upload
+  -> private R2 source
+  -> Workers AI or Gemini extraction
+  -> receipt header + line items
+  -> arithmetic validation
+  -> review queue
+  -> professional edit or approval
+  -> audit event + correction memory
+  -> filed ledger
+  -> P&L
+  -> source drill-down
+```
 
-- [x] Auth sign-up / sign-in + protected routes
-- [x] Firm auto-provision + client CRUD
-- [x] Default category folders (hotel, travel, food, supplies) + custom
-- [x] Polished shell: login, client list, workspace (folders / upload / review / P&L)
-- [x] `providers/llm` Gemini + mock
-- [x] Receipt upload skeleton: file → R2 → receipt row → job stub → LLM
-- [x] Deployable Pages + Workers layout, migrations, secrets docs
+Validation currently checks:
 
-## Days 3–10 (remaining)
+- receipt total is present
+- line items are present
+- item amounts reconcile to subtotal when both exist
+- subtotal plus tax plus tip reconciles to total
+- receipt and line-item confidence signals
 
-- Review queue: edit extract fields, file into folders, confidence UX
-- Bank CSV import + business/personal triage + category assignment
-- Real monthly/yearly P&L + PDF/Excel export
-- Cloudflare Queues consumer for async extract at scale
-- Bulk upload progress, duplicate detection
-- Custom categories UX polish, client archive
-- Production cookie `secure` + multi-origin trustedOrigins
-- Soft delete, audit trail, invite firm members
+The tolerance for receipt arithmetic is two cents to allow normal rounding differences.
+
+## Client correction memory
+
+When a reviewer changes a merchant's top-level category, Folio stores a client-scoped `merchant_category` rule. Future receipts from the normalized merchant can inherit that client's remembered category without leaking a rule to another client.
+
+This is the first institutional-memory path. More granular item-level and vendor-specific correction learning can be added after the alpha proves the review loop.
+
+## P&L traceability
+
+Only receipts in `filed` status enter the P&L. When line items exist, the P&L is built from those line items. A receipt with no line items falls back to its reviewed receipt total so evidence is not silently dropped.
+
+`GET /api/clients/:clientId/pnl/drilldown?category=...` returns every contributing line with a source URL. The UI exposes the same drill-down next to the report.
+
+## Deliberately deferred
+
+To protect the paid-alpha timeline, this milestone does not add:
+
+- bank CSV reconciliation
+- tax-year checklist UI
+- e-file
+- full MFA rollout
+- queue consumer and bulk async processing
+- PDF or Excel report export
+- item-level machine learning beyond correction rules
+
+Those should follow only after the line-item review and evidence drill-down are working with real Phyllis documents.
+
+## Verification commands
+
+```bash
+npm run typecheck
+npm run build
+```
+
+A build is not considered production-ready until the Neon schema has been applied and real Cloudflare bindings and secrets are present.
 
 ## Security notes
 
-- `GEMINI_API_KEY` and `BETTER_AUTH_SECRET` live only on the Worker (`.dev.vars` / `wrangler secret`).
-- Never expose secrets via `VITE_*` env vars.
-- Thin Workers: images/PDFs are forwarded to Gemini; no heavy PDF CPU in-Worker.
+- Receipt sources remain private in R2.
+- `DATABASE_URL`, `BETTER_AUTH_SECRET`, and optional `GEMINI_API_KEY` are Worker secrets only.
+- No secret belongs in a `VITE_*` browser variable.
+- Production auth cookies use `Secure` and `SameSite=None` when `BETTER_AUTH_URL` is HTTPS so Pages can authenticate to the Worker across origins.
+- Source endpoints enforce the same authenticated client boundary as receipt and P&L endpoints.
+- Audit events record extraction, review edits, filing, and validation override state.
 
 ## License
 
-Private — all rights reserved.
+Private. All rights reserved.

@@ -2,12 +2,20 @@ import { betterAuth } from "better-auth";
 import type { Env } from "./env";
 
 /**
- * Better Auth on D1 — email/password (no outbound email needed for alpha).
- * Magic link can be added later when a free email path exists.
+ * Better Auth stays on D1 while accounting data moves to Neon. Keeping auth
+ * isolated avoids a risky session migration during the paid-alpha build.
  */
 export function createAuth(env: Env) {
+  const production = env.BETTER_AUTH_URL?.startsWith("https://") ?? false;
+  const trustedOrigins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+  ];
+  if (env.APP_ORIGIN) trustedOrigins.push(env.APP_ORIGIN);
+
   return betterAuth({
-    database: env.DB,
+    database: env.AUTH_DB,
     secret: env.BETTER_AUTH_SECRET || "dev-only-change-me-32chars-minimum!!",
     baseURL: env.BETTER_AUTH_URL || "http://localhost:8787",
     basePath: "/api/auth",
@@ -16,15 +24,11 @@ export function createAuth(env: Env) {
       requireEmailVerification: false,
       minPasswordLength: 8,
     },
-    trustedOrigins: [
-      "http://localhost:5173",
-      "http://127.0.0.1:5173",
-      "http://localhost:3000",
-    ],
+    trustedOrigins,
     advanced: {
       defaultCookieAttributes: {
-        sameSite: "lax",
-        secure: false, // set true in production HTTPS
+        sameSite: production ? "none" : "lax",
+        secure: production,
       },
     },
   });

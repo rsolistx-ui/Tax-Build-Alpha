@@ -4,15 +4,19 @@ compatibility_date = "2025-03-01"
 compatibility_flags = ["nodejs_compat"]
 
 [vars]
-LLM_PROVIDER = "mock"
+LLM_PROVIDER = "workers-ai"
 BETTER_AUTH_URL = "http://localhost:8787"
+APP_ORIGIN = "http://localhost:5173"
 
-# Secrets (set via: wrangler secret put ...):
-#   BETTER_AUTH_SECRET
-#   GEMINI_API_KEY
+# Secrets:
+#   BETTER_AUTH_SECRET   Better Auth encryption/session secret
+#   DATABASE_URL        Neon pooled PostgreSQL connection string
+#   GEMINI_API_KEY      Optional fallback if Workers AI extraction fails
 
+# D1 is intentionally auth-only in the married architecture.
+# Existing app tables from the original alpha may remain but are no longer read.
 [[d1_databases]]
-binding = "DB"
+binding = "AUTH_DB"
 database_name = "folio-db"
 database_id = "00000000-0000-0000-0000-000000000001"
 migrations_dir = "../../migrations"
@@ -21,16 +25,14 @@ migrations_dir = "../../migrations"
 binding = "RECEIPTS"
 bucket_name = "folio-receipts"
 
-# Queues stub — create with: wrangler queues create folio-jobs
-# Uncomment when the queue exists in your Cloudflare account:
+[ai]
+binding = "AI"
+
+# Queues remain a scale-up option. Receipt extraction stays inline for the paid alpha
+# until the queue consumer is implemented and tested end-to-end.
 # [[queues.producers]]
 # binding = "JOBS_QUEUE"
 # queue = "folio-jobs"
-#
-# [[queues.consumers]]
-# queue = "folio-jobs"
-# max_batch_size = 5
-# max_retries = 3
 
 [dev]
 port = 8787

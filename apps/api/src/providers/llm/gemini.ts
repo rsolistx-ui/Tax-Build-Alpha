@@ -1,21 +1,15 @@
-import type { LlmProvider, ReceiptExtraction } from "./types";
+import { normalizeExtraction, safeJson } from "./normalize";
+import type { LlmProvider, ReceiptBusinessContext, ReceiptExtraction } from "./types";
 
 const MODEL = "gemini-2.0-flash";
 
-/**
- * Thin adapter: send image/PDF bytes to Gemini Flash.
- * Heavy PDF CPU parsing is intentionally avoided in the Worker —
- * Gemini accepts PDF/image inline; Worker only forwards bytes.
- */
 export function createGeminiProvider(apiKey: string): LlmProvider {
   return {
     name: "gemini",
-    async extractReceipt({ bytes, contentType, filename }): Promise<ReceiptExtraction> {
+    model: MODEL,
+    async extractReceipt({ bytes, contentType, filename, context }): Promise<ReceiptExtraction> {
       const b64 = arrayBufferToBase64(bytes);
-      const prompt = `Extract receipt fields as JSON only (no markdown):
-{"date":"YYYY-MM-DD or null","merchant":"string or null","amount":number or null,"currency":"USD","category":"hotel|travel|food|supplies|other or null","confidence":0-1}
-Filename hint: ${filename}`;
-
+      const prompt = buildPrompt(filename, context);
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${apiKey}`;
       const res = await fetch(url, {
         method: "POST",
@@ -35,37 +29,40 @@ Filename hint: ${filename}`;
 
       if (!res.ok) {
         const errText = await res.text();
-        throw new Error(`Gemini error ${res.status}: ${errText.slice(0, 400)}`);
+        throw new Error(`Gemini error ${res.status}: ${errText.slice(0, 500)}`);
       }
 
       const data = (await res.json()) as {
         candidates?: { content?: { parts?: { text?: string }[] } }[];
       };
       const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}";
-      return normalizeExtraction(safeJson(text));
+      const extraction = normalizeExtraction(safeJson(text));
+      if (extraction.total == null && extraction.lineItems.length === 0) {
+        throw new Error("Gemini returned no usable receipt totals or line items");
+      }
+      return extraction;
     },
   };
 }
 
-function safeJson(text: string): Record<string, unknown> {
-  try {
-    const cleaned = text.replace(/^```json\s*/i, "").replace(/```$/i, "").trim();
-    return JSON.parse(cleaned) as Record<string, unknown>;
-  } catch {
-    return {};
-  }
+function buildPrompt(filename: string, context?: ReceiptBusinessContext): string {
+  const categories = context?.categories?.join(", ") || "use the best accounting category";
+  return `Extract this receipt as JSON only. Do not invent missing values. Itemize every purchased line separately. Use client category names when appropriate: ${categories}.
+{
+  "date":"YYYY-MM-DD or null",
+  "merchant":"string or null",
+  "subtotal":number or null,
+  "tax":number or null,
+  "tip":number or null,
+  "total":number or null,
+  "currency":"USD",
+  "category":"string or null",
+  "confidence":0-1,
+  "lineItems":[{"description":"string","quantity":number or null,"unitPrice":number or null,"amount":number or null,"category":"string or null","confidence":0-1}]
 }
-
-function normalizeExtraction(raw: Record<string, unknown>): ReceiptExtraction {
-  const amount = raw.amount;
-  return {
-    date: typeof raw.date === "string" ? raw.date : null,
-    merchant: typeof raw.merchant === "string" ? raw.merchant : null,
-    amount: typeof amount === "number" ? amount : amount != null ? Number(amount) : null,
-    currency: typeof raw.currency === "string" ? raw.currency : "USD",
-    category: typeof raw.category === "string" ? raw.category : null,
-    confidence: typeof raw.confidence === "number" ? raw.confidence : 0.5,
-  };
+Filename: ${filename}
+Client: ${context?.clientName ?? "unknown"}
+Industry: ${context?.industry ?? "unknown"}`;
 }
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {

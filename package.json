@@ -2,7 +2,7 @@
   "name": "folio",
   "private": true,
   "version": "0.1.0",
-  "description": "Folio \u2014 zero-cost B2B bookkeeping alpha",
+  "description": "Folio — evidence-first professional bookkeeping and tax workspace alpha",
   "workspaces": [
     "apps/*"
   ],
@@ -12,7 +12,9 @@
     "dev:api": "npm run dev -w @folio/api",
     "build": "npm run build -w @folio/web && npm run build -w @folio/api",
     "typecheck": "npm run typecheck -w @folio/web && npm run typecheck -w @folio/api",
-    "db:migrate:local": "npm run db:migrate:local -w @folio/api",
+    "auth:migrate:local": "npm run db:migrate:local -w @folio/api",
+    "auth:migrate:remote": "npm run db:migrate:remote -w @folio/api",
+    "db:migrate:neon": "node scripts/neon-migrate.mjs migrations/neon/0001_married_spine.sql",
     "deploy:api": "npm run deploy -w @folio/api",
     "deploy:web": "npm run deploy -w @folio/web"
   },
