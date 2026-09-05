@@ -43,7 +43,7 @@ apps/api/                         Hono Worker, auth, R2, Workers AI
 migrations/                       D1 auth schema
 migrations/neon/                 Neon business schema
 scripts/neon-migrate.mjs          Neon migration runner
-scripts/bootstrap-production.ps1  Cloudflare production bootstrap
+scripts/bootstrap-production.ps1  Neon + Cloudflare production bootstrap
 scripts/smoke-production.ps1      End-to-end paid-alpha verification
 ```
 
@@ -53,7 +53,7 @@ Requirements:
 
 - Node 20+
 - Cloudflare account
-- Neon project
+- Neon account
 - Windows PowerShell for the production bootstrap scripts
 
 Install dependencies:
@@ -68,7 +68,7 @@ Copy the Worker environment template:
 Copy-Item apps/api/.dev.vars.example apps/api/.dev.vars
 ```
 
-Set a real pooled Neon `DATABASE_URL` in `apps/api/.dev.vars`, then apply the business schema:
+For local development, set a pooled Neon `DATABASE_URL` in `apps/api/.dev.vars`, then apply the business schema:
 
 ```powershell
 $env:DATABASE_URL="postgresql://..."
@@ -92,7 +92,7 @@ Local development defaults to `LLM_PROVIDER=mock`. Mock output is never an autom
 
 ## One-command production bootstrap
 
-The production bootstrap creates or reuses the Cloudflare resources, applies both database schemas, generates the Better Auth secret, stores Worker secrets, builds the SPA, deploys the single-origin Worker, and verifies `/api/health`.
+The production bootstrap provisions or reuses Neon and Cloudflare resources, applies both database schemas, generates the Better Auth secret, stores Worker secrets, builds the SPA, deploys the single-origin Worker, and verifies `/api/health`.
 
 From the repository root:
 
@@ -100,25 +100,34 @@ From the repository root:
 powershell -ExecutionPolicy Bypass -File .\scripts\bootstrap-production.ps1
 ```
 
+The default Neon project name is `folio-alpha`. Override it only when needed:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\bootstrap-production.ps1 -NeonProjectName "folio-alpha"
+```
+
 The script will:
 
 1. Run `npm ci`.
-2. Verify Wrangler authentication and open `wrangler login` if required.
-3. Create or reuse D1 `folio-db` for Better Auth.
-4. Patch the local Wrangler config with the real D1 database ID.
-5. Create or reuse private R2 bucket `folio-receipts`.
-6. Apply the D1 auth migration.
-7. Read `DATABASE_URL` from the environment or securely prompt for the pooled Neon connection string.
-8. Apply `migrations/neon/0001_married_spine.sql`.
-9. Build the React client.
-10. Deploy the Worker with the client as static assets.
-11. Generate and upload `BETTER_AUTH_SECRET`.
-12. Upload `DATABASE_URL` as a Worker secret.
-13. Upload `GEMINI_API_KEY` only when it is already present in the environment.
-14. Set production `BETTER_AUTH_URL` and `APP_ORIGIN` to the same Worker origin.
-15. Redeploy and verify Neon plus Workers AI through the health endpoint.
+2. Verify Cloudflare authentication and open `wrangler login` if required.
+3. Use `DATABASE_URL` if one is already present in the PowerShell session. Otherwise it invokes the current Neon CLI with `npx --yes neon@latest`.
+4. Authenticate Neon through browser OAuth if needed.
+5. Reuse a Neon project named `folio-alpha` when it exists, otherwise create it. If the account requires an organization or region choice, the script falls back to Neon's guided `link` flow rather than guessing.
+6. Resolve the project's pooled Postgres connection string without writing it into the repository.
+7. Create or reuse D1 `folio-db` for Better Auth.
+8. Patch the local Wrangler config with the real D1 database ID.
+9. Create or reuse private R2 bucket `folio-receipts`.
+10. Apply the D1 auth migration.
+11. Apply `migrations/neon/0001_married_spine.sql` to Neon.
+12. Build the React client.
+13. Deploy the Worker with the client as static assets.
+14. Generate and upload `BETTER_AUTH_SECRET`.
+15. Upload `DATABASE_URL` as a Worker secret.
+16. Upload `GEMINI_API_KEY` only when it is already present in the environment.
+17. Set production `BETTER_AUTH_URL` and `APP_ORIGIN` to the same Worker origin.
+18. Redeploy and verify Neon plus Workers AI through the health endpoint.
 
-No database credential or auth secret is written into the repository.
+No database credential or auth secret is written into the repository. The Neon CLI may create a local `.neon` context when its guided fallback is needed. Neon manages that file as local project context and adds it to git ignore.
 
 ## End-to-end production proof
 
