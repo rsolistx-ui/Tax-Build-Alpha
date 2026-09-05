@@ -10,15 +10,42 @@ Set-StrictMode -Version Latest
 $BaseUrl = $BaseUrl.TrimEnd("/")
 
 function Invoke-CurlJson([string[]]$CurlArgs) {
-  $output = @(& curl.exe --fail-with-body --silent --show-error @CurlArgs 2>&1)
-  if ($LASTEXITCODE -ne 0) {
-    throw ($output -join "`n")
-  }
-  $text = $output -join "`n"
+  $previousPreference = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
   try {
-    return $text | ConvertFrom-Json
+    $output = @(& curl.exe --silent --show-error --write-out "`n__FOLIO_HTTP_STATUS__:%{http_code}" @CurlArgs 2>&1)
+    $exitCode = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $previousPreference
+  }
+
+  $text = $output -join "`n"
+  $marker = "__FOLIO_HTTP_STATUS__:"
+  $markerIndex = $text.LastIndexOf($marker)
+  if ($markerIndex -lt 0) {
+    throw "curl failed before an HTTP status could be read. Exit code: $exitCode. Output: $text"
+  }
+
+  $body = $text.Substring(0, $markerIndex).Trim()
+  $statusText = $text.Substring($markerIndex + $marker.Length).Trim()
+  $statusCode = 0
+  if (-not [int]::TryParse($statusText, [ref]$statusCode)) {
+    throw "Could not parse HTTP status '$statusText'. Response: $body"
+  }
+
+  if ($exitCode -ne 0 -or $statusCode -ge 400) {
+    $responseText = if ([string]::IsNullOrWhiteSpace($body)) { "<empty response body>" } else { $body }
+    throw "HTTP $statusCode from curl (exit $exitCode). Response: $responseText"
+  }
+
+  if ([string]::IsNullOrWhiteSpace($body)) {
+    return $null
+  }
+
+  try {
+    return $body | ConvertFrom-Json
   } catch {
-    throw "Expected JSON but received: $($text.Substring(0, [Math]::Min(800, $text.Length)))"
+    throw "Expected JSON but received HTTP $statusCode response: $($body.Substring(0, [Math]::Min(800, $body.Length)))"
   }
 }
 
@@ -77,7 +104,7 @@ try {
   }
 
   $stamp = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
-  $email = "folio-smoke-$stamp@example.test"
+  $email = "folio-smoke-$([guid]::NewGuid().ToString('N'))@example.com"
   $password = "Smoke!$([guid]::NewGuid().ToString('N').Substring(0, 18))"
   $signupBody = @{ name = "Folio Smoke Test"; email = $email; password = $password } | ConvertTo-Json -Compress
 
@@ -86,6 +113,7 @@ try {
     "-c", $cookieJar,
     "-b", $cookieJar,
     "-H", "Content-Type: application/json",
+    "-H", "Origin: $BaseUrl",
     "--data-binary", $signupBody,
     "$BaseUrl/api/auth/sign-up/email"
   )
@@ -182,8 +210,15 @@ try {
     throw "P&L drill-down returned no evidence entries."
   }
 
-  $sourceStatus = (& curl.exe --silent --output NUL --write-out "%{http_code}" -c $cookieJar -b $cookieJar "$BaseUrl/api/clients/$clientId/receipts/$receiptId/source")
-  if ($LASTEXITCODE -ne 0 -or $sourceStatus -ne "200") {
+  $previousPreference = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    $sourceStatus = (& curl.exe --silent --output NUL --write-out "%{http_code}" -c $cookieJar -b $cookieJar "$BaseUrl/api/clients/$clientId/receipts/$receiptId/source")
+    $sourceExitCode = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $previousPreference
+  }
+  if ($sourceExitCode -ne 0 -or $sourceStatus -ne "200") {
     throw "Source evidence endpoint failed with HTTP $sourceStatus."
   }
 
