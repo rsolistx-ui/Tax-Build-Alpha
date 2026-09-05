@@ -106,7 +106,9 @@ $clientPayloadPath = ""
 $approvePayloadPath = ""
 $bankDecisionPayloadPath = ""
 $bankMappingPayloadPath = ""
+$noReceiptDecisionPayloadPath = ""
 $bankCsvPath = ""
+$bankExceptionCsvPath = ""
 
 try {
   if (-not $ReceiptPath) {
@@ -339,14 +341,136 @@ try {
     throw "Confirmed bank reconciliation did not create the expected audit event."
   }
 
+  Write-Host "Verifying bank exception inbox and missing receipt resolution..."
+  $bankExceptionCsvPath = Join-Path $env:TEMP "folio-smoke-bank-exceptions-$([guid]::NewGuid().ToString('N')).csv"
+  $exceptionCsv = "Date,Description,Amount`r`n2026-08-01,FOLIO MISSING RECEIPT SMOKE,$bankAmountText`r`n2026-08-02,FOLIO NO RECEIPT SMOKE,-11.11`r`n"
+  [System.IO.File]::WriteAllText($bankExceptionCsvPath, $exceptionCsv, $utf8)
+
+  $exceptionImport = Invoke-CurlJson @(
+    "-c", $cookieJar,
+    "-b", $cookieJar,
+    "-F", "file=@$bankExceptionCsvPath",
+    "-F", "mapping=<$bankMappingPayloadPath",
+    "$BaseUrl/api/clients/$clientId/bank-transactions/import"
+  )
+  if ($exceptionImport.insertedCount -ne 2 -or $exceptionImport.duplicateCount -ne 0) {
+    throw "Bank exception CSV did not insert both unmatched transactions."
+  }
+
+  $exceptionQueue = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/bank-transactions")
+  $missingTransaction = @($exceptionQueue.transactions) | Where-Object { $_.description -eq "FOLIO MISSING RECEIPT SMOKE" } | Select-Object -First 1
+  $noReceiptTransaction = @($exceptionQueue.transactions) | Where-Object { $_.description -eq "FOLIO NO RECEIPT SMOKE" } | Select-Object -First 1
+  if (-not $missingTransaction -or $missingTransaction.triage -ne "unmatched") {
+    throw "Missing receipt exception did not enter the unmatched queue."
+  }
+  if (-not $noReceiptTransaction -or $noReceiptTransaction.triage -ne "unmatched") {
+    throw "No-receipt exception did not enter the unmatched queue."
+  }
+
+  $missingTransactionId = [string]$missingTransaction.id
+  $noReceiptTransactionId = [string]$noReceiptTransaction.id
+
+  Write-Host "Documenting a professional no-receipt-required resolution..."
+  $noReceiptReason = "Smoke test documented non-receipt resolution"
+  $noReceiptDecisionBody = @{ action = "no_receipt_required"; reason = $noReceiptReason } | ConvertTo-Json -Compress
+  $noReceiptDecisionPayloadPath = New-JsonPayloadFile $noReceiptDecisionBody
+  $null = Invoke-CurlJson @(
+    "-c", $cookieJar,
+    "-b", $cookieJar,
+    "-H", "Content-Type: application/json",
+    "--data-binary", "@$noReceiptDecisionPayloadPath",
+    "$BaseUrl/api/clients/$clientId/bank-transactions/$noReceiptTransactionId/decision"
+  )
+
+  $afterNoReceiptQueue = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/bank-transactions")
+  $resolvedNoReceipt = @($afterNoReceiptQueue.transactions) | Where-Object { $_.id -eq $noReceiptTransactionId } | Select-Object -First 1
+  if (-not $resolvedNoReceipt -or $resolvedNoReceipt.triage -ne "no_receipt_required" -or $resolvedNoReceipt.resolutionReason -ne $noReceiptReason) {
+    throw "No-receipt-required resolution was not persisted with its reason."
+  }
+
+  $noReceiptAudit = Invoke-CurlJson @(
+    "-c", $cookieJar,
+    "-b", $cookieJar,
+    "$BaseUrl/api/clients/$clientId/bank-transactions/$noReceiptTransactionId/audit"
+  )
+  if (-not (@($noReceiptAudit.events) | Where-Object { $_.action -eq "bank_no_receipt_required" } | Select-Object -First 1)) {
+    throw "No-receipt-required resolution did not create an audit event."
+  }
+
+  Write-Host "Uploading missing receipt evidence directly from the bank exception..."
+  $exceptionReceiptUpload = Invoke-CurlJson @(
+    "-c", $cookieJar,
+    "-b", $cookieJar,
+    "-F", "file=@$ReceiptPath",
+    "-F", "bankTransactionId=$missingTransactionId",
+    "$BaseUrl/api/clients/$clientId/receipts"
+  )
+  $exceptionReceiptId = [string]$exceptionReceiptUpload.receipt.id
+  if (-not $exceptionReceiptId) {
+    throw "Bank exception receipt upload did not return a receipt id."
+  }
+
+  $pendingQueue = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/bank-transactions")
+  $pendingTransaction = @($pendingQueue.transactions) | Where-Object { $_.id -eq $missingTransactionId } | Select-Object -First 1
+  if (-not $pendingTransaction -or $pendingTransaction.triage -ne "receipt_pending" -or $pendingTransaction.pendingReceipt.id -ne $exceptionReceiptId) {
+    throw "Uploaded missing receipt was not attached to the bank exception in pending review state."
+  }
+
+  $exceptionReview = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/review")
+  $exceptionReceipt = @($exceptionReview.receipts) | Where-Object { $_.id -eq $exceptionReceiptId } | Select-Object -First 1
+  if (-not $exceptionReceipt) {
+    throw "Bank exception receipt did not appear in the review inbox."
+  }
+  if ($exceptionReceipt.validation_status -eq "fail") {
+    throw "Bank exception receipt failed deterministic validation and cannot be filed automatically by the smoke test."
+  }
+
+  Write-Host "Filing the deliberately linked receipt and verifying automatic exception completion..."
+  $exceptionFiled = Invoke-CurlJson @(
+    "-c", $cookieJar,
+    "-b", $cookieJar,
+    "-H", "Content-Type: application/json",
+    "--data-binary", "@$approvePayloadPath",
+    "$BaseUrl/api/clients/$clientId/receipts/$exceptionReceiptId/approve"
+  )
+  if ($exceptionFiled.receipt.status -ne "filed") {
+    throw "Bank exception receipt did not file successfully."
+  }
+  if ($missingTransactionId -notin @($exceptionFiled.resolvedBankTransactions)) {
+    throw "Filing the deliberately linked receipt did not report the bank exception as resolved."
+  }
+
+  $finalBankQueue = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/bank-transactions")
+  $resolvedMissing = @($finalBankQueue.transactions) | Where-Object { $_.id -eq $missingTransactionId } | Select-Object -First 1
+  if (-not $resolvedMissing -or $resolvedMissing.triage -ne "matched" -or $resolvedMissing.matchedReceipt.id -ne $exceptionReceiptId) {
+    throw "Missing receipt exception did not resolve to the newly filed source evidence."
+  }
+  if ($finalBankQueue.summary.actionCount -ne 0 -or $finalBankQueue.summary.matched -lt 2 -or $finalBankQueue.summary.noReceiptRequired -lt 1) {
+    throw "Bank exception summary does not reflect the resolved smoke-test workload."
+  }
+
+  $missingAudit = Invoke-CurlJson @(
+    "-c", $cookieJar,
+    "-b", $cookieJar,
+    "$BaseUrl/api/clients/$clientId/bank-transactions/$missingTransactionId/audit"
+  )
+  $uploadedAudit = @($missingAudit.events) | Where-Object { $_.action -eq "bank_receipt_uploaded" } | Select-Object -First 1
+  $resolvedAudit = @($missingAudit.events) | Where-Object { $_.action -eq "bank_match_confirmed" } | Select-Object -Last 1
+  if (-not $uploadedAudit -or -not $resolvedAudit -or $resolvedAudit.receipt_id -ne $exceptionReceiptId) {
+    throw "Missing receipt workflow did not preserve the expected upload and confirmation audit history."
+  }
+
   Write-Host ""
   Write-Host "END-TO-END PAID-ALPHA SMOKE TEST PASSED" -ForegroundColor Green
-  Write-Host "Receipt -> R2 -> Workers AI -> line items -> validation -> review -> filed ledger -> P&L -> source drill-down -> CSV -> normalized bank transaction -> duplicate protection -> suggested match -> explicit confirmation -> audit"
+  Write-Host "BANK EXCEPTION WORKFLOW PRODUCTION VERIFICATION PASSED" -ForegroundColor Green
+  Write-Host "Receipt -> R2 -> Workers AI -> line items -> validation -> review -> filed ledger -> P&L -> source drill-down -> CSV -> duplicate protection -> suggested match -> explicit confirmation -> exception inbox -> missing receipt upload -> receipt review -> resolved match -> documented no-receipt resolution -> audit"
   Write-Host "Test account: $email"
   Write-Host "Test password: $password"
   Write-Host "Test client:  $clientId"
-  Write-Host "P&L expenses: $pnlExpenses"
-  Write-Host "Bank transaction: $bankTransactionId"
+  Write-Host "P&L expenses before exception receipt: $pnlExpenses"
+  Write-Host "Matched bank transaction: $bankTransactionId"
+  Write-Host "Resolved missing receipt transaction: $missingTransactionId"
+  Write-Host "No-receipt-required transaction: $noReceiptTransactionId"
 } finally {
   Remove-TempFile $cookieJar
   Remove-TempFile $signupPayloadPath
@@ -354,7 +478,9 @@ try {
   Remove-TempFile $approvePayloadPath
   Remove-TempFile $bankDecisionPayloadPath
   Remove-TempFile $bankMappingPayloadPath
+  Remove-TempFile $noReceiptDecisionPayloadPath
   Remove-TempFile $bankCsvPath
+  Remove-TempFile $bankExceptionCsvPath
   if ($generatedReceipt) {
     Remove-TempFile $ReceiptPath
   }

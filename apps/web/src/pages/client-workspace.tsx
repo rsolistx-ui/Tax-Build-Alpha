@@ -240,7 +240,16 @@ export function ClientWorkspacePage() {
         )
       ) : null}
 
-      {tab === "bank" ? <BankReconciliation clientId={clientId} /> : null}
+      {tab === "bank" ? (
+        <BankReconciliation
+          clientId={clientId}
+          onReceiptAdded={() => void load()}
+          onOpenReview={() => {
+            setTab("review");
+            void load();
+          }}
+        />
+      ) : null}
 
       {tab === "pnl" ? (
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(380px,0.8fr)]">
