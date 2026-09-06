@@ -13,7 +13,7 @@ import {
   type BankColumnMapping,
   type NormalizedBankRow,
 } from "../services/bank-csv";
-import { planClassifyBankTransaction, planAttachBankSourceToReceiptLedgerEntry, planDetachReceiptFromBankLedgerEntry } from "../services/ledger";
+import { planClassifyBankTransaction, planAttachBankSourceToReceiptLedgerEntry, planDetachReceiptFromBankLedgerEntry, planEnsureLedgerEntryForBankTransaction } from "../services/ledger";
 import {
   suggestReceiptMatch,
   type ReceiptMatchCandidate,
@@ -175,9 +175,16 @@ bankRoutes.get("/:clientId/bank-transactions/:transactionId/receipt-options", as
     `SELECT id, status, extracted_date, extracted_merchant, extracted_total, filename, created_at
      FROM receipts
      WHERE client_id = $1 AND status IN ('review', 'filed')
+       AND id NOT IN (
+         SELECT matched_receipt_id FROM bank_transactions
+         WHERE client_id = $1 AND matched_receipt_id IS NOT NULL AND id != $2
+         UNION
+         SELECT pending_receipt_id FROM bank_transactions
+         WHERE client_id = $1 AND pending_receipt_id IS NOT NULL AND id != $2
+       )
      ORDER BY created_at DESC
      LIMIT 200`,
-    [client.id],
+    [client.id, transactionId],
   );
 
   const options = receipts
@@ -391,6 +398,11 @@ bankRoutes.post("/:clientId/bank-transactions/:transactionId/decision", async (c
       [receiptId, client.id],
     );
     if (!receipt) return c.json({ error: "Filed receipt evidence was not found" }, 404);
+    try {
+      await checkReceiptNotAlreadyClaimed(db, client.id, receiptId, transactionId);
+    } catch {
+      return c.json({ error: "Receipt is already matched to another bank transaction" }, 409);
+    }
 
     const afterSnapshot = {
       ...before,
@@ -436,6 +448,11 @@ bankRoutes.post("/:clientId/bank-transactions/:transactionId/decision", async (c
       [body.receiptId, client.id],
     );
     if (!receipt) return c.json({ error: "Receipt evidence was not found" }, 404);
+    try {
+      await checkReceiptNotAlreadyClaimed(db, client.id, receipt.id, transactionId);
+    } catch {
+      return c.json({ error: "Receipt is already matched to another bank transaction" }, 409);
+    }
 
     if (receipt.status === "filed") {
       const afterSnapshot = {
@@ -545,8 +562,11 @@ bankRoutes.post("/:clientId/bank-transactions/:transactionId/decision", async (c
       },
     ];
 
-    const detachStatement = await planDetachReceiptFromBankLedgerEntry(db, client.id, transactionId);
-    if (detachStatement) statements.push(detachStatement);
+    const detachStatements = await planDetachReceiptFromBankLedgerEntry(db, client.id, transactionId, userId);
+    statements.push(...detachStatements);
+
+    const ensureLedgerStatements = await planEnsureLedgerEntryForBankTransaction(db, client.id, transactionId, userId);
+    statements.push(...ensureLedgerStatements);
 
     statements.push({
       query: `INSERT INTO audit_events
@@ -587,8 +607,8 @@ bankRoutes.post("/:clientId/bank-transactions/:transactionId/decision", async (c
     },
   ];
 
-  const rejectDetachStatement = await planDetachReceiptFromBankLedgerEntry(db, client.id, transactionId);
-  if (rejectDetachStatement) rejectStatements.push(rejectDetachStatement);
+  const rejectDetachStatements = await planDetachReceiptFromBankLedgerEntry(db, client.id, transactionId, userId);
+  rejectStatements.push(...rejectDetachStatements);
 
   rejectStatements.push({
     query: `INSERT INTO audit_events
@@ -690,6 +710,31 @@ async function checkPeriodOpen(db: ReturnType<typeof createDb>, clientId: string
   );
   if (period?.state === "closed") {
     throw new Error("Period is closed");
+  }
+}
+
+/**
+ * A receipt can back at most one active bank relationship (matched or
+ * receipt_pending) at a time. Called before confirm/link_receipt writes so
+ * a second bank transaction cannot silently claim a receipt another
+ * transaction already owns, which would otherwise leave bank reconciliation
+ * state inconsistent with the canonical ledger.
+ */
+async function checkReceiptNotAlreadyClaimed(
+  db: ReturnType<typeof createDb>,
+  clientId: string,
+  receiptId: string,
+  excludeTransactionId: string,
+): Promise<void> {
+  const [claim] = await db.query<{ id: string }>(
+    `SELECT id FROM bank_transactions
+     WHERE client_id = $1 AND id != $2
+       AND (matched_receipt_id = $3 OR pending_receipt_id = $3)
+     LIMIT 1`,
+    [clientId, excludeTransactionId, receiptId],
+  );
+  if (claim) {
+    throw new Error("Receipt is already matched to another bank transaction");
   }
 }
 

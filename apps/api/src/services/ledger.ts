@@ -464,14 +464,18 @@ export async function planAttachBankSourceToReceiptLedgerEntry(
   );
 
   if (receiptOnlyEntry && bankOnlyEntry) {
+    // The receipt-only row must be removed BEFORE the bank-owned row claims
+    // its receipt_id: uq_ledger_source_receipt is checked immediately per
+    // statement, and both rows would briefly hold the same receipt_id if
+    // the update ran first.
     return [
-      {
-        query: `UPDATE ledger_entries SET source_receipt_id = $1 WHERE id = $2`,
-        params: [receiptId, bankOnlyEntry.id],
-      },
       {
         query: `DELETE FROM ledger_entries WHERE id = $1`,
         params: [receiptOnlyEntry.id],
+      },
+      {
+        query: `UPDATE ledger_entries SET source_receipt_id = $1 WHERE id = $2`,
+        params: [receiptId, bankOnlyEntry.id],
       },
     ];
   }
@@ -507,24 +511,132 @@ export async function planAttachBankSourceToReceiptLedgerEntry(
  * receipt evidence for this bank transaction must be unlinked from it so the
  * ledger no longer claims evidence the bank state no longer agrees with. The
  * bank-sourced ledger row itself (if any) is kept, since the cash movement is
- * still real; only the stale receipt reference is detached.
+ * still real. If the previously attached receipt is filed, it is still valid
+ * evidence on its own, so its own canonical ledger row is recreated rather
+ * than letting the receipt silently disappear from the ledger and P&L.
  */
 export async function planDetachReceiptFromBankLedgerEntry(
   db: Db,
   clientId: string,
   bankTransactionId: string,
-): Promise<DbStatement | null> {
-  const [entry] = await db.query<{ id: string }>(
-    `SELECT id FROM ledger_entries
+  userId: string,
+): Promise<DbStatement[]> {
+  const [entry] = await db.query<{ id: string; source_receipt_id: string | null }>(
+    `SELECT id, source_receipt_id FROM ledger_entries
      WHERE client_id = $1
        AND source_bank_transaction_id = $2
        AND source_receipt_id IS NOT NULL`,
     [clientId, bankTransactionId],
   );
-  if (!entry) return null;
+  if (!entry || !entry.source_receipt_id) return [];
+  const receiptId = entry.source_receipt_id;
 
-  return {
-    query: `UPDATE ledger_entries SET source_receipt_id = NULL WHERE id = $1`,
-    params: [entry.id],
-  };
+  const statements: DbStatement[] = [
+    {
+      query: `UPDATE ledger_entries SET source_receipt_id = NULL WHERE id = $1`,
+      params: [entry.id],
+    },
+  ];
+
+  const [existingReceiptOnly] = await db.query<{ id: string }>(
+    `SELECT id FROM ledger_entries WHERE client_id = $1 AND source_receipt_id = $2`,
+    [clientId, receiptId],
+  );
+  if (existingReceiptOnly) return statements;
+
+  const [receipt] = await db.query<{
+    extracted_date: string | null;
+    extracted_merchant: string | null;
+    extracted_total: number | null;
+    extracted_currency: string | null;
+    category_id: string | null;
+    accounting_class: string | null;
+    treatment: string | null;
+    status: string;
+  }>(
+    `SELECT extracted_date, extracted_merchant, extracted_total, extracted_currency,
+            category_id, accounting_class, treatment, status
+     FROM receipts WHERE id = $1 AND client_id = $2`,
+    [receiptId, clientId],
+  );
+  if (!receipt || receipt.status !== "filed" || !receipt.extracted_date || receipt.extracted_total === null) {
+    return statements;
+  }
+
+  const periodKey = receipt.extracted_date.slice(0, 7);
+  statements.push(buildEnsurePeriodStatement(clientId, periodKey));
+  statements.push(
+    buildCreateLedgerEntryStatement({
+      clientId,
+      periodKey,
+      entryDate: receipt.extracted_date,
+      description: receipt.extracted_merchant || "Receipt",
+      amount: Number(receipt.extracted_total),
+      currency: receipt.extracted_currency || "USD",
+      accountingClass:
+        (receipt.accounting_class as
+          | "expense" | "income" | "transfer" | "owner_contribution" | "owner_draw" | "needs_review"
+          | null) || "expense",
+      treatment: (receipt.treatment as "business" | "personal" | null) || "business",
+      categoryId: receipt.category_id,
+      source: { type: "receipt", receiptId },
+      createdByUserId: userId,
+    }).statement,
+  );
+
+  return statements;
+}
+
+/**
+ * A bank transaction resolved as "no receipt required" is still real cash
+ * movement that belongs in the books. If nothing has created a ledger row
+ * for it yet, create one defaulting to needs_review/business so it cannot
+ * silently vanish from the ledger and the period cannot close around it; the
+ * professional then classifies it explicitly from the Transactions view. If
+ * a row already exists (e.g. it was previously classified), it is left
+ * untouched rather than downgraded back to needs_review.
+ */
+export async function planEnsureLedgerEntryForBankTransaction(
+  db: Db,
+  clientId: string,
+  bankTransactionId: string,
+  userId: string,
+): Promise<DbStatement[]> {
+  const [existing] = await db.query<{ id: string }>(
+    `SELECT id FROM ledger_entries WHERE client_id = $1 AND source_bank_transaction_id = $2`,
+    [clientId, bankTransactionId],
+  );
+  if (existing) return [];
+
+  const [bt] = await db.query<{
+    id: string;
+    txn_date: string | null;
+    description: string;
+    amount: number;
+    currency: string;
+    category_id: string | null;
+  }>(
+    `SELECT id, txn_date, description, amount, currency, category_id
+     FROM bank_transactions WHERE id = $1 AND client_id = $2`,
+    [bankTransactionId, clientId],
+  );
+  if (!bt || !bt.txn_date) return [];
+
+  const periodKey = bt.txn_date.slice(0, 7);
+  return [
+    buildEnsurePeriodStatement(clientId, periodKey),
+    buildCreateLedgerEntryStatement({
+      clientId,
+      periodKey,
+      entryDate: bt.txn_date,
+      description: bt.description,
+      amount: Math.abs(bt.amount),
+      currency: bt.currency,
+      accountingClass: "needs_review",
+      treatment: "business",
+      categoryId: bt.category_id,
+      source: { type: "bank_transaction", bankTransactionId: bt.id },
+      createdByUserId: userId,
+    }).statement,
+  ];
 }

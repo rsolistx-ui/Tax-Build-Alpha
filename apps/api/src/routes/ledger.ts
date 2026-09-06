@@ -164,6 +164,14 @@ ledgerRoutes.patch("/:clientId/ledger/:entryId/classify", async (c) => {
     return c.json({ error: "Cannot mutate accounting in a closed period" }, 409);
   }
 
+  if (body.categoryId) {
+    const [category] = await db.query<{ id: string }>(
+      `SELECT id FROM categories WHERE id = $1 AND client_id = $2`,
+      [body.categoryId, client.id],
+    );
+    if (!category) return c.json({ error: "Category not found" }, 404);
+  }
+
   const [before] = await db.query<Record<string, unknown>>(
     `SELECT * FROM ledger_entries WHERE id = $1 AND client_id = $2`,
     [entryId, client.id],

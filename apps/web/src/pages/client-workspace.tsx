@@ -21,6 +21,7 @@ type PeriodState = { state: "open" | "closed"; canClose: boolean };
 export type ClientOutletContext = {
   currentPeriod: string | undefined;
   onPeriodChange: (period: string) => void;
+  ledgerVersion: number;
 };
 
 export function ClientWorkspacePage() {
@@ -35,6 +36,7 @@ export function ClientWorkspacePage() {
     needsReview: 0,
   });
   const [periodState, setPeriodState] = useState<PeriodState | null>(null);
+  const [ledgerVersion, setLedgerVersion] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   async function load() {
@@ -110,6 +112,7 @@ export function ClientWorkspacePage() {
     try {
       await api(`/api/clients/${clientId}/periods/${currentPeriod}/close`, { method: "POST", body: "{}" });
       await loadStatusSummary(currentPeriod);
+      setLedgerVersion((v) => v + 1);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not close the period");
     }
@@ -126,6 +129,7 @@ export function ClientWorkspacePage() {
         body: JSON.stringify({ reason: reason.trim() }),
       });
       await loadStatusSummary(currentPeriod);
+      setLedgerVersion((v) => v + 1);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not reopen the period");
     }
@@ -165,7 +169,7 @@ export function ClientWorkspacePage() {
           {error}
         </div>
       ) : (
-        <Outlet context={{ currentPeriod: currentPeriod || undefined, onPeriodChange: handlePeriodChange } satisfies ClientOutletContext} />
+        <Outlet context={{ currentPeriod: currentPeriod || undefined, onPeriodChange: handlePeriodChange, ledgerVersion } satisfies ClientOutletContext} />
       )}
     </>
   );

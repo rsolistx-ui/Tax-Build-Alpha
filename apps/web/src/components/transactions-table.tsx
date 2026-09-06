@@ -97,10 +97,12 @@ export function TransactionsTable({
   clientId,
   initialPeriod,
   onPeriodChange,
+  refreshToken,
 }: {
   clientId: string;
   initialPeriod?: string;
   onPeriodChange?: (period: string) => void;
+  refreshToken?: number;
 }) {
   const [entries, setEntries] = useState<LedgerEntry[]>([]);
   const [total, setTotal] = useState(0);
@@ -184,7 +186,7 @@ export function TransactionsTable({
   useEffect(() => {
     loadEntries();
     setSelectedIds(new Set());
-  }, [clientId, filters]);
+  }, [clientId, filters, refreshToken]);
 
   function setPage(page: number) {
     setFilters(f => ({ ...f, page }));
