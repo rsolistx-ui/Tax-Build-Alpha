@@ -47,7 +47,11 @@ test("Tauri desktop configuration and source contain no secrets or credentials",
 test("Tauri window loads the real production origin, not a local or bundled frontend", async () => {
   const confPath = path.join(tauriDir, "tauri.conf.json");
   const conf = JSON.parse(await readFile(confPath, "utf8"));
-  const windowUrl = conf.app?.windows?.[0]?.url;
-  assert.ok(windowUrl, "expected app.windows[0].url to be set");
-  assert.match(windowUrl, /^https:\/\/folio-api\.rsolistx\.workers\.dev/);
+  assert.match(conf.build.frontendDist, /^https:\/\/folio-api\.rsolistx\.workers\.dev/);
+
+  const libRsPath = path.join(tauriDir, "src", "lib.rs");
+  const libRs = await readFile(libRsPath, "utf8");
+  assert.match(libRs, /PRODUCTION_URL:\s*&str\s*=\s*"https:\/\/folio-api\.rsolistx\.workers\.dev"/);
+  assert.match(libRs, /ALLOWED_HOST:\s*&str\s*=\s*"folio-api\.rsolistx\.workers\.dev"/);
+  assert.match(libRs, /on_navigation/, "expected the desktop window to restrict navigation to the production origin");
 });
