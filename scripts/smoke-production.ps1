@@ -852,7 +852,7 @@ try {
   if ($pnlAccrual.accrualSupported -ne $false -or -not $pnlAccrual.warning) {
     throw "An accrual-basis client must receive an explicit unsupported warning, not a cash-derived P&L."
   }
-  if ($null -ne $pnlAccrual.income -or $null -ne $pnlAccrual.expenses) {
+  if (($pnlAccrual.PSObject.Properties.Name -contains "income") -or ($pnlAccrual.PSObject.Properties.Name -contains "expenses")) {
     throw "An accrual-basis client must never receive cash-derived income/expense figures presented as accrual."
   }
 
