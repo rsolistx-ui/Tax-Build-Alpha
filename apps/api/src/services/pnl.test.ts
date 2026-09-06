@@ -12,6 +12,7 @@ import {
   isAccrualBasisSupported,
   isValidCalendarDate,
   isCurrencyMismatch,
+  normalizeCurrencyCode,
   type BankTxnForPnl,
 } from "./pnl";
 
@@ -239,8 +240,9 @@ describe("computeCompleteness", () => {
     ];
     const completeness = computeCompleteness({
       transactions,
+      clientCurrency: "USD",
       uncategorizedReceiptLineCount: 0,
-      currencyConflictCount: 0,
+      receiptCurrencyConflictCount: 0,
     });
     expect(completeness).toEqual({
       unclassifiedCount: 1,
@@ -259,8 +261,9 @@ describe("computeCompleteness", () => {
     ];
     const completeness = computeCompleteness({
       transactions,
+      clientCurrency: "USD",
       uncategorizedReceiptLineCount: 0,
-      currencyConflictCount: 0,
+      receiptCurrencyConflictCount: 0,
     });
     expect(completeness.uncategorizedCount).toBe(2);
     expect(completeness.isComplete).toBe(false);
@@ -270,8 +273,9 @@ describe("computeCompleteness", () => {
     const transactions = [txn({ id: "1", disposition: "personal", triage: "matched", categoryId: null })];
     const completeness = computeCompleteness({
       transactions,
+      clientCurrency: "USD",
       uncategorizedReceiptLineCount: 0,
-      currencyConflictCount: 0,
+      receiptCurrencyConflictCount: 0,
     });
     expect(completeness.uncategorizedCount).toBe(0);
     expect(completeness.isComplete).toBe(true);
@@ -280,8 +284,9 @@ describe("computeCompleteness", () => {
   it("includes uncategorized filed-receipt expense lines in the count and blocks completeness", () => {
     const completeness = computeCompleteness({
       transactions: [],
+      clientCurrency: "USD",
       uncategorizedReceiptLineCount: 3,
-      currencyConflictCount: 0,
+      receiptCurrencyConflictCount: 0,
     });
     expect(completeness.uncategorizedCount).toBe(3);
     expect(completeness.isComplete).toBe(false);
@@ -290,8 +295,9 @@ describe("computeCompleteness", () => {
   it("blocks completeness when there is a currency conflict", () => {
     const completeness = computeCompleteness({
       transactions: [],
+      clientCurrency: "USD",
       uncategorizedReceiptLineCount: 0,
-      currencyConflictCount: 1,
+      receiptCurrencyConflictCount: 1,
     });
     expect(completeness.isComplete).toBe(false);
   });
@@ -303,10 +309,81 @@ describe("computeCompleteness", () => {
     ];
     const completeness = computeCompleteness({
       transactions,
+      clientCurrency: "USD",
       uncategorizedReceiptLineCount: 0,
-      currencyConflictCount: 0,
+      receiptCurrencyConflictCount: 0,
     });
     expect(completeness.isComplete).toBe(true);
+  });
+
+  it("does not let a foreign-currency unclassified transaction disappear from completeness", () => {
+    const transactions = [txn({ id: "1", disposition: "unclassified", triage: "unmatched", currency: "EUR" })];
+    const completeness = computeCompleteness({
+      transactions,
+      clientCurrency: "USD",
+      uncategorizedReceiptLineCount: 0,
+      receiptCurrencyConflictCount: 0,
+    });
+    expect(completeness.unclassifiedCount).toBe(1);
+    expect(completeness.isComplete).toBe(false);
+  });
+
+  it("does not let a foreign-currency unresolved-triage transaction disappear from completeness", () => {
+    const transactions = [
+      txn({ id: "1", disposition: "business_expense", triage: "needs_review", categoryId: "cat_1", currency: "EUR" }),
+    ];
+    const completeness = computeCompleteness({
+      transactions,
+      clientCurrency: "USD",
+      uncategorizedReceiptLineCount: 0,
+      receiptCurrencyConflictCount: 0,
+    });
+    expect(completeness.unresolvedTriageCount).toBe(1);
+    expect(completeness.isComplete).toBe(false);
+  });
+
+  it("counts explicitly classified foreign-currency business activity as a currency conflict", () => {
+    const transactions = [
+      txn({ id: "1", disposition: "business_expense", triage: "no_receipt_required", categoryId: "cat_1", currency: "EUR" }),
+      txn({ id: "2", disposition: "business_income", triage: "matched", categoryId: "cat_1", currency: "eur" }),
+    ];
+    const completeness = computeCompleteness({
+      transactions,
+      clientCurrency: "USD",
+      uncategorizedReceiptLineCount: 0,
+      receiptCurrencyConflictCount: 0,
+    });
+    expect(completeness.currencyConflictCount).toBe(2);
+    expect(completeness.isComplete).toBe(false);
+  });
+
+  it("does not flag foreign-currency personal/excluded activity as a currency conflict", () => {
+    const transactions = [
+      txn({ id: "1", disposition: "personal", triage: "matched", currency: "EUR" }),
+      txn({ id: "2", disposition: "transfer", triage: "matched", currency: "GBP" }),
+    ];
+    const completeness = computeCompleteness({
+      transactions,
+      clientCurrency: "USD",
+      uncategorizedReceiptLineCount: 0,
+      receiptCurrencyConflictCount: 0,
+    });
+    expect(completeness.currencyConflictCount).toBe(0);
+    expect(completeness.isComplete).toBe(true);
+  });
+
+  it("does not double-flag a foreign-currency business transaction as also uncategorized", () => {
+    const transactions = [
+      txn({ id: "1", disposition: "business_expense", triage: "no_receipt_required", categoryId: null, currency: "EUR" }),
+    ];
+    const completeness = computeCompleteness({
+      transactions,
+      clientCurrency: "USD",
+      uncategorizedReceiptLineCount: 0,
+      receiptCurrencyConflictCount: 0,
+    });
+    expect(completeness.currencyConflictCount).toBe(1);
+    expect(completeness.uncategorizedCount).toBe(0);
   });
 });
 
@@ -367,5 +444,27 @@ describe("isCurrencyMismatch", () => {
 
   it("is true when currencies differ", () => {
     expect(isCurrencyMismatch("EUR", "USD")).toBe(true);
+  });
+});
+
+describe("normalizeCurrencyCode", () => {
+  it("normalizes lowercase currency codes to uppercase", () => {
+    expect(normalizeCurrencyCode("usd")).toBe("USD");
+  });
+
+  it("normalizes mixed-case currency codes to uppercase", () => {
+    expect(normalizeCurrencyCode("Usd")).toBe("USD");
+  });
+
+  it("rejects a value with a digit", () => {
+    expect(normalizeCurrencyCode("US1")).toBeNull();
+  });
+
+  it("rejects a value that is too short", () => {
+    expect(normalizeCurrencyCode("US")).toBeNull();
+  });
+
+  it("rejects a value that is too long", () => {
+    expect(normalizeCurrencyCode("USDD")).toBeNull();
   });
 });

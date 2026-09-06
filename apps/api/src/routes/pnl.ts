@@ -23,6 +23,16 @@ import {
 export const pnlRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 pnlRoutes.use("*", requireSession);
 
+const CONFLICTING_DISPOSITIONS = [
+  "personal",
+  "transfer",
+  "owner_contribution",
+  "owner_draw",
+  "loan",
+  "other_excluded",
+  "business_income",
+] as const;
+
 /**
  * Build the expense ledger from approved evidence while preserving an exact
  * receipt-total reconciliation.
@@ -40,7 +50,8 @@ pnlRoutes.use("*", requireSession);
  * professional's bank-side decision wins, and the P&L never silently keeps
  * it as a business expense. Receipts in a currency other than the client's
  * configured default are also excluded, surfaced instead as a currency
- * conflict for deliberate resolution.
+ * conflict for deliberate resolution. Currency comparisons are
+ * case-insensitive so legacy lowercase currency codes never slip through.
  */
 const expenseLinesCte = `
 WITH line_sums AS (
@@ -78,7 +89,7 @@ expense_lines AS (
     AND (LOWER(cat_li.slug) = LOWER(NULLIF(li.category, '')) OR LOWER(cat_li.name) = LOWER(NULLIF(li.category, '')))
   LEFT JOIN categories cat_receipt ON cat_receipt.id = r.category_id
   WHERE r.client_id = $1 AND r.status = 'filed'
-    AND r.extracted_currency = $4
+    AND UPPER(r.extracted_currency) = UPPER($4)
     AND NOT EXISTS (SELECT 1 FROM receipt_conflict rc WHERE rc.receipt_id = r.id)
     AND ($2::date IS NULL OR r.extracted_date >= $2::date)
     AND ($3::date IS NULL OR r.extracted_date <= $3::date)
@@ -100,7 +111,7 @@ expense_lines AS (
   LEFT JOIN categories cat_receipt ON cat_receipt.id = r.category_id
   WHERE r.client_id = $1
     AND r.status = 'filed'
-    AND r.extracted_currency = $4
+    AND UPPER(r.extracted_currency) = UPPER($4)
     AND s.line_count > 0
     AND ABS(COALESCE(r.extracted_total, s.line_sum) - s.line_sum) > 0.004
     AND NOT EXISTS (SELECT 1 FROM receipt_conflict rc WHERE rc.receipt_id = r.id)
@@ -124,7 +135,7 @@ expense_lines AS (
   LEFT JOIN categories cat_receipt ON cat_receipt.id = r.category_id
   WHERE r.client_id = $1
     AND r.status = 'filed'
-    AND r.extracted_currency = $4
+    AND UPPER(r.extracted_currency) = UPPER($4)
     AND s.line_count = 0
     AND NOT EXISTS (SELECT 1 FROM receipt_conflict rc WHERE rc.receipt_id = r.id)
     AND ($2::date IS NULL OR r.extracted_date >= $2::date)
@@ -158,7 +169,7 @@ pnlRoutes.get("/:clientId/pnl", async (c) => {
     `SELECT accounting_basis, default_currency FROM client_profiles WHERE client_id = $1`,
     [clientId],
   );
-  const clientCurrency = profile?.default_currency || "USD";
+  const clientCurrency = (profile?.default_currency || "USD").toUpperCase();
 
   if (!isAccrualBasisSupported(profile?.accounting_basis ?? null)) {
     return c.json({
@@ -189,7 +200,7 @@ pnlRoutes.get("/:clientId/pnl", async (c) => {
   const filedReceiptCountResult = await db.query<{ count: string }>(
     `SELECT COUNT(DISTINCT r.id)::text AS count
      FROM receipts r
-     WHERE r.client_id = $1 AND r.status = 'filed' AND r.extracted_currency = $4
+     WHERE r.client_id = $1 AND r.status = 'filed' AND UPPER(r.extracted_currency) = UPPER($4)
        AND ($2::date IS NULL OR r.extracted_date >= $2::date)
        AND ($3::date IS NULL OR r.extracted_date <= $3::date)`,
     [clientId, startDate, endDate, clientCurrency],
@@ -199,12 +210,43 @@ pnlRoutes.get("/:clientId/pnl", async (c) => {
   const receiptCurrencyConflictResult = await db.query<{ count: string }>(
     `SELECT COUNT(DISTINCT r.id)::text AS count
      FROM receipts r
-     WHERE r.client_id = $1 AND r.status = 'filed' AND r.extracted_currency != $4
+     WHERE r.client_id = $1 AND r.status = 'filed' AND UPPER(r.extracted_currency) != UPPER($4)
        AND ($2::date IS NULL OR r.extracted_date >= $2::date)
        AND ($3::date IS NULL OR r.extracted_date <= $3::date)`,
     [clientId, startDate, endDate, clientCurrency],
   );
   const receiptCurrencyConflictCount = parseInt(receiptCurrencyConflictResult[0]?.count || "0", 10);
+
+  const excludedReceiptRows = await db.query<{
+    receipt_id: string;
+    merchant: string | null;
+    date: string | null;
+    amount: number | null;
+    filename: string;
+    bank_transaction_id: string;
+    bank_disposition: AnyDisposition;
+  }>(
+    `SELECT r.id AS receipt_id, r.extracted_merchant AS merchant, r.extracted_date AS date,
+            r.extracted_total AS amount, r.filename, bt.id AS bank_transaction_id, bt.disposition AS bank_disposition
+     FROM receipts r
+     JOIN bank_transactions bt ON bt.matched_receipt_id = r.id AND bt.client_id = r.client_id
+     WHERE r.client_id = $1 AND r.status = 'filed'
+       AND bt.disposition IN ('personal', 'transfer', 'owner_contribution', 'owner_draw', 'loan', 'other_excluded', 'business_income')
+       AND ($2::date IS NULL OR r.extracted_date >= $2::date)
+       AND ($3::date IS NULL OR r.extracted_date <= $3::date)
+     ORDER BY r.extracted_date DESC NULLS LAST`,
+    [clientId, startDate, endDate],
+  );
+  const excludedFiledReceipts = excludedReceiptRows.map((row) => ({
+    receiptId: row.receipt_id,
+    merchant: row.merchant,
+    date: row.date,
+    amount: row.amount === null ? null : Number(row.amount),
+    filename: row.filename,
+    bankTransactionId: row.bank_transaction_id,
+    bankDisposition: row.bank_disposition,
+    sourceUrl: `/api/clients/${clientId}/receipts/${row.receipt_id}/source`,
+  }));
 
   const bankRows = await db.query<{
     id: string;
@@ -230,12 +272,13 @@ pnlRoutes.get("/:clientId/pnl", async (c) => {
     triage: row.triage,
     categoryId: row.category_id,
     categoryName: row.category_name,
-    currency: row.currency || "USD",
+    currency: (row.currency || "USD").toUpperCase(),
   }));
+
+  // Completeness must see every relevant transaction in the period before
+  // any currency exclusion happens, so an unclassified or unresolved-triage
+  // transaction in a foreign currency can never disappear from the report.
   const bankTxnsInRangeAllCurrencies = filterByDateRange(bankTxns, startDate, endDate);
-  const bankCurrencyConflictCount = bankTxnsInRangeAllCurrencies.filter(
-    (t) => (t.disposition === "business_expense" || t.disposition === "business_income") && isCurrencyMismatch(t.currency, clientCurrency),
-  ).length;
   const bankTxnsInRange = bankTxnsInRangeAllCurrencies.filter((t) => !isCurrencyMismatch(t.currency, clientCurrency));
 
   const bankExpenseTxns = selectBankExpenseTransactions(bankTxnsInRange);
@@ -261,15 +304,16 @@ pnlRoutes.get("/:clientId/pnl", async (c) => {
     }
   }
 
-  const bankIncomeByCategory = new Map<string, { category: string; count: number; total: number }>();
+  const bankIncomeByCategory = new Map<string, { categoryId: string | null; category: string; count: number; total: number }>();
   for (const txn of bankIncomeTxns) {
-    const key = (txn.categoryName || "Uncategorized").toLowerCase();
+    const key = txn.categoryId ?? "__uncategorized__";
     const existing = bankIncomeByCategory.get(key);
     if (existing) {
       existing.count += 1;
       existing.total += Number(txn.amount);
     } else {
       bankIncomeByCategory.set(key, {
+        categoryId: txn.categoryId,
         category: txn.categoryName || "Uncategorized",
         count: 1,
         total: Number(txn.amount),
@@ -289,11 +333,16 @@ pnlRoutes.get("/:clientId/pnl", async (c) => {
   );
   const categorizedIncome = Array.from(bankIncomeByCategory.values()).sort((a, b) => b.total - a.total);
 
-  const currencyConflictCount = receiptCurrencyConflictCount + bankCurrencyConflictCount;
   const completeness = computeCompleteness({
-    transactions: bankTxnsInRange.map((t) => ({ disposition: t.disposition, triage: t.triage, categoryId: t.categoryId })),
+    transactions: bankTxnsInRangeAllCurrencies.map((t) => ({
+      disposition: t.disposition,
+      triage: t.triage,
+      categoryId: t.categoryId,
+      currency: t.currency,
+    })),
+    clientCurrency,
     uncategorizedReceiptLineCount,
-    currencyConflictCount,
+    receiptCurrencyConflictCount,
   });
   const matchedBankTransactionCount = bankTxnsInRange.filter((t) => t.triage === "matched").length;
 
@@ -315,7 +364,9 @@ pnlRoutes.get("/:clientId/pnl", async (c) => {
       businessIncomeTransactions: bankIncomeTxns.length,
     },
     completeness,
-    note: "Business income comes only from bank transactions explicitly classified business income. Business expenses combine filed receipt evidence with deliberately no-receipt bank transactions explicitly classified business expense. Personal, transfer, owner, loan, other-excluded, and unclassified activity are excluded. A filed receipt whose matched bank transaction was explicitly classified as personal, transfer, owner, loan, other-excluded, or business income is excluded from expenses and must be resolved by the professional. Activity in a currency other than the client's configured currency is excluded and counted as a currency conflict.",
+    excludedFiledReceiptCount: excludedFiledReceipts.length,
+    excludedFiledReceipts,
+    note: "Business income comes only from bank transactions explicitly classified business income. Business expenses combine filed receipt evidence with deliberately no-receipt bank transactions explicitly classified business expense. Personal, transfer, owner, loan, other-excluded, and unclassified activity are excluded. A filed receipt whose matched bank transaction was explicitly classified as personal, transfer, owner, loan, other-excluded, or business income is excluded from expenses; see excludedFiledReceipts for the affected evidence. Activity in a currency other than the client's configured currency is excluded and counted as a currency conflict.",
   });
 });
 
@@ -327,6 +378,7 @@ pnlRoutes.get("/:clientId/pnl/drilldown", async (c) => {
   if (!client) return c.json({ error: "Not found" }, 404);
   const category = c.req.query("category");
   if (!category) return c.json({ error: "category is required" }, 400);
+  const type = c.req.query("type") === "income" ? "income" : "expense";
   const startBound = parseDateBound(c.req.query("startDate"));
   const endBound = parseDateBound(c.req.query("endDate"));
   if (!startBound.ok) return c.json({ error: "startDate must be a valid calendar date in YYYY-MM-DD format" }, 400);
@@ -341,7 +393,46 @@ pnlRoutes.get("/:clientId/pnl/drilldown", async (c) => {
     `SELECT default_currency FROM client_profiles WHERE client_id = $1`,
     [clientId],
   );
-  const clientCurrency = profile?.default_currency || "USD";
+  const clientCurrency = (profile?.default_currency || "USD").toUpperCase();
+
+  if (type === "income") {
+    const incomeRows = await db.query<{
+      id: string;
+      txn_date: string | null;
+      description: string | null;
+      amount: number;
+      category_name: string | null;
+      disposition_note: string | null;
+      raw_json: unknown;
+      currency: string;
+    }>(
+      `SELECT bt.id, bt.txn_date, bt.description, bt.amount, cat.name AS category_name,
+              bt.disposition_note, bt.raw_json, bt.currency
+       FROM bank_transactions bt
+       LEFT JOIN categories cat ON cat.id = bt.category_id AND cat.client_id = bt.client_id
+       WHERE bt.client_id = $1
+         AND bt.disposition = 'business_income'
+         AND ((bt.category_id IS NULL AND $2 = 'Uncategorized') OR LOWER(COALESCE(cat.name, 'Uncategorized')) = LOWER($2))`,
+      [clientId, category],
+    );
+    const entries = filterByDateRange(
+      incomeRows
+        .filter((row) => !isCurrencyMismatch((row.currency || "USD").toUpperCase(), clientCurrency))
+        .map((row) => ({
+          date: row.txn_date ? String(row.txn_date) : null,
+          bankTransactionId: row.id,
+          description: row.description,
+          amount: Number(row.amount ?? 0),
+          reportedAmount: Number(row.amount ?? 0),
+          category: row.category_name || "Uncategorized",
+          dispositionNote: row.disposition_note,
+          rawImportedRow: row.raw_json ?? null,
+        })),
+      startDate,
+      endDate,
+    );
+    return c.json({ type: "income", category, entries });
+  }
 
   const entries = await db.query<{
     receipt_id: string;
@@ -385,7 +476,7 @@ pnlRoutes.get("/:clientId/pnl/drilldown", async (c) => {
   );
   const bankEntries = filterByDateRange(
     bankRows
-      .filter((row) => !isCurrencyMismatch(row.currency || "USD", clientCurrency))
+      .filter((row) => !isCurrencyMismatch((row.currency || "USD").toUpperCase(), clientCurrency))
       .map((row) => ({
         id: row.id,
         date: row.txn_date ? String(row.txn_date) : null,
@@ -400,6 +491,7 @@ pnlRoutes.get("/:clientId/pnl/drilldown", async (c) => {
   );
 
   return c.json({
+    type: "expense",
     category,
     entries: entries.map((entry) => ({
       receiptId: entry.receipt_id,

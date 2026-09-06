@@ -199,18 +199,39 @@ export type PnlCompleteness = {
  * A report is only complete when nothing is left for the professional to
  * decide: every transaction has a disposition, every bank exception is
  * resolved, every material business item is categorized, and nothing is
- * sitting in a currency the report can't safely combine. Excluded/personal
- * activity is never required to carry an expense category.
+ * sitting in a currency the report can't safely combine.
+ *
+ * Completeness must be evaluated on every relevant bank transaction in the
+ * period BEFORE any currency-based exclusion happens downstream. An
+ * unclassified or unresolved-triage transaction still needs a professional
+ * decision regardless of what currency it is in, so currency is never
+ * grounds to drop it from unclassifiedCount or unresolvedTriageCount. Once a
+ * transaction is explicitly classified business_expense or business_income,
+ * a foreign currency becomes its own decision the professional must resolve
+ * (currencyConflictCount) rather than being silently combined into the
+ * report. Explicitly personal/transfer/owner/loan/other-excluded activity
+ * never needs a category and is never a currency conflict, since it never
+ * enters the operating P&L regardless of currency.
  */
 export function computeCompleteness(input: {
-  transactions: Array<{ disposition: AnyDisposition; triage: string; categoryId: string | null }>;
+  transactions: Array<{ disposition: AnyDisposition; triage: string; categoryId: string | null; currency: string }>;
+  clientCurrency: string;
   uncategorizedReceiptLineCount: number;
-  currencyConflictCount: number;
+  receiptCurrencyConflictCount: number;
 }): PnlCompleteness {
   const unclassifiedCount = input.transactions.filter((t) => t.disposition === "unclassified").length;
   const unresolvedTriageCount = input.transactions.filter((t) => isUnresolvedTriage(t.triage)).length;
+
+  const isBusinessDisposition = (disposition: AnyDisposition) =>
+    disposition === "business_expense" || disposition === "business_income";
+
+  const bankCurrencyConflictCount = input.transactions.filter(
+    (t) => isBusinessDisposition(t.disposition) && isCurrencyMismatch(t.currency, input.clientCurrency),
+  ).length;
+  const currencyConflictCount = bankCurrencyConflictCount + input.receiptCurrencyConflictCount;
+
   const uncategorizedBankCount = input.transactions.filter(
-    (t) => (t.disposition === "business_expense" || t.disposition === "business_income") && !t.categoryId,
+    (t) => isBusinessDisposition(t.disposition) && !t.categoryId && !isCurrencyMismatch(t.currency, input.clientCurrency),
   ).length;
   const uncategorizedCount = uncategorizedBankCount + input.uncategorizedReceiptLineCount;
 
@@ -218,12 +239,12 @@ export function computeCompleteness(input: {
     unclassifiedCount,
     unresolvedTriageCount,
     uncategorizedCount,
-    currencyConflictCount: input.currencyConflictCount,
+    currencyConflictCount,
     isComplete:
       unclassifiedCount === 0 &&
       unresolvedTriageCount === 0 &&
       uncategorizedCount === 0 &&
-      input.currencyConflictCount === 0,
+      currencyConflictCount === 0,
   };
 }
 
@@ -247,4 +268,15 @@ export function isValidCalendarDate(value: string): boolean {
 
 export function isCurrencyMismatch(itemCurrency: string, clientCurrency: string): boolean {
   return itemCurrency.trim().toUpperCase() !== clientCurrency.trim().toUpperCase();
+}
+
+/**
+ * Canonical currency-code normalization for the API boundary: exactly three
+ * alphabetic characters, stored and returned uppercase. Anything else
+ * (wrong length, digits, symbols) is rejected outright rather than silently
+ * coerced, so a value like "US1" or "US" never becomes a false currency.
+ */
+export function normalizeCurrencyCode(value: string): string | null {
+  const trimmed = value.trim();
+  return /^[A-Za-z]{3}$/.test(trimmed) ? trimmed.toUpperCase() : null;
 }

@@ -42,6 +42,14 @@ categoryRoutes.post("/:clientId/categories", async (c) => {
     body.slug ??
     body.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
+  const [existingByName] = await db.query<{ id: string }>(
+    `SELECT id FROM categories WHERE client_id = $1 AND LOWER(name) = LOWER($2)`,
+    [clientId, body.name],
+  );
+  if (existingByName) {
+    return c.json({ error: "A category with this name already exists" }, 409);
+  }
+
   try {
     const [category] = await db.query(
       `INSERT INTO categories (id, client_id, name, slug, is_default, sort_order)
@@ -52,7 +60,7 @@ categoryRoutes.post("/:clientId/categories", async (c) => {
     return c.json({ category }, 201);
   } catch (error) {
     if (error instanceof Error && /unique|duplicate/i.test(error.message)) {
-      return c.json({ error: "Category slug already exists" }, 409);
+      return c.json({ error: "A category with this name or slug already exists" }, 409);
     }
     throw error;
   }
@@ -89,9 +97,16 @@ categoryRoutes.get("/:clientId/categories/:categoryId/evidence", async (c) => {
     extracted_total: number | null;
     extracted_currency: string;
     filename: string;
+    excluded_bank_disposition: string | null;
   }>(
-    `SELECT DISTINCT r.id, r.extracted_date, r.extracted_merchant, r.extracted_total, r.extracted_currency, r.filename
+    `SELECT DISTINCT r.id, r.extracted_date, r.extracted_merchant, r.extracted_total, r.extracted_currency, r.filename,
+            excluded_bt.disposition AS excluded_bank_disposition
      FROM receipts r
+     LEFT JOIN bank_transactions excluded_bt ON excluded_bt.matched_receipt_id = r.id
+       AND excluded_bt.client_id = r.client_id
+       AND excluded_bt.disposition IN (
+         'personal', 'transfer', 'owner_contribution', 'owner_draw', 'loan', 'other_excluded', 'business_income'
+       )
      WHERE r.client_id = $1
        AND r.status = 'filed'
        AND (
@@ -118,6 +133,10 @@ categoryRoutes.get("/:clientId/categories/:categoryId/evidence", async (c) => {
       filename: r.filename,
       category: category.name,
       sourceUrl: `/api/clients/${clientId}/receipts/${r.id}/source`,
+      excludedFromOperatingPnl: r.excluded_bank_disposition !== null,
+      excludedReason: r.excluded_bank_disposition
+        ? `Matched bank transaction classified ${r.excluded_bank_disposition.replace(/_/g, " ")}`
+        : null,
     })),
   });
 });

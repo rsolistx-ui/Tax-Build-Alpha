@@ -6,6 +6,7 @@ import type { AuthedVars } from "../middleware/session";
 import { requireSession } from "../middleware/session";
 import * as clients from "../services/clients";
 import { ensureFirm } from "../services/firm";
+import { normalizeCurrencyCode } from "../services/pnl";
 
 const createSchema = z.object({
   name: z.string().min(1).max(200),
@@ -25,7 +26,17 @@ const profileSchema = z.object({
   state: z.string().max(50).nullable().optional(),
   tax_year: z.number().int().min(2000).max(2100).nullable().optional(),
   accounting_basis: z.enum(["cash", "accrual"]).nullable().optional(),
-  default_currency: z.string().length(3).optional(),
+  default_currency: z
+    .string()
+    .transform((value, ctx) => {
+      const normalized = normalizeCurrencyCode(value);
+      if (normalized === null) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: "default_currency must be exactly three alphabetic characters" });
+        return z.NEVER;
+      }
+      return normalized;
+    })
+    .optional(),
   profile: z.record(z.unknown()).optional(),
 });
 
@@ -52,11 +63,14 @@ clientRoutes.get("/:id/profile", async (c) => {
   const client = await clients.getClient(db, c.req.param("id"), firm.id);
   if (!client) return c.json({ error: "Not found" }, 404);
 
-  const [profile] = await db.query(
+  const [profile] = await db.query<Record<string, unknown>>(
     `SELECT * FROM client_profiles WHERE client_id = $1`,
     [client.id],
   );
-  return c.json({ profile: profile ?? null });
+  const normalized = profile
+    ? { ...profile, default_currency: String(profile.default_currency ?? "USD").toUpperCase() }
+    : null;
+  return c.json({ profile: normalized });
 });
 
 clientRoutes.patch("/:id/profile", async (c) => {
@@ -78,7 +92,7 @@ clientRoutes.patch("/:id/profile", async (c) => {
     tax_year: body.tax_year !== undefined ? body.tax_year : current?.tax_year ?? null,
     accounting_basis:
       body.accounting_basis !== undefined ? body.accounting_basis : current?.accounting_basis ?? null,
-    default_currency: body.default_currency ?? String(current?.default_currency ?? "USD"),
+    default_currency: (body.default_currency ?? String(current?.default_currency ?? "USD")).toUpperCase(),
     profile: body.profile ?? (current?.profile as Record<string, unknown> | undefined) ?? {},
   };
 

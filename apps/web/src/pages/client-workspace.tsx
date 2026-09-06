@@ -71,7 +71,20 @@ type Pnl = {
     currencyConflictCount: number;
     isComplete: boolean;
   };
+  excludedFiledReceiptCount?: number;
+  excludedFiledReceipts?: ExcludedFiledReceipt[];
   note?: string;
+};
+
+type ExcludedFiledReceipt = {
+  receiptId: string;
+  merchant: string | null;
+  date: string | null;
+  amount: number | null;
+  filename: string;
+  bankTransactionId: string;
+  bankDisposition: string;
+  sourceUrl: string;
 };
 
 type DrilldownEntry = {
@@ -83,6 +96,17 @@ type DrilldownEntry = {
   description: string;
   amount: number;
   sourceUrl: string;
+};
+
+type IncomeDrilldownEntry = {
+  bankTransactionId: string;
+  date: string | null;
+  description: string | null;
+  amount: number;
+  reportedAmount: number;
+  category: string;
+  dispositionNote: string | null;
+  rawImportedRow: unknown;
 };
 
 type DrilldownBankEntry = {
@@ -103,6 +127,8 @@ type FolderReceipt = {
   filename: string;
   category: string;
   sourceUrl: string;
+  excludedFromOperatingPnl?: boolean;
+  excludedReason?: string | null;
 };
 
 type BatchStatus = "pending" | "processing" | "succeeded" | "failed";
@@ -156,7 +182,11 @@ export function ClientWorkspacePage() {
   const [pnlPreset, setPnlPreset] = useState<PnlPreset>("current_month");
   const [pnlCustomStart, setPnlCustomStart] = useState("");
   const [pnlCustomEnd, setPnlCustomEnd] = useState("");
-  const [drilldown, setDrilldown] = useState<{ category: string; entries: DrilldownEntry[]; bankEntries: DrilldownBankEntry[] } | null>(null);
+  const [drilldown, setDrilldown] = useState<
+    | { type: "expense"; category: string; entries: DrilldownEntry[]; bankEntries: DrilldownBankEntry[] }
+    | { type: "income"; category: string; entries: IncomeDrilldownEntry[] }
+    | null
+  >(null);
   const [error, setError] = useState<string | null>(null);
   const [batch, setBatch] = useState<BatchFile[]>([]);
   const [batchRunning, setBatchRunning] = useState(false);
@@ -237,11 +267,18 @@ export function ClientWorkspacePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, clientId, pnlRange.startDate, pnlRange.endDate, review.length]);
 
-  async function loadDrilldown(category: string) {
-    const params = new URLSearchParams({ category });
+  async function loadDrilldown(category: string, type: "expense" | "income" = "expense") {
+    const params = new URLSearchParams({ category, type });
     if (pnlRange.startDate) params.set("startDate", pnlRange.startDate);
     if (pnlRange.endDate) params.set("endDate", pnlRange.endDate);
-    const data = await api<{ category: string; entries: DrilldownEntry[]; bankEntries: DrilldownBankEntry[] }>(
+    if (type === "income") {
+      const data = await api<{ type: "income"; category: string; entries: IncomeDrilldownEntry[] }>(
+        `/api/clients/${clientId}/pnl/drilldown?${params.toString()}`,
+      );
+      setDrilldown(data);
+      return;
+    }
+    const data = await api<{ type: "expense"; category: string; entries: DrilldownEntry[]; bankEntries: DrilldownBankEntry[] }>(
       `/api/clients/${clientId}/pnl/drilldown?${params.toString()}`,
     );
     setDrilldown(data);
@@ -446,7 +483,14 @@ export function ClientWorkspacePage() {
                       {folderReceipts.map((receipt) => (
                         <tr key={receipt.id} className="border-b border-[var(--color-border)] last:border-0">
                           <td className="py-2 pr-3">{receipt.date || "\u2014"}</td>
-                          <td className="py-2 pr-3">{receipt.merchant || "\u2014"}</td>
+                          <td className="py-2 pr-3">
+                            {receipt.merchant || "\u2014"}
+                            {receipt.excludedFromOperatingPnl ? (
+                              <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-900" title={receipt.excludedReason ?? undefined}>
+                                Excluded from P&amp;L
+                              </span>
+                            ) : null}
+                          </td>
                           <td className="py-2 pr-3 font-medium">{receipt.total !== null ? `${receipt.currency} ${receipt.total.toFixed(2)}` : "\u2014"}</td>
                           <td className="py-2 pr-3 truncate max-w-[220px]">{receipt.filename}</td>
                           <td className="py-2">
@@ -643,70 +687,134 @@ export function ClientWorkspacePage() {
                 <CardDescription>{pnl?.note ?? "Loading…"}</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <Summary label="Income" value={pnl?.income ?? 0} />
-                  <Summary label="Expenses" value={pnl?.expenses ?? 0} />
-                  <Summary label="Net" value={pnl?.net ?? 0} />
-                </div>
-
-                {pnl?.counts ? (
-                  <div className="flex flex-wrap gap-2 text-xs text-[var(--color-muted-foreground)]">
-                    <span>{pnl.counts.filedReceipts} filed receipt(s)</span>
-                    <span>·</span>
-                    <span>{pnl.counts.matchedBankTransactions} matched bank txn(s)</span>
-                    <span>·</span>
-                    <span>{pnl.counts.noReceiptBusinessExpenses} no-receipt expense(s)</span>
-                    <span>·</span>
-                    <span>{pnl.counts.businessIncomeTransactions} income txn(s)</span>
-                  </div>
-                ) : null}
-
-                <div>
-                  <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--color-muted-foreground)]">Expenses by category</p>
-                  <div className="space-y-2">
-                    {(pnl?.categorizedExpenses ?? []).map((row) => (
-                      <button
-                        type="button"
-                        key={row.category}
-                        onClick={() => void loadDrilldown(row.category)}
-                        className="flex w-full items-center justify-between rounded-md border border-[var(--color-border)] px-3 py-3 text-left text-sm hover:bg-[var(--color-muted)]/60"
-                      >
-                        <div>
-                          <span className="font-medium capitalize">{row.category}</span>
-                          <p className="text-xs text-[var(--color-muted-foreground)]">
-                            {row.receiptCount} receipt line(s){row.bankCount > 0 ? `, ${row.bankCount} no-receipt bank txn(s)` : ""}
-                          </p>
-                        </div>
-                        <span className="font-medium">${Number(row.total).toFixed(2)}</span>
-                      </button>
-                    ))}
-                    {!pnl?.categorizedExpenses?.length ? <p className="text-sm text-[var(--color-muted-foreground)]">No business expenses in this period.</p> : null}
-                  </div>
-                </div>
-
-                {pnl?.categorizedIncome?.length ? (
-                  <div>
-                    <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--color-muted-foreground)]">Income by category</p>
-                    <div className="space-y-2">
-                      {pnl.categorizedIncome.map((row) => (
-                        <div key={row.category} className="flex items-center justify-between rounded-md border border-[var(--color-border)] px-3 py-3 text-sm">
-                          <span className="font-medium capitalize">{row.category}</span>
-                          <span className="font-medium">${Number(row.total).toFixed(2)}</span>
-                        </div>
-                      ))}
+                {pnl && pnl.accrualSupported === false ? (
+                  <p className="text-sm text-[var(--color-muted-foreground)]">
+                    Accrual reporting is not available in the paid alpha. No P&amp;L figures can be shown for this client until it is switched to cash basis.
+                  </p>
+                ) : (
+                  <>
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <Summary label="Income" value={pnl?.income ?? 0} />
+                      <Summary label="Expenses" value={pnl?.expenses ?? 0} />
+                      <Summary label="Net" value={pnl?.net ?? 0} />
                     </div>
-                  </div>
-                ) : null}
+
+                    {pnl?.counts ? (
+                      <div className="flex flex-wrap gap-2 text-xs text-[var(--color-muted-foreground)]">
+                        <span>{pnl.counts.filedReceipts} filed receipt(s)</span>
+                        <span>·</span>
+                        <span>{pnl.counts.matchedBankTransactions} matched bank txn(s)</span>
+                        <span>·</span>
+                        <span>{pnl.counts.noReceiptBusinessExpenses} no-receipt expense(s)</span>
+                        <span>·</span>
+                        <span>{pnl.counts.businessIncomeTransactions} income txn(s)</span>
+                      </div>
+                    ) : null}
+
+                    {pnl && pnl.excludedFiledReceiptCount ? (
+                      <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+                        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                        <div className="min-w-0">
+                          <p className="font-medium">
+                            {pnl.excludedFiledReceiptCount} filed receipt(s) are excluded from operating expenses because their matched bank transactions were classified as nonbusiness.
+                          </p>
+                          <div className="mt-2 space-y-1">
+                            {(pnl.excludedFiledReceipts ?? []).map((r) => (
+                              <a
+                                key={r.receiptId}
+                                href={apiUrl(r.sourceUrl)}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="block truncate text-xs underline hover:no-underline"
+                              >
+                                {r.merchant || r.filename}{r.date ? ` · ${r.date}` : ""} — matched bank txn classified {r.bankDisposition.replace(/_/g, " ")}
+                              </a>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    <div>
+                      <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--color-muted-foreground)]">Expenses by category</p>
+                      <div className="space-y-2">
+                        {(pnl?.categorizedExpenses ?? []).map((row) => (
+                          <button
+                            type="button"
+                            key={row.category}
+                            onClick={() => void loadDrilldown(row.category)}
+                            className="flex w-full items-center justify-between rounded-md border border-[var(--color-border)] px-3 py-3 text-left text-sm hover:bg-[var(--color-muted)]/60"
+                          >
+                            <div>
+                              <span className="font-medium capitalize">{row.category}</span>
+                              <p className="text-xs text-[var(--color-muted-foreground)]">
+                                {row.receiptCount} receipt line(s){row.bankCount > 0 ? `, ${row.bankCount} no-receipt bank txn(s)` : ""}
+                              </p>
+                            </div>
+                            <span className="font-medium">${Number(row.total).toFixed(2)}</span>
+                          </button>
+                        ))}
+                        {!pnl?.categorizedExpenses?.length ? <p className="text-sm text-[var(--color-muted-foreground)]">No business expenses in this period.</p> : null}
+                      </div>
+                    </div>
+
+                    {pnl?.categorizedIncome?.length ? (
+                      <div>
+                        <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--color-muted-foreground)]">Income by category</p>
+                        <div className="space-y-2">
+                          {pnl.categorizedIncome.map((row) => (
+                            <button
+                              type="button"
+                              key={row.category}
+                              onClick={() => void loadDrilldown(row.category, "income")}
+                              className="flex w-full items-center justify-between rounded-md border border-[var(--color-border)] px-3 py-3 text-left text-sm hover:bg-[var(--color-muted)]/60"
+                            >
+                              <span className="font-medium capitalize">{row.category}</span>
+                              <span className="font-medium">${Number(row.total).toFixed(2)}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </>
+                )}
               </CardContent>
             </Card>
 
             <Card>
               <CardHeader>
                 <CardTitle>Source drill-down</CardTitle>
-                <CardDescription>{drilldown ? `Showing every filed line and no-receipt bank transaction behind ${drilldown.category}.` : "Select a P&L category to trace it back to evidence."}</CardDescription>
+                <CardDescription>
+                  {drilldown
+                    ? drilldown.type === "income"
+                      ? `Showing every bank transaction behind income category ${drilldown.category}.`
+                      : `Showing every filed line and no-receipt bank transaction behind ${drilldown.category}.`
+                    : "Select a P&L category to trace it back to evidence."}
+                </CardDescription>
               </CardHeader>
               <CardContent>
-                {drilldown ? (
+                {drilldown && drilldown.type === "income" ? (
+                  <div className="space-y-2">
+                    {drilldown.entries.map((entry) => (
+                      <div key={`i-${entry.bankTransactionId}`} className="rounded-md border border-[var(--color-border)] p-3 text-sm">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="truncate font-medium">{entry.description || "Bank income"}</p>
+                            <p className="truncate text-xs text-[var(--color-muted-foreground)]">{entry.date ? entry.date : "No date"} · {entry.category}</p>
+                          </div>
+                          <span className="font-medium">${Number(entry.reportedAmount).toFixed(2)}</span>
+                        </div>
+                        {entry.dispositionNote ? (
+                          <p className="mt-2 text-xs text-[var(--color-muted-foreground)]">Note: {entry.dispositionNote}</p>
+                        ) : null}
+                        <p className="mt-1 text-xs text-[var(--color-muted-foreground)]">Bank transaction {entry.bankTransactionId}</p>
+                      </div>
+                    ))}
+                    {drilldown.entries.length === 0 ? (
+                      <p className="text-sm text-[var(--color-muted-foreground)]">No entries for this category and period.</p>
+                    ) : null}
+                  </div>
+                ) : drilldown && drilldown.type === "expense" ? (
                   <div className="space-y-2">
                     {drilldown.entries.map((entry, index) => (
                       <div key={`r-${entry.receiptId}-${entry.lineNo ?? index}`} className="rounded-md border border-[var(--color-border)] p-3 text-sm">
@@ -748,6 +856,7 @@ export function ClientWorkspacePage() {
       ) : null}
     </div>
   );
+
 }
 
 function Summary({ label, value }: { label: string; value: number }) {
@@ -797,7 +906,7 @@ function ProfileEditForm({
         <select value={basis} onChange={(e) => setBasis(e.target.value)} className="h-9 rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-2 text-sm font-normal">
           <option value="">Not set</option>
           <option value="cash">Cash</option>
-          <option value="accrual">Accrual</option>
+          <option value="accrual">Accrual (not available for reporting in the paid alpha)</option>
         </select>
       </label>
       <Field label="Currency" value={currency} onChange={setCurrency} />

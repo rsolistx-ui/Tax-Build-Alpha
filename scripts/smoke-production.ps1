@@ -639,6 +639,13 @@ try {
   if ([double]$pnlAfterConflict.expenses -ge $pnlExpenses) {
     throw "A filed receipt whose matched bank transaction is explicitly classified personal must be excluded from expenses."
   }
+  if ([int]$pnlAfterConflict.excludedFiledReceiptCount -lt 1) {
+    throw "excludedFiledReceiptCount did not report the personal-disposition exclusion."
+  }
+  $excludedEntry = @($pnlAfterConflict.excludedFiledReceipts) | Where-Object { $_.receiptId -eq $receiptId } | Select-Object -First 1
+  if (-not $excludedEntry -or $excludedEntry.bankTransactionId -ne $bankTransactionId -or $excludedEntry.bankDisposition -ne "personal" -or -not $excludedEntry.sourceUrl) {
+    throw "excludedFiledReceipts did not surface the excluded receipt with its matched bank transaction and source link."
+  }
 
   Write-Host "Verifying signed accounting: a vendor refund reduces net expense rather than adding to it..."
   $refundCsvPath = Join-Path $env:TEMP "folio-smoke-refund-$([guid]::NewGuid().ToString('N')).csv"
@@ -791,12 +798,136 @@ try {
   Remove-TempFile $cashProfilePayloadPath
 
 
+  Write-Host "Verifying income category drill-down returns the underlying bank transaction..."
+  $incomeDrilldownEncoded = [Uri]::EscapeDataString("Uncategorized")
+  $incomeDrilldown = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/pnl/drilldown?type=income&category=$incomeDrilldownEncoded&startDate=2026-09-01&endDate=2026-09-30")
+  if ($incomeDrilldown.type -ne "income") { throw "Income drilldown did not return type=income." }
+  $incomeDrilldownEntry = @($incomeDrilldown.entries) | Where-Object { $_.bankTransactionId -eq $incomeTxnId } | Select-Object -First 1
+  if (-not $incomeDrilldownEntry -or [double]$incomeDrilldownEntry.reportedAmount -le 0) {
+    throw "Income drill-down did not surface the classified business income transaction with a reported amount."
+  }
+  if (-not $incomeDrilldownEntry.rawImportedRow) {
+    throw "Income drill-down did not preserve the original imported bank row for source traceability."
+  }
+
+  Write-Host "Verifying foreign-currency completeness: an unclassified EUR transaction cannot disappear from the report..."
+  $eurCsvPath = Join-Path $env:TEMP "folio-smoke-eur-$([guid]::NewGuid().ToString('N')).csv"
+  $eurCsv = "Date,Description,Amount,Currency`r`n2026-12-05,FOLIO EUR UNCLASSIFIED SMOKE,-42.00,EUR`r`n"
+  [System.IO.File]::WriteAllText($eurCsvPath, $eurCsv, $utf8)
+  $eurMappingBody = @{ date = "Date"; description = "Description"; amount = "Amount"; currency = "Currency" } | ConvertTo-Json -Compress
+  $eurMappingPayloadPath = New-JsonPayloadFile $eurMappingBody
+  $eurImport = Invoke-CurlJson @(
+    "-c", $cookieJar, "-b", $cookieJar,
+    "-F", "file=@$eurCsvPath",
+    "-F", "mapping=<$eurMappingPayloadPath",
+    "$BaseUrl/api/clients/$clientId/bank-transactions/import"
+  )
+  if ($eurImport.insertedCount -ne 1) { throw "Foreign-currency smoke CSV did not insert the EUR transaction." }
+  Remove-TempFile $eurCsvPath
+
+  $pnlDecemberUnclassified = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/pnl?startDate=2026-12-01&endDate=2026-12-31")
+  if ($pnlDecemberUnclassified.completeness.unclassifiedCount -lt 1) {
+    throw "An unclassified foreign-currency transaction disappeared from unclassifiedCount instead of blocking completeness."
+  }
+  if ($pnlDecemberUnclassified.completeness.isComplete) {
+    throw "A period with an unclassified foreign-currency transaction must not report complete."
+  }
+
+  $eurQueue = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/bank-transactions")
+  $eurTxn = @($eurQueue.transactions) | Where-Object { $_.description -eq "FOLIO EUR UNCLASSIFIED SMOKE" } | Select-Object -First 1
+  if (-not $eurTxn) { throw "EUR smoke transaction was not persisted." }
+  $eurNoReceiptBody = @{ action = "no_receipt_required"; reason = "Smoke test foreign-currency scenario" } | ConvertTo-Json -Compress
+  $eurNoReceiptPayloadPath = New-JsonPayloadFile $eurNoReceiptBody
+  $null = Invoke-CurlJson @(
+    "-c", $cookieJar, "-b", $cookieJar,
+    "-H", "Content-Type: application/json",
+    "--data-binary", "@$eurNoReceiptPayloadPath",
+    "$BaseUrl/api/clients/$clientId/bank-transactions/$([string]$eurTxn.id)/decision"
+  )
+  Remove-TempFile $eurNoReceiptPayloadPath
+  $eurExpenseBody = @{ disposition = "business_expense"; categoryId = $smokeCategoryId } | ConvertTo-Json -Compress
+  $eurExpensePayloadPath = New-JsonPayloadFile $eurExpenseBody
+  $null = Invoke-CurlJson @(
+    "-c", $cookieJar, "-b", $cookieJar,
+    "-H", "Content-Type: application/json",
+    "-X", "PATCH",
+    "--data-binary", "@$eurExpensePayloadPath",
+    "$BaseUrl/api/clients/$clientId/bank-transactions/$([string]$eurTxn.id)/disposition"
+  )
+  Remove-TempFile $eurExpensePayloadPath
+
+  $pnlDecemberClassified = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/pnl?startDate=2026-12-01&endDate=2026-12-31")
+  if ($pnlDecemberClassified.completeness.currencyConflictCount -lt 1) {
+    throw "An explicitly classified foreign-currency business transaction did not create a currency conflict."
+  }
+  if ([double]$pnlDecemberClassified.expenses -ne 0) {
+    throw "A foreign-currency business expense must be excluded from operating totals, not silently summed in."
+  }
+
+  Write-Host "Verifying client currency is normalized to canonical uppercase..."
+  $lowercaseCurrencyBody = @{ default_currency = "usd" } | ConvertTo-Json -Compress
+  $lowercaseCurrencyPayloadPath = New-JsonPayloadFile $lowercaseCurrencyBody
+  $normalizedProfile = Invoke-CurlJson @(
+    "-c", $cookieJar, "-b", $cookieJar,
+    "-H", "Content-Type: application/json",
+    "-X", "PATCH",
+    "--data-binary", "@$lowercaseCurrencyPayloadPath",
+    "$BaseUrl/api/clients/$clientId/profile"
+  )
+  Remove-TempFile $lowercaseCurrencyPayloadPath
+  if ($normalizedProfile.profile.default_currency -ne "USD") {
+    throw "Lowercase default_currency input was not normalized to uppercase, got $($normalizedProfile.profile.default_currency)."
+  }
+
+  $invalidCurrencyBody = @{ default_currency = "US1" } | ConvertTo-Json -Compress
+  $invalidCurrencyPayloadPath = New-JsonPayloadFile $invalidCurrencyBody
+  $invalidCurrencyStatus = ""
+  $previousPreference = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    $invalidCurrencyStatus = (& curl.exe --silent --output NUL --write-out "%{http_code}" -c $cookieJar -b $cookieJar -H "Content-Type: application/json" -X PATCH --data-binary "@$invalidCurrencyPayloadPath" "$BaseUrl/api/clients/$clientId/profile")
+  } finally {
+    $ErrorActionPreference = $previousPreference
+  }
+  Remove-TempFile $invalidCurrencyPayloadPath
+  if ($invalidCurrencyStatus -ne "400") {
+    throw "An invalid default_currency value must be rejected with HTTP 400, got $invalidCurrencyStatus."
+  }
+
+  Write-Host "Verifying duplicate category names are rejected case-insensitively..."
+  $duplicateCategoryName = "Smoke Duplicate Category $stamp"
+  $firstCategoryBody = @{ name = $duplicateCategoryName } | ConvertTo-Json -Compress
+  $firstCategoryPayloadPath = New-JsonPayloadFile $firstCategoryBody
+  $null = Invoke-CurlJson @(
+    "-c", $cookieJar, "-b", $cookieJar,
+    "-H", "Content-Type: application/json",
+    "--data-binary", "@$firstCategoryPayloadPath",
+    "$BaseUrl/api/clients/$clientId/categories"
+  )
+  Remove-TempFile $firstCategoryPayloadPath
+
+  $duplicateCategoryBody = @{ name = $duplicateCategoryName.ToLowerInvariant() } | ConvertTo-Json -Compress
+  $duplicateCategoryPayloadPath = New-JsonPayloadFile $duplicateCategoryBody
+  $duplicateCategoryStatus = ""
+  $previousPreference = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    $duplicateCategoryStatus = (& curl.exe --silent --output NUL --write-out "%{http_code}" -c $cookieJar -b $cookieJar -H "Content-Type: application/json" --data-binary "@$duplicateCategoryPayloadPath" "$BaseUrl/api/clients/$clientId/categories")
+  } finally {
+    $ErrorActionPreference = $previousPreference
+  }
+  Remove-TempFile $duplicateCategoryPayloadPath
+  if ($duplicateCategoryStatus -ne "409") {
+    throw "A case-insensitive duplicate category name must be rejected with HTTP 409, got $duplicateCategoryStatus."
+  }
+
   Write-Host ""
   Write-Host "END-TO-END PAID-ALPHA SMOKE TEST PASSED" -ForegroundColor Green
   Write-Host "BANK EXCEPTION WORKFLOW PRODUCTION VERIFICATION PASSED" -ForegroundColor Green
   Write-Host "BOOKKEEPING CORE AUDIT CORRECTION VERIFICATION PASSED" -ForegroundColor Green
   Write-Host "Receipt -> R2 -> Workers AI -> line items -> validation -> review -> filed ledger -> P&L -> source drill-down -> CSV -> duplicate protection -> suggested match -> explicit confirmation -> exception inbox -> missing receipt upload -> receipt review -> resolved match -> documented no-receipt resolution -> audit"
   Write-Host "Signed accounting refund/reversal netting -> receipt/bank disposition conflict exclusion -> uncategorized completeness -> invalid date rejection -> accrual guardrail"
+  Write-Host "Income drilldown -> foreign-currency completeness -> currency normalization -> duplicate category name rejection"
   Write-Host "Test account: $email"
   Write-Host "Test password: $password"
   Write-Host "Test client:  $clientId"
