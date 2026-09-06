@@ -182,12 +182,28 @@ betaRoutes.get("/invitations", requireSession, requireOwner, async (c) => {
 betaRoutes.get("/entitlements", requireSession, requireOwner, async (c) => {
   const db = createDb(c.env);
   const entitlements = await db.query<Record<string, unknown>>(
-    `SELECT be.user_id, be.status, be.starts_at, be.expires_at, be.revoked_at, be.revocation_reason, u.email, u.name
-     FROM beta_entitlements be
-     LEFT JOIN "user" u ON u.id = be.user_id
-     ORDER BY be.updated_at DESC LIMIT 200`,
+    `SELECT user_id, status, starts_at, expires_at, revoked_at, revocation_reason
+     FROM beta_entitlements ORDER BY updated_at DESC LIMIT 200`,
   );
-  return c.json({ entitlements });
+  // Better Auth's user table lives in D1, a separate database from Neon, so
+  // the email/name lookup happens as a second query against the D1 binding
+  // and is merged here rather than attempted as a cross-database SQL join.
+  const userIds = entitlements.map((e) => String(e.user_id));
+  const userById = new Map<string, { email: string | null; name: string | null }>();
+  if (userIds.length > 0) {
+    const placeholders = userIds.map((_, i) => `?${i + 1}`).join(", ");
+    const stmt = c.env.AUTH_DB.prepare(`SELECT id, email, name FROM user WHERE id IN (${placeholders})`);
+    const result = await stmt.bind(...userIds).all<{ id: string; email: string; name: string }>();
+    for (const row of result.results ?? []) {
+      userById.set(row.id, { email: row.email, name: row.name });
+    }
+  }
+  const enriched = entitlements.map((e) => ({
+    ...e,
+    email: userById.get(String(e.user_id))?.email ?? null,
+    name: userById.get(String(e.user_id))?.name ?? null,
+  }));
+  return c.json({ entitlements: enriched });
 });
 
 const revokeSchema = z.object({ reason: z.string().max(500).optional() });

@@ -116,7 +116,7 @@ function New-SampleReceiptPng([string]$Path) {
 
 $cookieJar = Join-Path $env:TEMP "folio-smoke-cookies-$([guid]::NewGuid().ToString('N')).txt"
 $generatedReceipt = $false
-$signupPayloadPath = ""
+$firmId = $null
 $clientPayloadPath = ""
 $approvePayloadPath = ""
 $bankDecisionPayloadPath = ""
@@ -140,25 +140,57 @@ try {
   }
 
   $stamp = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
-  $email = "folio-smoke-$([guid]::NewGuid().ToString('N'))@example.com"
+  $runId = [guid]::NewGuid().ToString('N')
+  $email = "folio-smoke-$runId@example.com"
   $password = "Smoke!$([guid]::NewGuid().ToString('N').Substring(0, 18))"
-  $signupBody = @{ name = "Folio Smoke Test"; email = $email; password = $password } | ConvertTo-Json -Compress
-  $signupPayloadPath = New-JsonPayloadFile $signupBody
 
-  Write-Host "Creating an isolated smoke-test firm..."
+  Write-Host "Verifying public arbitrary account creation cannot obtain usable application access..."
+  $publicSignupBody = @{ name = "Attacker"; email = "folio-smoke-attacker-$runId@example.com"; password = $password } | ConvertTo-Json -Compress
+  $publicSignupPayloadPath = New-JsonPayloadFile $publicSignupBody
+  $publicSignupStatus = ""
+  $previousPreference = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    $publicSignupStatus = (& curl.exe --silent --output NUL --write-out "%{http_code}" -H "Content-Type: application/json" -H "Origin: $BaseUrl" --data-binary "@$publicSignupPayloadPath" "$BaseUrl/api/auth/sign-up/email")
+  } finally {
+    $ErrorActionPreference = $previousPreference
+  }
+  Remove-TempFile $publicSignupPayloadPath
+  if ($publicSignupStatus -ne "403") {
+    throw "Public registration must be closed (expected HTTP 403 from direct sign-up), got $publicSignupStatus."
+  }
+
+  Write-Host "Seeding a controlled smoke invitation via direct infrastructure access..."
+  $seedResultRaw = & node (Join-Path $PSScriptRoot "smoke-admin.mjs") seed-invite $email 30
+  if ($LASTEXITCODE -ne 0) { throw "Failed to seed the smoke invitation: $seedResultRaw" }
+  $seedResult = ($seedResultRaw | Select-Object -Last 1) | ConvertFrom-Json
+  $inviteToken = $seedResult.token
+  if (-not $inviteToken) { throw "Smoke invitation seeding did not return a token." }
+
+  Write-Host "Activating the invited smoke account (invitation redemption)..."
+  $redeemBody = @{ token = $inviteToken; email = $email; password = $password; name = "Folio Smoke Test" } | ConvertTo-Json -Compress
+  $redeemPayloadPath = New-JsonPayloadFile $redeemBody
   $null = Invoke-CurlJson @(
     "-c", $cookieJar,
     "-b", $cookieJar,
     "-H", "Content-Type: application/json",
     "-H", "Origin: $BaseUrl",
-    "--data-binary", "@$signupPayloadPath",
-    "$BaseUrl/api/auth/sign-up/email"
+    "--data-binary", "@$redeemPayloadPath",
+    "$BaseUrl/api/beta/redeem"
   )
+  Remove-TempFile $redeemPayloadPath
 
   Write-Host "Verifying the Better Auth production session..."
   $me = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/me")
   if (-not $me.user.id) {
     throw "Better Auth did not establish a usable production session."
+  }
+  $firmId = [string]$me.firm.id
+
+  Write-Host "Verifying the beta access status endpoint reports an active entitlement..."
+  $betaStatus = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/beta/status")
+  if (-not $betaStatus.allowed) {
+    throw "A freshly redeemed invitation must produce an active, allowed beta entitlement."
   }
 
   $clientBody = @{
@@ -1003,6 +1035,26 @@ try {
     throw "A case-insensitive duplicate category name must be rejected with HTTP 409, got $duplicateCategoryStatus."
   }
 
+  Write-Host "Verifying a revoked beta entitlement blocks protected business APIs (403 BETA_REVOKED)..."
+  $revokeResultRaw = & node (Join-Path $PSScriptRoot "smoke-admin.mjs") revoke-by-email $email
+  if ($LASTEXITCODE -ne 0) { throw "Failed to revoke the smoke entitlement for coverage: $revokeResultRaw" }
+
+  $revokedStatus = ""
+  $previousPreference = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    $revokedStatus = (& curl.exe --silent --output NUL --write-out "%{http_code}" -c $cookieJar -b $cookieJar "$BaseUrl/api/clients")
+  } finally {
+    $ErrorActionPreference = $previousPreference
+  }
+  if ($revokedStatus -ne "403") {
+    throw "A revoked beta entitlement must block a protected business endpoint with HTTP 403, got $revokedStatus."
+  }
+  $revokedBetaStatus = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/beta/status")
+  if ($revokedBetaStatus.allowed -or $revokedBetaStatus.reason -ne "BETA_REVOKED") {
+    throw "The access-status endpoint must remain available after revocation and report BETA_REVOKED."
+  }
+
   Write-Host ""
   Write-Host "END-TO-END PAID-ALPHA SMOKE TEST PASSED" -ForegroundColor Green
   Write-Host "BANK EXCEPTION WORKFLOW PRODUCTION VERIFICATION PASSED" -ForegroundColor Green
@@ -1011,6 +1063,7 @@ try {
   Write-Host "Signed accounting refund/reversal netting -> receipt/bank disposition conflict exclusion -> uncategorized completeness -> invalid date rejection -> accrual guardrail"
   Write-Host "Income drilldown -> foreign-currency completeness -> currency normalization -> duplicate category name rejection"
   Write-Host "One-receipt-to-one-bank-transaction protection (409) -> already-matched receipt excluded from suggestions"
+  Write-Host "Public registration closed -> invitation-only activation -> active entitlement -> revoked entitlement blocks business APIs -> self-cleaning tenant removal"
   Write-Host "Test account: $email"
   Write-Host "Test password: $password"
   Write-Host "Test client:  $clientId"
@@ -1020,7 +1073,6 @@ try {
   Write-Host "No-receipt-required transaction: $noReceiptTransactionId"
 } finally {
   Remove-TempFile $cookieJar
-  Remove-TempFile $signupPayloadPath
   Remove-TempFile $clientPayloadPath
   Remove-TempFile $approvePayloadPath
   Remove-TempFile $bankDecisionPayloadPath
@@ -1030,5 +1082,38 @@ try {
   Remove-TempFile $bankExceptionCsvPath
   if ($generatedReceipt) {
     Remove-TempFile $ReceiptPath
+  }
+
+  if ($firmId) {
+    if ($env:SMOKE_CLEANUP_TOKEN) {
+      Write-Host "Cleaning up synthetic smoke-test tenant $firmId..."
+      $cleanupBody = @{ firmId = $firmId } | ConvertTo-Json -Compress
+      $cleanupPayloadPath = New-JsonPayloadFile $cleanupBody
+      try {
+        $cleanupResult = Invoke-CurlJson @(
+          "-H", "Content-Type: application/json",
+          "-H", "X-Internal-Token: $($env:SMOKE_CLEANUP_TOKEN)",
+          "--data-binary", "@$cleanupPayloadPath",
+          "$BaseUrl/api/internal/smoke-cleanup"
+        )
+        if (-not $cleanupResult.removed) {
+          throw "Cleanup endpoint did not report removal for firm $firmId."
+        }
+        Write-Host "Cleanup removed firm $firmId ($($cleanupResult.clientCount) client(s), $($cleanupResult.r2ObjectsRemoved) R2 object(s) removed)."
+        if ($cleanupResult.r2Failures -and @($cleanupResult.r2Failures).Count -gt 0) {
+          throw "Cleanup could not remove R2 object(s): $($cleanupResult.r2Failures -join ', ')"
+        }
+        if ($cleanupResult.authFailures -and @($cleanupResult.authFailures).Count -gt 0) {
+          throw "Cleanup could not remove the synthetic auth account: $($cleanupResult.authFailures -join ', ')"
+        }
+      } catch {
+        Write-Host "SMOKE CLEANUP FAILURE for firm $firmId : $($_.Exception.Message)" -ForegroundColor Red
+        throw
+      } finally {
+        Remove-TempFile $cleanupPayloadPath
+      }
+    } else {
+      Write-Host "WARNING: SMOKE_CLEANUP_TOKEN is not set in this environment; synthetic tenant $firmId was NOT cleaned up." -ForegroundColor Yellow
+    }
   }
 }
