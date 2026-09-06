@@ -4,6 +4,10 @@ import { LoginPage } from "@/pages/login";
 import { SignupPage } from "@/pages/signup";
 import { ClientsPage } from "@/pages/clients";
 import { ClientWorkspacePage } from "@/pages/client-workspace";
+import { ClientOverviewPage } from "@/pages/client-overview";
+import { ClientReceiptsPage } from "@/pages/client-receipts";
+import { ClientBankingPage } from "@/pages/client-banking";
+import { ClientReportsPage } from "@/pages/client-reports";
 
 export default function App() {
   return (
@@ -13,7 +17,12 @@ export default function App() {
         <Route path="/signup" element={<SignupPage />} />
         <Route element={<ProtectedLayout />}>
           <Route path="/" element={<ClientsPage />} />
-          <Route path="/clients/:clientId" element={<ClientWorkspacePage />} />
+          <Route path="/clients/:clientId" element={<ClientWorkspacePage />}>
+            <Route index element={<ClientOverviewPage />} />
+            <Route path="receipts" element={<ClientReceiptsPage />} />
+            <Route path="banking" element={<ClientBankingPage />} />
+            <Route path="reports" element={<ClientReportsPage />} />
+          </Route>
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

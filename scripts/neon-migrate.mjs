@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { splitSqlStatements } from "./lib/sql-split.mjs";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -8,11 +9,7 @@ if (!databaseUrl) {
 
 const migrationPath = process.argv[2] || "migrations/neon/0001_married_spine.sql";
 const sqlText = await readFile(migrationPath, "utf8");
-const statements = sqlText
-  .split(";")
-  .map((statement) => statement.trim())
-  .filter(Boolean)
-  .map((query) => ({ query, params: [] }));
+const statements = splitSqlStatements(sqlText).map((query) => ({ query, params: [] }));
 
 const parsed = new URL(databaseUrl);
 const apiHost = parsed.hostname.replace(/^[^.]+\./, "api.");
@@ -37,4 +34,4 @@ if (!response.ok) {
   process.exit(1);
 }
 
-console.log("Neon married-spine migration applied successfully.");
+console.log("Neon migration applied successfully.");

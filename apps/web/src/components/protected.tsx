@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { authClient } from "@/lib/auth-client";
-import { AppShell } from "@/components/layout/app-shell";
+import { WorkspaceShell } from "@/components/layout/workspace-shell";
+import { WorkspaceProvider } from "@/lib/workspace-context";
 import { api } from "@/lib/api";
 
 export function ProtectedLayout() {
@@ -27,5 +28,9 @@ export function ProtectedLayout() {
     return <Navigate to="/login" replace />;
   }
 
-  return <AppShell firmName={firmName} userName={session.user.name} />;
+  return (
+    <WorkspaceProvider>
+      <WorkspaceShell firmName={firmName} userName={session.user.name} />
+    </WorkspaceProvider>
+  );
 }

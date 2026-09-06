@@ -56,13 +56,46 @@ function New-JsonPayloadFile([string]$Json) {
   return $path
 }
 
+function Invoke-CurlExpectStatus([string[]]$CurlArgs, [int]$ExpectedStatus) {
+  $previousPreference = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    $output = @(& curl.exe --silent --show-error --write-out "`n__FOLIO_HTTP_STATUS__:%{http_code}" @CurlArgs 2>&1)
+    $exitCode = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $previousPreference
+  }
+
+  $text = $output -join "`n"
+  $marker = "__FOLIO_HTTP_STATUS__:"
+  $markerIndex = $text.LastIndexOf($marker)
+  if ($markerIndex -lt 0) {
+    throw "curl failed before an HTTP status could be read. Exit code: $exitCode. Output: $text"
+  }
+
+  $body = $text.Substring(0, $markerIndex).Trim()
+  $statusText = $text.Substring($markerIndex + $marker.Length).Trim()
+  $statusCode = 0
+  if (-not [int]::TryParse($statusText, [ref]$statusCode)) {
+    throw "Could not parse HTTP status '$statusText'. Response: $body"
+  }
+  if ($exitCode -ne 0) {
+    throw "curl failed with exit code $exitCode. Response: $body"
+  }
+  if ($statusCode -ne $ExpectedStatus) {
+    $responseText = if ([string]::IsNullOrWhiteSpace($body)) { "<empty response body>" } else { $body }
+    throw "Expected HTTP $ExpectedStatus but received HTTP $statusCode. Response: $responseText"
+  }
+  return $statusCode
+}
+
 function Remove-TempFile([string]$Path) {
   if (-not [string]::IsNullOrWhiteSpace($Path)) {
     Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
   }
 }
 
-function New-SampleReceiptPng([string]$Path) {
+function New-SampleReceiptPng([string]$Path, [string]$ReceiptDate = "09/05/2026") {
   Add-Type -AssemblyName System.Drawing
   $bitmap = New-Object System.Drawing.Bitmap 900, 1200
   $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
@@ -74,7 +107,7 @@ function New-SampleReceiptPng([string]$Path) {
       "100 MARKET STREET",
       "SAN ANTONIO TX 78205",
       "",
-      "DATE 09/05/2026",
+      "DATE $ReceiptDate",
       "",
       "2  Office Paper        12.50     25.00",
       "1  Printer Ink        35.00     35.00",
@@ -109,6 +142,10 @@ $bankMappingPayloadPath = ""
 $noReceiptDecisionPayloadPath = ""
 $bankCsvPath = ""
 $bankExceptionCsvPath = ""
+$categoryPayloadPath = ""
+$classifyCsvPath = ""
+$closedClassifyPayloadPath = ""
+$reopenPayloadPath = ""
 
 try {
   if (-not $ReceiptPath) {
@@ -222,15 +259,15 @@ try {
     throw "P&L does not reconcile. Receipt total is $approvedTotal but P&L expenses are $pnlExpenses."
   }
 
-  $firstCategory = @($pnl.byCategory) | Select-Object -First 1
+  $firstCategory = @($pnl.byCategory.expense) | Select-Object -First 1
   if (-not $firstCategory) {
-    throw "P&L returned no category rows."
+    throw "P&L returned no expense category rows."
   }
-  $encodedCategory = [Uri]::EscapeDataString([string]$firstCategory.category)
+  $encodedCategoryId = [Uri]::EscapeDataString([string]$firstCategory.categoryId)
   $drilldown = Invoke-CurlJson @(
     "-c", $cookieJar,
     "-b", $cookieJar,
-    "$BaseUrl/api/clients/$clientId/pnl/drilldown?category=$encodedCategory"
+    "$BaseUrl/api/clients/$clientId/pnl/drilldown?categoryId=$encodedCategoryId&class=expense"
   )
   if (@($drilldown.entries).Count -lt 1) {
     throw "P&L drill-down returned no evidence entries."
@@ -461,9 +498,719 @@ try {
   }
 
   Write-Host ""
+  Write-Host "Milestone 4: canonical ledger, explicit classification, and auditable periods" -ForegroundColor Cyan
+
+  Write-Host "Creating a deterministic smoke-test category..."
+  $categoryBody = @{ name = "Smoke Supplies"; slug = "smoke-supplies" } | ConvertTo-Json -Compress
+  $categoryPayloadPath = New-JsonPayloadFile $categoryBody
+  $categoryResponse = Invoke-CurlJson @(
+    "-c", $cookieJar,
+    "-b", $cookieJar,
+    "-H", "Content-Type: application/json",
+    "--data-binary", "@$categoryPayloadPath",
+    "$BaseUrl/api/clients/$clientId/categories"
+  )
+  $categoryId = [string]$categoryResponse.category.id
+  if (-not $categoryId) {
+    throw "Category creation did not return an id."
+  }
+
+  # 4. Reconciled bank + receipt produces exactly one ledger expense, not two.
+  #    Receipt A was filed before the bank CSV, so its receipt-only entry must
+  #    have absorbed the confirmed bank transaction instead of duplicating it.
+  Write-Host "Verifying reconciled bank + receipt produced one merged ledger entry..."
+  $ledgerT1 = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/ledger?period=2026-09")
+  $t1Entries = @($ledgerT1.entries) | Where-Object { $_.source.bankTransaction -and $_.source.bankTransaction.id -eq $bankTransactionId }
+  if (@($t1Entries).Count -ne 1) {
+    throw "Reconciled bank + receipt did not produce exactly one ledger entry. Found $(@($t1Entries).Count)."
+  }
+  $t1Entry = $t1Entries[0]
+  if (-not $t1Entry.source.receipt -or $t1Entry.source.receipt.id -ne $receiptId) {
+    throw "The merged ledger entry does not trace to the matched receipt evidence."
+  }
+  if ([Math]::Abs([double]$t1Entry.amount - $approvedTotal) -gt 0.02) {
+    throw "The merged ledger entry amount does not match the receipt total."
+  }
+
+  # Introduce two more exceptions in 2026-08 for classification coverage.
+  Write-Host "Importing personal and transfer smoke transactions for period 2026-08..."
+  $classifyCsvPath = Join-Path $env:TEMP "folio-smoke-classify-$([guid]::NewGuid().ToString('N')).csv"
+  $classifyCsv = "Date,Description,Amount`r`n2026-08-03,FOLIO PERSONAL SMOKE,-25.25`r`n2026-08-04,FOLIO TRANSFER SMOKE,-50.50`r`n"
+  [System.IO.File]::WriteAllText($classifyCsvPath, $classifyCsv, $utf8)
+
+  $classifyImport = Invoke-CurlJson @(
+    "-c", $cookieJar,
+    "-b", $cookieJar,
+    "-F", "file=@$classifyCsvPath",
+    "-F", "mapping=<$bankMappingPayloadPath",
+    "$BaseUrl/api/clients/$clientId/bank-transactions/import"
+  )
+  if ($classifyImport.insertedCount -ne 2 -or $classifyImport.duplicateCount -ne 0) {
+    throw "Classification CSV did not insert exactly two new transactions."
+  }
+
+  $classifyQueue = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/bank-transactions")
+  $personalTransaction = @($classifyQueue.transactions) | Where-Object { $_.description -eq "FOLIO PERSONAL SMOKE" } | Select-Object -First 1
+  $transferTransaction = @($classifyQueue.transactions) | Where-Object { $_.description -eq "FOLIO TRANSFER SMOKE" } | Select-Object -First 1
+  if (-not $personalTransaction -or $personalTransaction.triage -ne "unmatched") {
+    throw "Personal smoke transaction did not enter the unmatched queue."
+  }
+  if (-not $transferTransaction -or $transferTransaction.triage -ne "unmatched") {
+    throw "Transfer smoke transaction did not enter the unmatched queue."
+  }
+  $personalTransactionId = [string]$personalTransaction.id
+  $transferTransactionId = [string]$transferTransaction.id
+
+  # 7. An open period reports deterministic close blockers when unresolved work exists.
+  Write-Host "Verifying the open period reports blockers for unresolved work..."
+  $blockedSummary = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/periods/2026-08/summary")
+  if ($blockedSummary.state -ne "open" -or $blockedSummary.canClose) {
+    throw "A period with unresolved exceptions must report canClose=false and state=open."
+  }
+  $exceptionBlocker = @($blockedSummary.blockers) | Where-Object { $_ -match "unresolved bank exception" } | Select-Object -First 1
+  if (-not $exceptionBlocker) {
+    throw "Period summary did not report unresolved bank exceptions as a blocker."
+  }
+
+  # Document no-receipt resolutions for the two new classification transactions.
+  foreach ($pair in @(
+    @{ id = $personalTransactionId; description = "FOLIO PERSONAL SMOKE" },
+    @{ id = $transferTransactionId; description = "FOLIO TRANSFER SMOKE" }
+  )) {
+    $reason = "Smoke test documented non-receipt resolution for $($pair.description)"
+    $decisionBody = @{ action = "no_receipt_required"; reason = $reason } | ConvertTo-Json -Compress
+    $decisionPayloadPath = New-JsonPayloadFile $decisionBody
+    $null = Invoke-CurlJson @(
+      "-c", $cookieJar,
+      "-b", $cookieJar,
+      "-H", "Content-Type: application/json",
+      "--data-binary", "@$decisionPayloadPath",
+      "$BaseUrl/api/clients/$clientId/bank-transactions/$($pair.id)/decision"
+    )
+    Remove-TempFile $decisionPayloadPath
+  }
+
+  # Explicit professional classification for every smoke transaction.
+  Write-Host "Applying explicit professional classification to every transaction..."
+  foreach ($classification in @(
+    @{ id = $bankTransactionId;      accountingClass = "expense";  treatment = "business"; categoryId = $categoryId },
+    @{ id = $missingTransactionId;   accountingClass = "expense";  treatment = "business"; categoryId = $categoryId },
+    @{ id = $noReceiptTransactionId; accountingClass = "expense";  treatment = "business"; categoryId = $categoryId },
+    @{ id = $personalTransactionId;  accountingClass = "expense";  treatment = "personal"; categoryId = $null },
+    @{ id = $transferTransactionId;  accountingClass = "transfer"; treatment = "business"; categoryId = $null }
+  )) {
+    $classifyBody = @{
+      accountingClass = $classification.accountingClass
+      treatment = $classification.treatment
+      categoryId = $classification.categoryId
+    } | ConvertTo-Json -Compress
+    $classifyPayloadPath = New-JsonPayloadFile $classifyBody
+    $null = Invoke-CurlJson @(
+      "-c", $cookieJar,
+      "-b", $cookieJar,
+      "-H", "Content-Type: application/json",
+      "--data-binary", "@$classifyPayloadPath",
+      "$BaseUrl/api/clients/$clientId/bank-transactions/$($classification.id)/classify"
+    )
+    Remove-TempFile $classifyPayloadPath
+  }
+
+  # 5 + 6. Personal and transfer classifications must stay out of ledger P&L.
+  Write-Host "Verifying personal and transfer rows are excluded from ledger-backed P&L..."
+  $pnlAug = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/pnl?period=2026-08")
+  $expectedAugExpenses = [double]$approvedTotal + 11.11
+  if ([Math]::Abs([double]$pnlAug.expenses - $expectedAugExpenses) -gt 0.02) {
+    throw "Ledger P&L for 2026-08 is $($pnlAug.expenses); expected $expectedAugExpenses (personal and transfer excluded)."
+  }
+  $augCategorySum = 0
+  foreach ($row in @($pnlAug.byCategory.expense)) {
+    $augCategorySum += [double]$row.total
+  }
+  if ([Math]::Abs($augCategorySum - $expectedAugExpenses) -gt 0.02) {
+    throw "Ledger P&L category drill-down for 2026-08 does not reconcile to $expectedAugExpenses."
+  }
+
+  # 11. Ledger-backed P&L reconciles to the expected business expense total overall.
+  Write-Host "Verifying ledger-backed P&L reconciles across all periods..."
+  $pnlLedger = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/pnl")
+  $expectedAllExpenses = (2 * [double]$approvedTotal) + 11.11
+  if ([Math]::Abs([double]$pnlLedger.expenses - $expectedAllExpenses) -gt 0.02) {
+    throw "Ledger-backed P&L expenses are $($pnlLedger.expenses); expected $expectedAllExpenses."
+  }
+  $pnlSept = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/pnl?period=2026-09")
+  if ([Math]::Abs([double]$pnlSept.expenses - [double]$approvedTotal) -gt 0.02) {
+    throw "Ledger-backed P&L for 2026-09 is $($pnlSept.expenses); expected $approvedTotal."
+  }
+
+  # 8. A clean period can close.
+  Write-Host "Verifying the clean period can close..."
+  $cleanSummary = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/periods/2026-08/summary")
+  if (-not $cleanSummary.canClose) {
+    throw "Period 2026-08 should be clean: $($cleanSummary.blockers -join '; ')"
+  }
+  $closed = Invoke-CurlJson @(
+    "-c", $cookieJar,
+    "-b", $cookieJar,
+    "-H", "Content-Type: application/json",
+    "-X", "POST",
+    "--data-binary", "{}",
+    "$BaseUrl/api/clients/$clientId/periods/2026-08/close"
+  )
+  if ($closed.state -ne "closed") {
+    throw "Period close did not transition the period to closed."
+  }
+  $auditAfterClose = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/periods/2026-08/audit")
+  if (-not (@($auditAfterClose.events) | Where-Object { $_.action -eq "period_closed" } | Select-Object -First 1)) {
+    throw "Period close did not create a period_closed audit event."
+  }
+
+  # 9. Accounting mutations against a closed period are rejected.
+  Write-Host "Verifying closed-period accounting mutations are rejected..."
+  $closedClassifyBody = @{ accountingClass = "expense"; treatment = "business"; categoryId = $categoryId } | ConvertTo-Json -Compress
+  $closedClassifyPayloadPath = New-JsonPayloadFile $closedClassifyBody
+  $bankClassifyRejected = Invoke-CurlExpectStatus @(
+    "-c", $cookieJar,
+    "-b", $cookieJar,
+    "-H", "Content-Type: application/json",
+    "--data-binary", "@$closedClassifyPayloadPath",
+    "$BaseUrl/api/clients/$clientId/bank-transactions/$noReceiptTransactionId/classify"
+  ) 409
+  if ($bankClassifyRejected -ne 409) {
+    throw "Bank classify against a closed period must be rejected with HTTP 409."
+  }
+
+  $t3Search = Invoke-CurlJson @(
+    "-c", $cookieJar,
+    "-b", $cookieJar,
+    "$BaseUrl/api/clients/$clientId/ledger?period=2026-08&search=FOLIO%20NO%20RECEIPT%20SMOKE"
+  )
+  $t3LedgerEntry = @($t3Search.entries) | Select-Object -First 1
+  if (-not $t3LedgerEntry) {
+    throw "Could not locate the no-receipt ledger entry for the closed-period mutation test."
+  }
+  $ledgerClassifyRejected = Invoke-CurlExpectStatus @(
+    "-c", $cookieJar,
+    "-b", $cookieJar,
+    "-H", "Content-Type: application/json",
+    "-X", "PATCH",
+    "--data-binary", "@$closedClassifyPayloadPath",
+    "$BaseUrl/api/clients/$clientId/ledger/$($t3LedgerEntry.id)/classify"
+  ) 409
+  if ($ledgerClassifyRejected -ne 409) {
+    throw "Ledger classify against a closed period must be rejected with HTTP 409."
+  }
+
+  $closeAgainRejected = Invoke-CurlExpectStatus @(
+    "-c", $cookieJar,
+    "-b", $cookieJar,
+    "-H", "Content-Type: application/json",
+    "-X", "POST",
+    "--data-binary", "{}",
+    "$BaseUrl/api/clients/$clientId/periods/2026-08/close"
+  ) 409
+  if ($closeAgainRejected -ne 409) {
+    throw "Closing an already-closed period must be rejected with HTTP 409."
+  }
+
+  $closedDecisionBody = @{ action = "reject" } | ConvertTo-Json -Compress
+  $closedDecisionPayloadPath = New-JsonPayloadFile $closedDecisionBody
+  $bankDecisionRejected = Invoke-CurlExpectStatus @(
+    "-c", $cookieJar,
+    "-b", $cookieJar,
+    "-H", "Content-Type: application/json",
+    "--data-binary", "@$closedDecisionPayloadPath",
+    "$BaseUrl/api/clients/$clientId/bank-transactions/$missingTransactionId/decision"
+  ) 409
+  Remove-TempFile $closedDecisionPayloadPath
+  if ($bankDecisionRejected -ne 409) {
+    throw "Bank decision against a closed period must be rejected with HTTP 409."
+  }
+
+  $closedImportCsvPath = Join-Path $env:TEMP "folio-smoke-closed-import-$([guid]::NewGuid().ToString('N')).csv"
+  $closedImportCsv = "Date,Description,Amount`r`n2026-08-15,FOLIO CLOSED PERIOD IMPORT SMOKE,-9.99`r`n"
+  [System.IO.File]::WriteAllText($closedImportCsvPath, $closedImportCsv, $utf8)
+  $bankImportRejected = Invoke-CurlExpectStatus @(
+    "-c", $cookieJar,
+    "-b", $cookieJar,
+    "-F", "file=@$closedImportCsvPath",
+    "-F", "mapping=<$bankMappingPayloadPath",
+    "$BaseUrl/api/clients/$clientId/bank-transactions/import"
+  ) 409
+  Remove-TempFile $closedImportCsvPath
+  if ($bankImportRejected -ne 409) {
+    throw "Bank CSV import into a closed period must be rejected with HTTP 409."
+  }
+
+  # 10. Explicit reopen succeeds and preserves audit history.
+  Write-Host "Verifying explicit period reopen creates audit history..."
+  $reopenReason = "Smoke test reopening 2026-08 to verify auditable reopen behavior"
+  $reopenBody = @{ reason = $reopenReason } | ConvertTo-Json -Compress
+  $reopenPayloadPath = New-JsonPayloadFile $reopenBody
+  $reopened = Invoke-CurlJson @(
+    "-c", $cookieJar,
+    "-b", $cookieJar,
+    "-H", "Content-Type: application/json",
+    "--data-binary", "@$reopenPayloadPath",
+    "$BaseUrl/api/clients/$clientId/periods/2026-08/reopen"
+  )
+  if ($reopened.state -ne "open" -or $reopened.reason -ne $reopenReason) {
+    throw "Period reopen did not transition the period back to open with its reason."
+  }
+  $auditAfterReopen = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/periods/2026-08/audit")
+  if (-not (@($auditAfterReopen.events) | Where-Object { $_.action -eq "period_reopened" } | Select-Object -First 1)) {
+    throw "Period reopen did not create a period_reopened audit event."
+  }
+
+
+  Write-Host ""
+  Write-Host "Milestone 4 regression coverage: merge ordering, duplicate matches, no-receipt ledger presence" -ForegroundColor Cyan
+
+  # Isolated period 2026-10 so these checks never interact with the P&L totals asserted above.
+  $regressionBankCsvPath = Join-Path $env:TEMP "folio-smoke-regression-bank-$([guid]::NewGuid().ToString('N')).csv"
+  $regressionBankCsv = "Date,Description,Amount`r`n2026-10-05,FOLIO MERGE ORDER SMOKE,-30.30`r`n2026-10-06,FOLIO DUPLICATE MATCH SMOKE,-15.15`r`n2026-10-07,FOLIO NO RECEIPT LEDGER SMOKE,-20.20`r`n"
+  [System.IO.File]::WriteAllText($regressionBankCsvPath, $regressionBankCsv, $utf8)
+
+  $regressionImport = Invoke-CurlJson @(
+    "-c", $cookieJar, "-b", $cookieJar,
+    "-F", "file=@$regressionBankCsvPath",
+    "-F", "mapping=<$bankMappingPayloadPath",
+    "$BaseUrl/api/clients/$clientId/bank-transactions/import"
+  )
+  if ($regressionImport.insertedCount -ne 3 -or $regressionImport.duplicateCount -ne 0) {
+    throw "Regression coverage CSV did not insert exactly three new transactions."
+  }
+  Remove-TempFile $regressionBankCsvPath
+
+  $regressionQueue = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/bank-transactions")
+  $mergeOrderTxn = @($regressionQueue.transactions) | Where-Object { $_.description -eq "FOLIO MERGE ORDER SMOKE" } | Select-Object -First 1
+  $duplicateMatchTxn = @($regressionQueue.transactions) | Where-Object { $_.description -eq "FOLIO DUPLICATE MATCH SMOKE" } | Select-Object -First 1
+  $noReceiptLedgerTxn = @($regressionQueue.transactions) | Where-Object { $_.description -eq "FOLIO NO RECEIPT LEDGER SMOKE" } | Select-Object -First 1
+  if (-not $mergeOrderTxn -or -not $duplicateMatchTxn -or -not $noReceiptLedgerTxn) {
+    throw "Regression coverage transactions were not persisted."
+  }
+  $mergeOrderTxnId = [string]$mergeOrderTxn.id
+  $duplicateMatchTxnId = [string]$duplicateMatchTxn.id
+  $noReceiptLedgerTxnId = [string]$noReceiptLedgerTxn.id
+
+  Write-Host "Classifying an unresolved bank transaction before it is later matched to a receipt..."
+  $mergeOrderClassifyBody = @{ accountingClass = "expense"; treatment = "business"; categoryId = $categoryId } | ConvertTo-Json -Compress
+  $mergeOrderClassifyPayloadPath = New-JsonPayloadFile $mergeOrderClassifyBody
+  $null = Invoke-CurlJson @(
+    "-c", $cookieJar, "-b", $cookieJar,
+    "-H", "Content-Type: application/json",
+    "--data-binary", "@$mergeOrderClassifyPayloadPath",
+    "$BaseUrl/api/clients/$clientId/bank-transactions/$mergeOrderTxnId/classify"
+  )
+  Remove-TempFile $mergeOrderClassifyPayloadPath
+
+  $preMergeLedger = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/ledger?period=2026-10")
+  $preMergeEntries = @($preMergeLedger.entries) | Where-Object { $_.source.bankTransaction -and $_.source.bankTransaction.id -eq $mergeOrderTxnId }
+  if (@($preMergeEntries).Count -ne 1) {
+    throw "Classifying an unresolved bank transaction did not create its own bank-only ledger row."
+  }
+
+  Write-Host "Filing a receipt that will later be matched to the already-classified transaction..."
+  $mergeOrderReceiptUpload = Invoke-CurlJson @(
+    "-c", $cookieJar, "-b", $cookieJar,
+    "-F", "file=@$ReceiptPath",
+    "$BaseUrl/api/clients/$clientId/receipts"
+  )
+  $mergeOrderReceiptId = [string]$mergeOrderReceiptUpload.receipt.id
+  if (-not $mergeOrderReceiptId) { throw "Merge-order regression receipt upload did not return a receipt id." }
+  $mergeOrderReview = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/review")
+  $mergeOrderReceipt = @($mergeOrderReview.receipts) | Where-Object { $_.id -eq $mergeOrderReceiptId } | Select-Object -First 1
+  if (-not $mergeOrderReceipt) { throw "Merge-order regression receipt did not appear in the review inbox." }
+  if ($mergeOrderReceipt.validation_status -eq "fail") { throw "Merge-order regression receipt failed validation and cannot be filed automatically." }
+  $mergeOrderFiled = Invoke-CurlJson @(
+    "-c", $cookieJar, "-b", $cookieJar,
+    "-H", "Content-Type: application/json",
+    "--data-binary", "@$approvePayloadPath",
+    "$BaseUrl/api/clients/$clientId/receipts/$mergeOrderReceiptId/approve"
+  )
+  if ($mergeOrderFiled.receipt.status -ne "filed") { throw "Merge-order regression receipt did not file successfully." }
+
+  Write-Host "Matching the already-classified transaction to the filed receipt and verifying the two ledger rows merge..."
+  $mergeOrderLinkBody = @{ action = "link_receipt"; receiptId = $mergeOrderReceiptId } | ConvertTo-Json -Compress
+  $mergeOrderLinkPayloadPath = New-JsonPayloadFile $mergeOrderLinkBody
+  $null = Invoke-CurlJson @(
+    "-c", $cookieJar, "-b", $cookieJar,
+    "-H", "Content-Type: application/json",
+    "--data-binary", "@$mergeOrderLinkPayloadPath",
+    "$BaseUrl/api/clients/$clientId/bank-transactions/$mergeOrderTxnId/decision"
+  )
+  Remove-TempFile $mergeOrderLinkPayloadPath
+
+  $postMergeLedger = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/ledger?period=2026-10")
+  $mergedEntries = @($postMergeLedger.entries) | Where-Object {
+    ($_.source.bankTransaction -and $_.source.bankTransaction.id -eq $mergeOrderTxnId) -or
+    ($_.source.receipt -and $_.source.receipt.id -eq $mergeOrderReceiptId)
+  }
+  if (@($mergedEntries).Count -ne 1) {
+    throw "Bank-classified-first merge did not collapse to exactly one ledger row. Found $(@($mergedEntries).Count)."
+  }
+  $mergedEntry = $mergedEntries[0]
+  if (-not $mergedEntry.source.bankTransaction -or -not $mergedEntry.source.receipt) {
+    throw "The merged ledger row does not trace to both the bank transaction and the receipt."
+  }
+
+  Write-Host "Verifying a receipt already matched to a bank transaction cannot be matched to a second one..."
+  $duplicateMatchBody = @{ action = "link_receipt"; receiptId = $mergeOrderReceiptId } | ConvertTo-Json -Compress
+  $duplicateMatchPayloadPath = New-JsonPayloadFile $duplicateMatchBody
+  $duplicateMatchStatus = Invoke-CurlExpectStatus @(
+    "-c", $cookieJar, "-b", $cookieJar,
+    "-H", "Content-Type: application/json",
+    "--data-binary", "@$duplicateMatchPayloadPath",
+    "$BaseUrl/api/clients/$clientId/bank-transactions/$duplicateMatchTxnId/decision"
+  ) 409
+  Remove-TempFile $duplicateMatchPayloadPath
+  if ($duplicateMatchStatus -ne 409) {
+    throw "Matching an already-claimed receipt to a second bank transaction must be rejected with HTTP 409."
+  }
+
+  Write-Host "Rejecting the confirmed match and verifying the filed receipt is not dropped from the ledger..."
+  $mergeOrderRejectBody = @{ action = "reject" } | ConvertTo-Json -Compress
+  $mergeOrderRejectPayloadPath = New-JsonPayloadFile $mergeOrderRejectBody
+  $null = Invoke-CurlJson @(
+    "-c", $cookieJar, "-b", $cookieJar,
+    "-H", "Content-Type: application/json",
+    "--data-binary", "@$mergeOrderRejectPayloadPath",
+    "$BaseUrl/api/clients/$clientId/bank-transactions/$mergeOrderTxnId/decision"
+  )
+  Remove-TempFile $mergeOrderRejectPayloadPath
+
+  $postRejectLedger = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/ledger?period=2026-10")
+  $survivingReceiptEntries = @($postRejectLedger.entries) | Where-Object { $_.source.receipt -and $_.source.receipt.id -eq $mergeOrderReceiptId }
+  if (@($survivingReceiptEntries).Count -ne 1) {
+    throw "Rejecting a confirmed match must not remove the filed receipt's own ledger row. Found $(@($survivingReceiptEntries).Count)."
+  }
+  if ($survivingReceiptEntries[0].source.bankTransaction) {
+    throw "The receipt's restored ledger row must no longer reference the rejected bank transaction."
+  }
+
+  Write-Host "Verifying no-receipt-required resolution still creates an authoritative ledger row..."
+  $noReceiptLedgerBody = @{ action = "no_receipt_required"; reason = "Smoke test regression: resolved without evidence" } | ConvertTo-Json -Compress
+  $noReceiptLedgerPayloadPath = New-JsonPayloadFile $noReceiptLedgerBody
+  $null = Invoke-CurlJson @(
+    "-c", $cookieJar, "-b", $cookieJar,
+    "-H", "Content-Type: application/json",
+    "--data-binary", "@$noReceiptLedgerPayloadPath",
+    "$BaseUrl/api/clients/$clientId/bank-transactions/$noReceiptLedgerTxnId/decision"
+  )
+  Remove-TempFile $noReceiptLedgerPayloadPath
+
+  $noReceiptLedgerCheck = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/ledger?period=2026-10")
+  $noReceiptLedgerEntry = @($noReceiptLedgerCheck.entries) | Where-Object { $_.source.bankTransaction -and $_.source.bankTransaction.id -eq $noReceiptLedgerTxnId } | Select-Object -First 1
+  if (-not $noReceiptLedgerEntry) {
+    throw "Resolving a bank transaction as no-receipt-required did not create a canonical ledger row for it."
+  }
+  if ($noReceiptLedgerEntry.accountingClass -ne "needs_review") {
+    throw "A no-receipt-required ledger row must default to needs_review until explicitly classified."
+  }
+
+  Write-Host "Verifying the isolated regression period reports the needs-review row as a close blocker..."
+  $regressionSummary = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/periods/2026-10/summary")
+  if ($regressionSummary.canClose) {
+    throw "Period 2026-10 should not be closeable while the no-receipt-required row remains needs_review."
+  }
+
+  Write-Host "Classifying the no-receipt-required row and resolving the remaining regression exceptions..."
+  foreach ($pair in @(
+    @{ id = $noReceiptLedgerTxnId; classify = $true },
+    @{ id = $mergeOrderTxnId; classify = $false },
+    @{ id = $duplicateMatchTxnId; classify = $false }
+  )) {
+    if (-not $pair.classify) {
+      $reason = "Smoke test regression documented resolution for $($pair.id)"
+      $decisionBody = @{ action = "no_receipt_required"; reason = $reason } | ConvertTo-Json -Compress
+      $decisionPayloadPath = New-JsonPayloadFile $decisionBody
+      $null = Invoke-CurlJson @(
+        "-c", $cookieJar, "-b", $cookieJar,
+        "-H", "Content-Type: application/json",
+        "--data-binary", "@$decisionPayloadPath",
+        "$BaseUrl/api/clients/$clientId/bank-transactions/$($pair.id)/decision"
+      )
+      Remove-TempFile $decisionPayloadPath
+    }
+    $classifyBody = @{ accountingClass = "expense"; treatment = "business"; categoryId = $categoryId } | ConvertTo-Json -Compress
+    $classifyPayloadPath = New-JsonPayloadFile $classifyBody
+    $null = Invoke-CurlJson @(
+      "-c", $cookieJar, "-b", $cookieJar,
+      "-H", "Content-Type: application/json",
+      "--data-binary", "@$classifyPayloadPath",
+      "$BaseUrl/api/clients/$clientId/bank-transactions/$($pair.id)/classify"
+    )
+    Remove-TempFile $classifyPayloadPath
+  }
+
+  $regressionCleanSummary = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/periods/2026-10/summary")
+  if (-not $regressionCleanSummary.canClose) {
+    throw "Regression period 2026-10 should be closeable after resolving all exceptions: $($regressionCleanSummary.blockers -join '; ')"
+  }
+
+  Write-Host "Closing the regression period and verifying its ledger rows immediately reflect closed state..."
+  $null = Invoke-CurlJson @(
+    "-c", $cookieJar, "-b", $cookieJar,
+    "-H", "Content-Type: application/json",
+    "-X", "POST",
+    "--data-binary", "{}",
+    "$BaseUrl/api/clients/$clientId/periods/2026-10/close"
+  )
+  $closedRegressionLedger = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/ledger?period=2026-10")
+  $unclosedAfterClose = @($closedRegressionLedger.entries) | Where-Object { -not $_.closedAt }
+  if (@($unclosedAfterClose).Count -gt 0) {
+    throw "Closing period 2026-10 did not mark all its ledger rows closed; the GUI would still render them editable."
+  }
+
+  Write-Host "Reopening the regression period and verifying its ledger rows immediately become editable again..."
+  $regressionReopenBody = @{ reason = "Smoke test regression reopen to verify closedAt clears immediately" } | ConvertTo-Json -Compress
+  $regressionReopenPayloadPath = New-JsonPayloadFile $regressionReopenBody
+  $null = Invoke-CurlJson @(
+    "-c", $cookieJar, "-b", $cookieJar,
+    "-H", "Content-Type: application/json",
+    "--data-binary", "@$regressionReopenPayloadPath",
+    "$BaseUrl/api/clients/$clientId/periods/2026-10/reopen"
+  )
+  Remove-TempFile $regressionReopenPayloadPath
+  $reopenedRegressionLedger = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/ledger?period=2026-10")
+  $stillClosedAfterReopen = @($reopenedRegressionLedger.entries) | Where-Object { $_.closedAt }
+  if (@($stillClosedAfterReopen).Count -gt 0) {
+    throw "Reopening period 2026-10 did not clear closedAt on its ledger rows; the GUI would still render them read-only."
+  }
+
+  Write-Host "Milestone 4 regression coverage passed." -ForegroundColor Green
+  Write-Host ""
+  Write-Host "Milestone 4 regression coverage (round 2): match-before-classify, bank-authoritative amount, cross-period guard" -ForegroundColor Cyan
+
+  # 2a. A bank transaction matched to a receipt before ever being classified
+  # must not silently inherit the receipt's expense/business default; it
+  # must land as needs_review and stay excluded from P&L until classified.
+  $matchFirstBankCsvPath = Join-Path $env:TEMP "folio-smoke-matchfirst-bank-$([guid]::NewGuid().ToString('N')).csv"
+  $matchFirstBankCsv = "Date,Description,Amount`r`n2026-11-05,FOLIO MATCH FIRST SMOKE,-40.42`r`n"
+  [System.IO.File]::WriteAllText($matchFirstBankCsvPath, $matchFirstBankCsv, $utf8)
+  $matchFirstImport = Invoke-CurlJson @(
+    "-c", $cookieJar, "-b", $cookieJar,
+    "-F", "file=@$matchFirstBankCsvPath",
+    "-F", "mapping=<$bankMappingPayloadPath",
+    "$BaseUrl/api/clients/$clientId/bank-transactions/import"
+  )
+  if ($matchFirstImport.insertedCount -ne 1) { throw "Match-first regression CSV did not insert its transaction." }
+  Remove-TempFile $matchFirstBankCsvPath
+
+  $matchFirstQueue = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/bank-transactions")
+  $matchFirstTxn = @($matchFirstQueue.transactions) | Where-Object { $_.description -eq "FOLIO MATCH FIRST SMOKE" } | Select-Object -First 1
+  if (-not $matchFirstTxn) { throw "Match-first regression transaction was not persisted." }
+  $matchFirstTxnId = [string]$matchFirstTxn.id
+
+  $matchFirstReceiptUpload = Invoke-CurlJson @(
+    "-c", $cookieJar, "-b", $cookieJar,
+    "-F", "file=@$ReceiptPath",
+    "$BaseUrl/api/clients/$clientId/receipts"
+  )
+  $matchFirstReceiptId = [string]$matchFirstReceiptUpload.receipt.id
+  if (-not $matchFirstReceiptId) { throw "Match-first regression receipt upload did not return a receipt id." }
+  $matchFirstReview = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/review")
+  $matchFirstReceipt = @($matchFirstReview.receipts) | Where-Object { $_.id -eq $matchFirstReceiptId } | Select-Object -First 1
+  if (-not $matchFirstReceipt) { throw "Match-first regression receipt did not appear in the review inbox." }
+  if ($matchFirstReceipt.validation_status -eq "fail") { throw "Match-first regression receipt failed validation and cannot be filed automatically." }
+  $matchFirstFiled = Invoke-CurlJson @(
+    "-c", $cookieJar, "-b", $cookieJar,
+    "-H", "Content-Type: application/json",
+    "--data-binary", "@$approvePayloadPath",
+    "$BaseUrl/api/clients/$clientId/receipts/$matchFirstReceiptId/approve"
+  )
+  if ($matchFirstFiled.receipt.status -ne "filed") { throw "Match-first regression receipt did not file successfully." }
+
+  Write-Host "Matching an unclassified bank transaction to a filed receipt and verifying it lands needs_review, excluded from P&L..."
+  $matchFirstLinkBody = @{ action = "link_receipt"; receiptId = $matchFirstReceiptId } | ConvertTo-Json -Compress
+  $matchFirstLinkPayloadPath = New-JsonPayloadFile $matchFirstLinkBody
+  $null = Invoke-CurlJson @(
+    "-c", $cookieJar, "-b", $cookieJar,
+    "-H", "Content-Type: application/json",
+    "--data-binary", "@$matchFirstLinkPayloadPath",
+    "$BaseUrl/api/clients/$clientId/bank-transactions/$matchFirstTxnId/decision"
+  )
+  Remove-TempFile $matchFirstLinkPayloadPath
+
+  $matchFirstLedger = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/ledger?period=2026-11")
+  $matchFirstEntry = @($matchFirstLedger.entries) | Where-Object { $_.source.bankTransaction -and $_.source.bankTransaction.id -eq $matchFirstTxnId } | Select-Object -First 1
+  if (-not $matchFirstEntry) { throw "Matching an unclassified bank transaction did not produce a merged ledger row." }
+  if ($matchFirstEntry.accountingClass -ne "needs_review") {
+    throw "A bank transaction matched before classification must land needs_review, not inherit the receipt's default. Found $($matchFirstEntry.accountingClass)."
+  }
+
+  $matchFirstPnl = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/pnl?period=2026-11")
+  if ([double]$matchFirstPnl.expenses -ne 0) {
+    throw "A needs_review matched row must be excluded from P&L until classified. Found expenses $($matchFirstPnl.expenses)."
+  }
+
+  Write-Host "Classifying the matched transaction and verifying it now enters P&L..."
+  $matchFirstClassifyBody = @{ accountingClass = "expense"; treatment = "business"; categoryId = $categoryId } | ConvertTo-Json -Compress
+  $matchFirstClassifyPayloadPath = New-JsonPayloadFile $matchFirstClassifyBody
+  $null = Invoke-CurlJson @(
+    "-c", $cookieJar, "-b", $cookieJar,
+    "-H", "Content-Type: application/json",
+    "--data-binary", "@$matchFirstClassifyPayloadPath",
+    "$BaseUrl/api/clients/$clientId/bank-transactions/$matchFirstTxnId/classify"
+  )
+  Remove-TempFile $matchFirstClassifyPayloadPath
+  $matchFirstPnlAfter = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/pnl?period=2026-11")
+  if ([double]$matchFirstPnlAfter.expenses -le 0) {
+    throw "Classifying the matched transaction should bring it into P&L. Found expenses $($matchFirstPnlAfter.expenses)."
+  }
+
+  # 2b. When a bank amount differs from the receipt total by a cent (within
+  # the allowed matching tolerance), the merged ledger row must adopt the
+  # bank amount, since the bank transaction is the authoritative cash
+  # movement, not the receipt's own extracted total.
+  Write-Host "Verifying a merged ledger row adopts the bank amount over a slightly different receipt total..."
+  $bankAuthoritativeAmount = [Math]::Round($approvedTotal - 0.01, 2)
+  $bankAuthoritativeAmountText = $bankAuthoritativeAmount.ToString("0.00", [System.Globalization.CultureInfo]::InvariantCulture)
+  $bankAuthoritativeCsvPath = Join-Path $env:TEMP "folio-smoke-bankauth-$([guid]::NewGuid().ToString('N')).csv"
+  $bankAuthoritativeCsv = "Date,Description,Amount`r`n2026-11-06,FOLIO BANK AUTHORITATIVE SMOKE,-$bankAuthoritativeAmountText`r`n"
+  [System.IO.File]::WriteAllText($bankAuthoritativeCsvPath, $bankAuthoritativeCsv, $utf8)
+  $bankAuthoritativeImport = Invoke-CurlJson @(
+    "-c", $cookieJar, "-b", $cookieJar,
+    "-F", "file=@$bankAuthoritativeCsvPath",
+    "-F", "mapping=<$bankMappingPayloadPath",
+    "$BaseUrl/api/clients/$clientId/bank-transactions/import"
+  )
+  if ($bankAuthoritativeImport.insertedCount -ne 1) { throw "Bank-authoritative-amount regression CSV did not insert its transaction." }
+  Remove-TempFile $bankAuthoritativeCsvPath
+
+  $bankAuthoritativeQueue = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/bank-transactions")
+  $bankAuthoritativeTxn = @($bankAuthoritativeQueue.transactions) | Where-Object { $_.description -eq "FOLIO BANK AUTHORITATIVE SMOKE" } | Select-Object -First 1
+  if (-not $bankAuthoritativeTxn) { throw "Bank-authoritative-amount regression transaction was not persisted." }
+  $bankAuthoritativeTxnId = [string]$bankAuthoritativeTxn.id
+
+  $bankAuthoritativeReceiptUpload = Invoke-CurlJson @(
+    "-c", $cookieJar, "-b", $cookieJar,
+    "-F", "file=@$ReceiptPath",
+    "$BaseUrl/api/clients/$clientId/receipts"
+  )
+  $bankAuthoritativeReceiptId = [string]$bankAuthoritativeReceiptUpload.receipt.id
+  if (-not $bankAuthoritativeReceiptId) { throw "Bank-authoritative-amount regression receipt upload did not return a receipt id." }
+  $bankAuthoritativeReview = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/review")
+  $bankAuthoritativeReceipt = @($bankAuthoritativeReview.receipts) | Where-Object { $_.id -eq $bankAuthoritativeReceiptId } | Select-Object -First 1
+  if (-not $bankAuthoritativeReceipt) { throw "Bank-authoritative-amount regression receipt did not appear in the review inbox." }
+  if ($bankAuthoritativeReceipt.validation_status -eq "fail") { throw "Bank-authoritative-amount regression receipt failed validation and cannot be filed automatically." }
+  $bankAuthoritativeFiled = Invoke-CurlJson @(
+    "-c", $cookieJar, "-b", $cookieJar,
+    "-H", "Content-Type: application/json",
+    "--data-binary", "@$approvePayloadPath",
+    "$BaseUrl/api/clients/$clientId/receipts/$bankAuthoritativeReceiptId/approve"
+  )
+  if ($bankAuthoritativeFiled.receipt.status -ne "filed") { throw "Bank-authoritative-amount regression receipt did not file successfully." }
+
+  $bankAuthoritativeLinkBody = @{ action = "link_receipt"; receiptId = $bankAuthoritativeReceiptId } | ConvertTo-Json -Compress
+  $bankAuthoritativeLinkPayloadPath = New-JsonPayloadFile $bankAuthoritativeLinkBody
+  $null = Invoke-CurlJson @(
+    "-c", $cookieJar, "-b", $cookieJar,
+    "-H", "Content-Type: application/json",
+    "--data-binary", "@$bankAuthoritativeLinkPayloadPath",
+    "$BaseUrl/api/clients/$clientId/bank-transactions/$bankAuthoritativeTxnId/decision"
+  )
+  Remove-TempFile $bankAuthoritativeLinkPayloadPath
+
+  $bankAuthoritativeLedger = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/ledger?period=2026-11")
+  $bankAuthoritativeEntry = @($bankAuthoritativeLedger.entries) | Where-Object { $_.source.bankTransaction -and $_.source.bankTransaction.id -eq $bankAuthoritativeTxnId } | Select-Object -First 1
+  if (-not $bankAuthoritativeEntry) { throw "Bank-authoritative-amount regression did not produce a merged ledger row." }
+  if ([Math]::Abs([double]$bankAuthoritativeEntry.amount - $bankAuthoritativeAmount) -gt 0.001) {
+    throw "The merged ledger row must adopt the bank amount ($bankAuthoritativeAmount), not the receipt total ($approvedTotal). Found $($bankAuthoritativeEntry.amount)."
+  }
+
+  # 2c. Matching must guard every affected period, not just the bank
+  # transaction's own month. A filed receipt from a closed month must not be
+  # matchable to a bank transaction in a different, open month.
+  Write-Host "Verifying a receipt from a closed period cannot be matched to a bank transaction in an open period..."
+  $crossPeriodReceiptPath = Join-Path $env:TEMP "folio-smoke-crossperiod-receipt-$([guid]::NewGuid().ToString('N')).png"
+  New-SampleReceiptPng $crossPeriodReceiptPath "12/31/2026"
+  $crossPeriodReceiptUpload = Invoke-CurlJson @(
+    "-c", $cookieJar, "-b", $cookieJar,
+    "-F", "file=@$crossPeriodReceiptPath",
+    "$BaseUrl/api/clients/$clientId/receipts"
+  )
+  Remove-TempFile $crossPeriodReceiptPath
+  $crossPeriodReceiptId = [string]$crossPeriodReceiptUpload.receipt.id
+  if (-not $crossPeriodReceiptId) { throw "Cross-period regression receipt upload did not return a receipt id." }
+  $crossPeriodReview = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/review")
+  $crossPeriodReceipt = @($crossPeriodReview.receipts) | Where-Object { $_.id -eq $crossPeriodReceiptId } | Select-Object -First 1
+  if (-not $crossPeriodReceipt) { throw "Cross-period regression receipt did not appear in the review inbox." }
+  if ($crossPeriodReceipt.extracted_date -ne "2026-12-31") {
+    throw "Cross-period regression receipt did not extract the controlled date 2026-12-31. Found $($crossPeriodReceipt.extracted_date)."
+  }
+  if ($crossPeriodReceipt.validation_status -eq "fail") { throw "Cross-period regression receipt failed validation and cannot be filed automatically." }
+  $crossPeriodFiled = Invoke-CurlJson @(
+    "-c", $cookieJar, "-b", $cookieJar,
+    "-H", "Content-Type: application/json",
+    "--data-binary", "@$approvePayloadPath",
+    "$BaseUrl/api/clients/$clientId/receipts/$crossPeriodReceiptId/approve"
+  )
+  if ($crossPeriodFiled.receipt.status -ne "filed") { throw "Cross-period regression receipt did not file successfully." }
+
+  $crossPeriodLedger = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/ledger?period=2026-12")
+  $crossPeriodEntry = @($crossPeriodLedger.entries) | Where-Object { $_.source.receipt -and $_.source.receipt.id -eq $crossPeriodReceiptId } | Select-Object -First 1
+  if (-not $crossPeriodEntry) { throw "Cross-period regression receipt did not produce its own ledger row." }
+  $crossPeriodCategoryBody = @{ categoryId = $categoryId } | ConvertTo-Json -Compress
+  $crossPeriodCategoryPayloadPath = New-JsonPayloadFile $crossPeriodCategoryBody
+  $null = Invoke-CurlJson @(
+    "-c", $cookieJar, "-b", $cookieJar,
+    "-H", "Content-Type: application/json",
+    "-X", "PATCH",
+    "--data-binary", "@$crossPeriodCategoryPayloadPath",
+    "$BaseUrl/api/clients/$clientId/ledger/$($crossPeriodEntry.id)/category"
+  )
+  Remove-TempFile $crossPeriodCategoryPayloadPath
+
+  $crossPeriodCleanSummary = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/periods/2026-12/summary")
+  if (-not $crossPeriodCleanSummary.canClose) {
+    throw "Period 2026-12 should be closeable after categorizing its only row: $($crossPeriodCleanSummary.blockers -join '; ')"
+  }
+  $null = Invoke-CurlJson @(
+    "-c", $cookieJar, "-b", $cookieJar,
+    "-H", "Content-Type: application/json",
+    "-X", "POST",
+    "--data-binary", "{}",
+    "$BaseUrl/api/clients/$clientId/periods/2026-12/close"
+  )
+
+  $crossPeriodBankCsvPath = Join-Path $env:TEMP "folio-smoke-crossperiod-bank-$([guid]::NewGuid().ToString('N')).csv"
+  $crossPeriodBankCsv = "Date,Description,Amount`r`n2026-11-07,FOLIO CROSS PERIOD SMOKE,-64.95`r`n"
+  [System.IO.File]::WriteAllText($crossPeriodBankCsvPath, $crossPeriodBankCsv, $utf8)
+  $crossPeriodImport = Invoke-CurlJson @(
+    "-c", $cookieJar, "-b", $cookieJar,
+    "-F", "file=@$crossPeriodBankCsvPath",
+    "-F", "mapping=<$bankMappingPayloadPath",
+    "$BaseUrl/api/clients/$clientId/bank-transactions/import"
+  )
+  if ($crossPeriodImport.insertedCount -ne 1) { throw "Cross-period regression bank CSV did not insert its transaction." }
+  Remove-TempFile $crossPeriodBankCsvPath
+
+  $crossPeriodQueue = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/bank-transactions")
+  $crossPeriodBankTxn = @($crossPeriodQueue.transactions) | Where-Object { $_.description -eq "FOLIO CROSS PERIOD SMOKE" } | Select-Object -First 1
+  if (-not $crossPeriodBankTxn) { throw "Cross-period regression bank transaction was not persisted." }
+  $crossPeriodBankTxnId = [string]$crossPeriodBankTxn.id
+
+  $crossPeriodLinkBody = @{ action = "link_receipt"; receiptId = $crossPeriodReceiptId } | ConvertTo-Json -Compress
+  $crossPeriodLinkPayloadPath = New-JsonPayloadFile $crossPeriodLinkBody
+  $crossPeriodLinkStatus = Invoke-CurlExpectStatus @(
+    "-c", $cookieJar, "-b", $cookieJar,
+    "-H", "Content-Type: application/json",
+    "--data-binary", "@$crossPeriodLinkPayloadPath",
+    "$BaseUrl/api/clients/$clientId/bank-transactions/$crossPeriodBankTxnId/decision"
+  ) 409
+  Remove-TempFile $crossPeriodLinkPayloadPath
+  if ($crossPeriodLinkStatus -ne 409) {
+    throw "Matching an open-period bank transaction to a closed-period receipt must be rejected with HTTP 409."
+  }
+
+  Write-Host "Milestone 4 regression coverage round 2 passed." -ForegroundColor Green
+
+
+  Write-Host ""
   Write-Host "END-TO-END PAID-ALPHA SMOKE TEST PASSED" -ForegroundColor Green
   Write-Host "BANK EXCEPTION WORKFLOW PRODUCTION VERIFICATION PASSED" -ForegroundColor Green
-  Write-Host "Receipt -> R2 -> Workers AI -> line items -> validation -> review -> filed ledger -> P&L -> source drill-down -> CSV -> duplicate protection -> suggested match -> explicit confirmation -> exception inbox -> missing receipt upload -> receipt review -> resolved match -> documented no-receipt resolution -> audit"
+  Write-Host "CANONICAL LEDGER + CLASSIFICATION + PERIOD CLOSE PRODUCTION VERIFICATION PASSED" -ForegroundColor Green
+  Write-Host "Receipt -> R2 -> Workers AI -> line items -> validation -> review -> filed -> canonical ledger -> merged bank+receipt -> single expense -> explicit classification -> personal/transfer excluded from P&L -> deterministic blockers -> clean period close -> closed-period mutation rejection -> explicit reopen -> audit history"
   Write-Host "Test account: $email"
   Write-Host "Test password: $password"
   Write-Host "Test client:  $clientId"
@@ -471,6 +1218,9 @@ try {
   Write-Host "Matched bank transaction: $bankTransactionId"
   Write-Host "Resolved missing receipt transaction: $missingTransactionId"
   Write-Host "No-receipt-required transaction: $noReceiptTransactionId"
+  Write-Host "Smoke Supplies category: $categoryId"
+  Write-Host "Ledger-backed P&L total business expenses: $($pnlLedger.expenses)"
+  Write-Host "Period 2026-08 close -> reopen verified"
 } finally {
   Remove-TempFile $cookieJar
   Remove-TempFile $signupPayloadPath
@@ -481,6 +1231,10 @@ try {
   Remove-TempFile $noReceiptDecisionPayloadPath
   Remove-TempFile $bankCsvPath
   Remove-TempFile $bankExceptionCsvPath
+  Remove-TempFile $categoryPayloadPath
+  Remove-TempFile $classifyCsvPath
+  Remove-TempFile $closedClassifyPayloadPath
+  Remove-TempFile $reopenPayloadPath
   if ($generatedReceipt) {
     Remove-TempFile $ReceiptPath
   }

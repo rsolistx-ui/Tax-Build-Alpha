@@ -28,9 +28,8 @@ The paid alpha intentionally serves the React app and API from one Worker origin
 - Review is evidence-first. The source document is visible beside editable extracted facts and validation results.
 - Clicking Approve always saves the visible draft first, reruns validation, and only then files the receipt.
 - Failed validation cannot be filed without an explicit professional override.
-- Only filed evidence enters the P&L.
-- Receipt-level tax, tip, discounts, shipping, and rounding are kept as visible adjustment lines so the P&L reconciles to the approved receipt total.
-- Every P&L category drills down to the contributing lines and exact source receipts.
+- Only filed evidence enters the P&L, sourced from the canonical ledger, never directly from unreviewed extraction.
+- Every P&L category drills down to the exact ledger rows behind it and their source bank transaction and/or receipt.
 - Bank CSVs are mapped, normalized, deduplicated, and stored in Neon without requiring a live bank integration.
 - Filed receipts can be deterministically suggested against bank transactions, but no suggested match becomes final without a professional decision.
 - Unmatched bank transactions become an exception inbox instead of a search problem.
@@ -39,6 +38,9 @@ The paid alpha intentionally serves the React app and API from one Worker origin
 - Per-client merchant category corrections are remembered for future extracts.
 - Client business profile data can inform extraction without leaking rules between clients.
 - Production extraction failures are real failures. Production never silently substitutes mock data.
+- A canonical ledger is the single source of book activity. A reconciled bank transaction and its matched receipt become one ledger expense, never two.
+- Every transaction receives an explicit accounting class and business/personal treatment from a professional. Personal rows, transfers, owner contributions, and owner draws never enter operating P&L.
+- Monthly periods track open and closed state. A closed period rejects accounting mutations until a professional explicitly reopens it with a recorded reason.
 
 ## Repository layout
 
@@ -131,7 +133,7 @@ The script will:
 16. Upload `GEMINI_API_KEY` only when it is already present in the environment.
 17. Set production `BETTER_AUTH_URL` and `APP_ORIGIN` to the same Worker origin.
 18. Redeploy and verify Neon plus Workers AI through the health endpoint.
-19. Generate controlled receipt and bank inputs and exercise the live production path through R2, Workers AI, line items, validation, filing, P&L reconciliation, source drill-down, bank normalization, duplicate protection, deterministic matching, explicit reconciliation, missing-receipt resolution, and audit history.
+19. Generate controlled receipt and bank inputs and exercise the live production path through R2, Workers AI, line items, validation, filing, P&L reconciliation, source drill-down, bank normalization, duplicate protection, deterministic matching, explicit reconciliation, missing-receipt resolution, audit history, canonical ledger merging, explicit classification, personal/transfer exclusion from P&L, deterministic close blockers, clean period close, closed-period mutation rejection, and explicit reopen with audit history.
 20. Stop with an error instead of silently overriding any failed deterministic validation.
 
 No database credential or auth secret is written into the repository. The Neon CLI may create a local `.neon` context when its guided fallback is needed. Neon manages that file as local project context and adds it to git ignore.
@@ -179,6 +181,13 @@ receipt file
   -> receipt review and filing
   -> resolved bank relationship
   -> audit history
+  -> one canonical ledger row per reconciled activity
+  -> explicit professional classification
+  -> personal and transfer rows excluded from ledger P&L
+  -> deterministic period close blockers
+  -> clean period close
+  -> closed-period mutation rejection
+  -> explicit reopen with audit history
 ```
 
 The smoke test never auto-overrides failed validation. If deterministic validation fails, it stops in review and prints the failed checks.
@@ -211,11 +220,45 @@ The arithmetic tolerance is two cents for normal rounding differences.
 
 ## P&L traceability
 
-Only receipts in `filed` status enter the P&L. Purchased line items remain their own ledger entries. When the approved receipt total differs from the item sum, Folio creates a visible receipt-level adjustment entry for the difference. This captures tax, tip, discounts, shipping, or rounding without hiding those amounts inside item rows.
+`GET /api/clients/:clientId/pnl` is the single production P&L source. It builds income and expense totals from the canonical `ledger_entries` table, filtered to confirmed business income and business expense. A reconciled receipt plus bank transaction counts exactly once, since the two collapse into one ledger row on match. Transfers, owner contributions, owner draws, personal rows, and anything still `needs_review` are excluded regardless of source. An optional `period=YYYY-MM` query filters to a single period; omitting it returns all-time totals.
 
-A filed receipt with no line items falls back to its approved receipt total so evidence is not silently dropped.
+The response shape is `{ income, expenses, net, byCategory: { income: [...], expense: [...] }, note }`, where each `byCategory` row carries `categoryId`, `category`, `slug`, `total`, and `count`.
 
-`GET /api/clients/:clientId/pnl/drilldown?category=...` returns every contributing entry with its source receipt URL.
+`GET /api/clients/:clientId/pnl/drilldown?categoryId=...&class=income|expense` traces every ledger row behind one category/class pair back to its exact source evidence (the matched bank transaction, the receipt, or both), with an optional `period=YYYY-MM` filter.
+
+## Canonical ledger
+
+A `ledger_entries` row is the single authoritative record of book activity. Every row traces to its source bank transaction, matched receipt, or both:
+
+- A bank transaction represents the cash movement when present.
+- A matched receipt is supporting evidence, not a second expense.
+- Receipt-only activity creates a ledger row when no bank row exists.
+- When a bank transaction and a filed receipt are reconciled, the receipt-only row absorbs the bank source so the activity appears exactly once, adopting the bank amount and currency as authoritative for the cash movement.
+
+Supported transaction classes are expense, income, transfer, owner contribution, owner draw, and needs review. Business/personal treatment is explicit and separate from the class. No silent AI posting: a row enters operating P&L only after a professional classifies it as business income or business expense.
+
+Classification and category changes record the actor and before/after state in `audit_events`. All ledger endpoints enforce the same authenticated firm/client boundary as the rest of the API.
+
+## Professional classification
+
+`POST /api/clients/:clientId/bank-transactions/:transactionId/classify` records the accounting class, business/personal treatment, and optional category for a resolved bank transaction and writes or updates its canonical ledger row. Closed periods reject the call with HTTP 409. Category changes on existing rows use `PATCH /api/clients/:clientId/ledger/:entryId/classify` and `PATCH .../category`.
+
+## Period model
+
+Periods use `YYYY-MM` keys with open and closed states.
+
+- `GET /api/clients/:clientId/periods/:periodKey/summary` reports state, per-class/treatment totals, a deterministic blocker list, and whether the period can close.
+- A period cannot close while any of the following exists in it: an unresolved bank exception, a pending linked receipt, an uncategorized business ledger row, a receipt in professional review, or a `needs_review` ledger class.
+- `POST .../close` records the actor and timestamp, stamps the period's ledger rows, and writes a `period_closed` audit event.
+- Accounting mutations against a closed period are rejected with HTTP 409.
+- `POST .../reopen` requires an explicit reason, clears the close stamp, and writes a `period_reopened` audit event.
+- `GET .../periods/:periodKey/audit` returns the period's close and reopen history.
+
+## Workspace shell
+
+The client workspace runs inside the permanent professional application shell. The shell mounts global navigation (Home, Clients, Inbox, Receipts, Banking, Transactions, Books, Reports, Tax, Documents, Settings) plus durable client-level navigation with a persistent client header, period selector, status/workload summary, and an evidence-first transactions table. Only real capabilities are wired; future sections are not faked.
+
+The Transactions view is a dense table with date, description, amount, class, treatment, category, source type (bank, receipt, or manual), and period. It supports search, filters by class/treatment/category/period, batch selection foundation, open-row detail, and direct links to source evidence. Closed-period rows render read-only.
 
 ## Bank reconciliation and exceptions
 
@@ -249,16 +292,15 @@ The bootstrap does not upgrade the Cloudflare account or enable paid inference.
 To protect the paid-alpha timeline, this milestone does not add:
 
 - Plaid or any live bank feed
-- payroll execution
-- tax-year checklist UI
-- e-file
+- payroll
 - invoicing or accounts receivable
-- full MFA rollout
-- queue consumer and bulk async processing
-- PDF or Excel report export
-- item-level machine learning beyond correction rules
+- e-file
+- tax form calculation engine
+- PDF or Excel export
+- bulk receipt redesign beyond what supports the workspace shell
+- speculative AI accounting decisions
 
-Those follow only after the real receipt, bank, and exception workflow is tested against Phyllis's actual operating process.
+Those follow only after the real receipt, bank, ledger, and period workflow is tested against Phyllis's actual operating process.
 
 ## Verification commands
 
