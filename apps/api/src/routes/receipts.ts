@@ -9,6 +9,7 @@ import { getClient, type ClientRow } from "../services/clients";
 import { newId } from "../lib/id";
 import { getLlmProvider, type ReceiptBusinessContext, type ReceiptExtraction } from "../providers/llm";
 import { validateReceipt } from "../services/receipt-validation";
+import { createLedgerEntry, getOrCreatePeriodKey, attachBankSourceToReceiptLedgerEntry } from "../services/ledger";
 
 export const receiptRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 receiptRoutes.use("*", requireSession);
@@ -403,6 +404,42 @@ receiptRoutes.post("/:clientId/receipts/:receiptId/approve", async (c) => {
   }
 
   await db.transaction(statements);
+
+  // Resolved bank transactions now trace to this filing; attach the bank source to
+  // any receipt-only ledger entry so the activity is never counted twice.
+  for (const bankTransaction of pendingBankTransactions) {
+    await attachBankSourceToReceiptLedgerEntry(db, client.id, receiptId, String(bankTransaction.id));
+  }
+
+  // Create ledger entry for this receipt if it doesn't have a bank transaction
+  if (pendingBankTransactions.length === 0 && receipt.extracted_date && receipt.extracted_total !== null) {
+    const extractedDate = String(receipt.extracted_date);
+    const extractedTotal = Number(receipt.extracted_total);
+    const periodKey = await getOrCreatePeriodKey(db, client.id, extractedDate);
+    const existing = await db.query<{ id: string }>(
+      `SELECT id FROM ledger_entries
+       WHERE client_id = $1
+         AND source_bank_transaction_id IS NULL
+         AND source_receipt_id = $2`,
+      [client.id, receiptId],
+    );
+
+    if (!existing[0]) {
+      await createLedgerEntry(db, {
+        clientId: client.id,
+        periodKey,
+        entryDate: extractedDate,
+        description: String(receipt.extracted_merchant || "Receipt"),
+        amount: extractedTotal,
+        currency: String(receipt.extracted_currency || "USD"),
+        accountingClass: "expense",
+        treatment: "business",
+        categoryId,
+        source: { type: "receipt", receiptId },
+        createdByUserId: c.get("userId"),
+      });
+    }
+  }
 
   return c.json({
     receipt: await getReceiptDetails(db, receiptId, client.id),

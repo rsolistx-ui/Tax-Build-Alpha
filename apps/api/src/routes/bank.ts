@@ -13,6 +13,7 @@ import {
   type BankColumnMapping,
   type NormalizedBankRow,
 } from "../services/bank-csv";
+import { classifyBankTransaction, attachBankSourceToReceiptLedgerEntry } from "../services/ledger";
 import {
   suggestReceiptMatch,
   type ReceiptMatchCandidate,
@@ -34,6 +35,12 @@ const decisionSchema = z.object({
   action: z.enum(["confirm", "reject", "link_receipt", "no_receipt_required"]),
   receiptId: z.string().min(1).optional(),
   reason: z.string().trim().min(3).max(500).optional(),
+});
+
+const classifySchema = z.object({
+  accountingClass: z.enum(["expense", "income", "transfer", "owner_contribution", "owner_draw", "needs_review"]),
+  treatment: z.enum(["business", "personal"]),
+  categoryId: z.string().nullable().optional(),
 });
 
 const MAX_CSV_BYTES = 5 * 1024 * 1024;
@@ -334,6 +341,7 @@ bankRoutes.post("/:clientId/bank-transactions/:transactionId/decision", async (c
        RETURNING *`,
       [receiptId, c.get("userId"), transactionId, client.id],
     );
+    await attachBankSourceToReceiptLedgerEntry(db, client.id, receiptId, transactionId);
     await logBankAudit(db, client.id, receiptId, c.get("userId"), "bank_match_confirmed", before, after);
     return c.json({ transaction: after });
   }
@@ -358,6 +366,7 @@ bankRoutes.post("/:clientId/bank-transactions/:transactionId/decision", async (c
          RETURNING *`,
         [receipt.id, c.get("userId"), transactionId, client.id],
       );
+      await attachBankSourceToReceiptLedgerEntry(db, client.id, receipt.id, transactionId);
       await logBankAudit(
         db,
         client.id,
@@ -442,6 +451,69 @@ bankRoutes.post("/:clientId/bank-transactions/:transactionId/decision", async (c
     before,
     after,
   );
+  return c.json({ transaction: after });
+});
+
+// Classify a resolved bank transaction (explicit professional decision)
+bankRoutes.post("/:clientId/bank-transactions/:transactionId/classify", async (c) => {
+  const body = classifySchema.parse(await c.req.json());
+  const { db, client } = await authorizedClient(c);
+  if (!client) return c.json({ error: "Not found" }, 404);
+
+  const transactionId = c.req.param("transactionId");
+  const userId = c.get("userId");
+
+  const [before] = await db.query<Record<string, unknown>>(
+    `SELECT * FROM bank_transactions WHERE id = $1 AND client_id = $2`,
+    [transactionId, client.id],
+  );
+  if (!before) return c.json({ error: "Not found" }, 404);
+
+  // Reject classification in a closed period
+  if (before.txn_date) {
+    const periodKey = String(before.txn_date).slice(0, 7);
+    const [period] = await db.query<{ state: string }>(
+      `SELECT state FROM accounting_periods WHERE client_id = $1 AND period_key = $2`,
+      [client.id, periodKey],
+    );
+    if (period?.state === "closed") {
+      return c.json({ error: "Cannot mutate accounting in a closed period" }, 409);
+    }
+  }
+
+  // Verify category if provided
+  if (body.categoryId) {
+    const [category] = await db.query<{ id: string }>(
+      `SELECT id FROM categories WHERE id = $1 AND client_id = $2`,
+      [body.categoryId, client.id],
+    );
+    if (!category) return c.json({ error: "Category not found" }, 404);
+  }
+
+  const [after] = await db.query<Record<string, unknown>>(
+    `UPDATE bank_transactions SET
+       accounting_class = $1,
+       treatment = $2,
+       category_id = $3,
+       classified_at = NOW(),
+       classified_by_user_id = $4
+     WHERE id = $5 AND client_id = $6
+     RETURNING *`,
+    [body.accountingClass, body.treatment, body.categoryId ?? null, userId, transactionId, client.id],
+  );
+
+  await classifyBankTransaction(
+    db,
+    client.id,
+    transactionId,
+    userId,
+    body.accountingClass,
+    body.treatment,
+    body.categoryId ?? null,
+  );
+
+  await logBankAudit(db, client.id, null, userId, "bank_transaction_classified", before, after);
+
   return c.json({ transaction: after });
 });
 
