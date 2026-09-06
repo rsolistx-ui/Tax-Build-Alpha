@@ -625,6 +625,7 @@ try {
   }
 
   Write-Host "Verifying a receipt matched to a personal-disposition bank transaction is excluded from P&L (conflict handling)..."
+  $pnlBeforeConflict = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/pnl")
   $conflictDispositionBody = @{ disposition = "personal" } | ConvertTo-Json -Compress
   $conflictDispositionPayloadPath = New-JsonPayloadFile $conflictDispositionBody
   $null = Invoke-CurlJson @(
@@ -636,8 +637,9 @@ try {
   )
   Remove-TempFile $conflictDispositionPayloadPath
   $pnlAfterConflict = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/pnl")
-  if ([double]$pnlAfterConflict.expenses -ge $pnlExpenses) {
-    throw "A filed receipt whose matched bank transaction is explicitly classified personal must be excluded from expenses."
+  $expectedExpensesAfterExclusion = [double]$pnlBeforeConflict.expenses - $approvedTotal
+  if ([Math]::Abs([double]$pnlAfterConflict.expenses - $expectedExpensesAfterExclusion) -gt 0.02) {
+    throw "A filed receipt whose matched bank transaction is explicitly classified personal must be excluded from expenses. Expected $expectedExpensesAfterExclusion, got $($pnlAfterConflict.expenses)."
   }
   if ([int]$pnlAfterConflict.excludedFiledReceiptCount -lt 1) {
     throw "excludedFiledReceiptCount did not report the personal-disposition exclusion."
