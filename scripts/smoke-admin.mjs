@@ -89,7 +89,50 @@ if (command === "seed-invite") {
      ORDER BY c.created_at`,
   );
   console.log(JSON.stringify({ rows: result.rows ?? [] }));
+} else if (command === "verify-clean") {
+  // Directly re-queries Neon (independent of what the cleanup endpoint
+  // claimed) to prove this exact smoke run left zero residue, and
+  // separately proves no folio-smoke-*@example.com row survives anywhere
+  // in beta_invitations, regardless of which run created it.
+  const [firmId, ownerUserId] = args;
+  if (!firmId || !ownerUserId) { console.error("usage: verify-clean <firmId> <ownerUserId>"); process.exit(1); }
+
+  const checks = {};
+  checks.firms = (await query(`SELECT COUNT(*)::int AS n FROM firms WHERE id = $1`, [firmId])).rows[0][0];
+  checks.clients = (await query(`SELECT COUNT(*)::int AS n FROM clients WHERE firm_id = $1`, [firmId])).rows[0][0];
+  checks.receipts = (await query(
+    `SELECT COUNT(*)::int AS n FROM receipts WHERE client_id IN (SELECT id FROM clients WHERE firm_id = $1)`,
+    [firmId],
+  )).rows[0][0];
+  checks.bank_transactions = (await query(
+    `SELECT COUNT(*)::int AS n FROM bank_transactions WHERE client_id IN (SELECT id FROM clients WHERE firm_id = $1)`,
+    [firmId],
+  )).rows[0][0];
+  checks.beta_invitations_for_run = (await query(
+    `SELECT COUNT(*)::int AS n FROM beta_invitations WHERE redeemed_by_user_id = $1`,
+    [ownerUserId],
+  )).rows[0][0];
+  checks.beta_entitlements_for_run = (await query(
+    `SELECT COUNT(*)::int AS n FROM beta_entitlements WHERE user_id = $1`,
+    [ownerUserId],
+  )).rows[0][0];
+  checks.beta_access_events_for_run = (await query(
+    `SELECT COUNT(*)::int AS n FROM beta_access_events WHERE affected_user_id = $1 OR actor_user_id = $1`,
+    [ownerUserId],
+  )).rows[0][0];
+  checks.any_smoke_invitation_anywhere = (await query(
+    `SELECT COUNT(*)::int AS n FROM beta_invitations WHERE email LIKE 'folio-smoke-%@example.com'`,
+  )).rows[0][0];
+  checks.any_smoke_entitlement_anywhere = (await query(
+    `SELECT COUNT(*)::int AS n FROM beta_entitlements be
+     JOIN beta_invitations bi ON bi.redeemed_by_user_id = be.user_id
+     WHERE bi.email LIKE 'folio-smoke-%@example.com'`,
+  )).rows[0][0];
+
+  const allZero = Object.values(checks).every((n) => Number(n) === 0);
+  console.log(JSON.stringify({ clean: allZero, checks }));
+  if (!allZero) process.exit(1);
 } else {
-  console.error("Unknown command. Use: seed-invite | revoke-by-email | find-firm-id-by-email | inventory-smoke-clients");
+  console.error("Unknown command. Use: seed-invite | revoke-by-email | find-firm-id-by-email | inventory-smoke-clients | verify-clean");
   process.exit(1);
 }

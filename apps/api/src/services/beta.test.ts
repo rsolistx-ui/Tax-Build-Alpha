@@ -4,6 +4,8 @@ import {
   hashToken,
   validateInvitationRedemption,
   computeAccessDecision,
+  isInvitationExpiredButStillPending,
+  canRevokeInvitation,
   addDays,
   DEFAULT_BETA_DAYS,
   type InvitationRow,
@@ -93,6 +95,54 @@ describe("validateInvitationRedemption", () => {
   it("rejects an invitation whose expiry instant has passed even if status still says pending", () => {
     const expired = invitation({ expiresAt: "2020-01-01T00:00:00.000Z" });
     expect(validateInvitationRedemption(expired, "phyllis@example.com", now)).toEqual({ ok: false, reason: "EXPIRED" });
+  });
+});
+
+
+describe("isInvitationExpiredButStillPending", () => {
+  const now = new Date("2026-06-01T00:00:00.000Z");
+
+  it("is true for a pending invitation whose expiry instant has passed", () => {
+    const inv = invitation({ status: "pending", expiresAt: "2020-01-01T00:00:00.000Z" });
+    expect(isInvitationExpiredButStillPending(inv, now)).toBe(true);
+  });
+
+  it("is false for a pending invitation that has not yet expired", () => {
+    const inv = invitation({ status: "pending", expiresAt: "2099-01-01T00:00:00.000Z" });
+    expect(isInvitationExpiredButStillPending(inv, now)).toBe(false);
+  });
+
+  it("is false for an already-redeemed invitation even if its expiry has passed", () => {
+    const inv = invitation({ status: "redeemed", expiresAt: "2020-01-01T00:00:00.000Z" });
+    expect(isInvitationExpiredButStillPending(inv, now)).toBe(false);
+  });
+
+  it("is false for an already-revoked invitation", () => {
+    const inv = invitation({ status: "revoked", expiresAt: "2020-01-01T00:00:00.000Z" });
+    expect(isInvitationExpiredButStillPending(inv, now)).toBe(false);
+  });
+
+  it("is false for an invitation already marked expired", () => {
+    const inv = invitation({ status: "expired", expiresAt: "2020-01-01T00:00:00.000Z" });
+    expect(isInvitationExpiredButStillPending(inv, now)).toBe(false);
+  });
+});
+
+describe("canRevokeInvitation", () => {
+  it("allows revoking a pending invitation", () => {
+    expect(canRevokeInvitation("pending")).toBe(true);
+  });
+
+  it("refuses to revoke a redeemed invitation", () => {
+    expect(canRevokeInvitation("redeemed")).toBe(false);
+  });
+
+  it("refuses to revoke an already-revoked invitation", () => {
+    expect(canRevokeInvitation("revoked")).toBe(false);
+  });
+
+  it("refuses to revoke an expired invitation", () => {
+    expect(canRevokeInvitation("expired")).toBe(false);
   });
 });
 

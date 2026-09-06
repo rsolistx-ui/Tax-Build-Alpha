@@ -1,7 +1,8 @@
 import type { FormEvent } from "react";
-import { useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
+import { parseInvitationFragment } from "@/lib/beta";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -9,13 +10,25 @@ import { Label } from "@/components/ui/label";
 
 export function SignupPage() {
   const navigate = useNavigate();
-  const [params] = useSearchParams();
-  const [token, setToken] = useState(params.get("token") ?? "");
+  const [token, setToken] = useState("");
   const [name, setName] = useState("");
-  const [email, setEmail] = useState(params.get("email") ?? "");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // The invitation token is a one-time secret: it travels in the URL
+  // fragment (never sent to the server in a normal request) rather than the
+  // query string, is copied into component state immediately, and the
+  // fragment is then stripped from browser history so it never lingers in
+  // history, referrer headers, or server access logs.
+  useEffect(() => {
+    if (!window.location.hash) return;
+    const { token: fragmentToken, email: fragmentEmail } = parseInvitationFragment(window.location.hash);
+    if (fragmentToken) setToken(fragmentToken);
+    if (fragmentEmail) setEmail(fragmentEmail);
+    window.history.replaceState(null, "", window.location.pathname + window.location.search);
+  }, []);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();

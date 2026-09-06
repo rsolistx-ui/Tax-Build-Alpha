@@ -117,6 +117,7 @@ function New-SampleReceiptPng([string]$Path) {
 $cookieJar = Join-Path $env:TEMP "folio-smoke-cookies-$([guid]::NewGuid().ToString('N')).txt"
 $generatedReceipt = $false
 $firmId = $null
+$ownerUserId = $null
 $clientPayloadPath = ""
 $approvePayloadPath = ""
 $bankDecisionPayloadPath = ""
@@ -186,6 +187,7 @@ try {
     throw "Better Auth did not establish a usable production session."
   }
   $firmId = [string]$me.firm.id
+  $ownerUserId = [string]$me.user.id
 
   Write-Host "Verifying the beta access status endpoint reports an active entitlement..."
   $betaStatus = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/beta/status")
@@ -1055,6 +1057,19 @@ try {
     throw "The access-status endpoint must remain available after revocation and report BETA_REVOKED."
   }
 
+  Write-Host "Verifying /api/me is beta-gated: a revoked entitlement blocks it exactly like other business endpoints..."
+  $revokedMeStatus = ""
+  $previousPreference = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    $revokedMeStatus = (& curl.exe --silent --output NUL --write-out "%{http_code}" -c $cookieJar -b $cookieJar "$BaseUrl/api/me")
+  } finally {
+    $ErrorActionPreference = $previousPreference
+  }
+  if ($revokedMeStatus -ne "403") {
+    throw "/api/me must be beta-gated: a revoked entitlement should return HTTP 403, got $revokedMeStatus."
+  }
+
   Write-Host ""
   Write-Host "END-TO-END PAID-ALPHA SMOKE TEST PASSED" -ForegroundColor Green
   Write-Host "BANK EXCEPTION WORKFLOW PRODUCTION VERIFICATION PASSED" -ForegroundColor Green
@@ -1106,6 +1121,20 @@ try {
         }
         if (($resultProps -contains "authFailures") -and @($cleanupResult.authFailures).Count -gt 0) {
           throw "Cleanup could not remove the synthetic auth account: $($cleanupResult.authFailures -join ', ')"
+        }
+        if (($resultProps -contains "betaMetadataFailures") -and @($cleanupResult.betaMetadataFailures).Count -gt 0) {
+          throw "Cleanup could not remove beta security metadata: $($cleanupResult.betaMetadataFailures -join ', ')"
+        }
+
+        if ($ownerUserId) {
+          Write-Host "Independently verifying zero production residue for this smoke run..."
+          $verifyRaw = & node (Join-Path $PSScriptRoot "smoke-admin.mjs") verify-clean $firmId $ownerUserId
+          $verifyExit = $LASTEXITCODE
+          $verifyResult = ($verifyRaw | Select-Object -Last 1) | ConvertFrom-Json
+          Write-Host "Residue check: $($verifyRaw | Select-Object -Last 1)"
+          if ($verifyExit -ne 0 -or -not $verifyResult.clean) {
+            throw "Final residue check found leftover production data: $($verifyRaw | Select-Object -Last 1)"
+          }
         }
       } catch {
         Write-Host "SMOKE CLEANUP FAILURE for firm $firmId : $($_.Exception.Message)" -ForegroundColor Red

@@ -2,6 +2,7 @@ import type { FormEvent } from "react";
 import { useEffect, useState } from "react";
 import { ShieldCheck } from "lucide-react";
 import { api } from "@/lib/api";
+import { buildInvitationLink } from "@/lib/beta";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -55,6 +56,7 @@ export function BetaAdminPage() {
   const [createdLink, setCreatedLink] = useState<{ email: string; token: string } | null>(null);
   const [creating, setCreating] = useState(false);
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
+  const [revokingInviteId, setRevokingInviteId] = useState<string | null>(null);
 
   async function loadAll() {
     try {
@@ -118,6 +120,18 @@ export function BetaAdminPage() {
     }
   }
 
+  async function revokeInvitation(invitationId: string) {
+    setRevokingInviteId(invitationId);
+    try {
+      await api(`/api/beta/invitations/${invitationId}/revoke`, { method: "POST", body: JSON.stringify({}) });
+      await loadAll();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to revoke invitation");
+    } finally {
+      setRevokingInviteId(null);
+    }
+  }
+
   async function extend(userId: string) {
     setBusyUserId(userId);
     try {
@@ -174,7 +188,7 @@ export function BetaAdminPage() {
             <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-muted)]/40 p-3 text-sm">
               <p className="font-medium">Invitation created for {createdLink.email}</p>
               <p className="mt-1 break-all text-xs text-[var(--color-muted-foreground)]">
-                Link: {`${window.location.origin}/signup?token=${createdLink.token}&email=${encodeURIComponent(createdLink.email)}`}
+                Link: {buildInvitationLink(window.location.origin, createdLink.token, createdLink.email)}
               </p>
               <p className="mt-1 text-xs text-[var(--color-muted-foreground)]">
                 This token is shown once. It is not recoverable after you leave this page.
@@ -198,7 +212,8 @@ export function BetaAdminPage() {
                   <th className="py-2 pr-3">Status</th>
                   <th className="py-2 pr-3">Issued</th>
                   <th className="py-2 pr-3">Expires</th>
-                  <th className="py-2">Redeemed</th>
+                  <th className="py-2 pr-3">Redeemed</th>
+                  <th className="py-2">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -208,12 +223,24 @@ export function BetaAdminPage() {
                     <td className="py-2 pr-3 capitalize">{inv.status}</td>
                     <td className="py-2 pr-3">{fmt(inv.issued_at)}</td>
                     <td className="py-2 pr-3">{fmt(inv.expires_at)}</td>
-                    <td className="py-2">{fmt(inv.redeemed_at)}</td>
+                    <td className="py-2 pr-3">{fmt(inv.redeemed_at)}</td>
+                    <td className="py-2">
+                      {inv.status === "pending" ? (
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          disabled={revokingInviteId === inv.id}
+                          onClick={() => void revokeInvitation(inv.id)}
+                        >
+                          Revoke
+                        </Button>
+                      ) : null}
+                    </td>
                   </tr>
                 ))}
                 {invitations.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="py-3 text-sm text-[var(--color-muted-foreground)]">
+                    <td colSpan={6} className="py-3 text-sm text-[var(--color-muted-foreground)]">
                       No invitations yet.
                     </td>
                   </tr>

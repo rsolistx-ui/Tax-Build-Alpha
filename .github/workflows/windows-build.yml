@@ -32,6 +32,9 @@ jobs:
         shell: bash
         run: echo "sha_short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
+      - name: Run Tauri Rust unit tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
       - name: Build Tauri Windows beta
         run: npx tauri build
 
@@ -51,6 +54,22 @@ jobs:
             cp "$f" "dist-windows/${name}.${ext}"
           done < <(find src-tauri/target/release/bundle -type f \( -iname "*.exe" -o -iname "*.msi" \) -print0)
           ls -la dist-windows
+
+      - name: Require both EXE and MSI before generating checksums
+        shell: bash
+        run: |
+          set -e
+          name="${{ steps.collect.outputs.artifact_name }}"
+          test -f "dist-windows/${name}.exe" || { echo "::error::Missing NSIS .exe installer"; exit 1; }
+          test -f "dist-windows/${name}.msi" || { echo "::error::Missing MSI installer"; exit 1; }
+
+      - name: Generate SHA256SUMS.txt
+        shell: bash
+        run: |
+          set -e
+          cd dist-windows
+          sha256sum *.exe *.msi > SHA256SUMS.txt
+          cat SHA256SUMS.txt
 
       - uses: actions/upload-artifact@v4
         with:

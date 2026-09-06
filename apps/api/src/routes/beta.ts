@@ -12,9 +12,12 @@ import {
   hashToken,
   validateInvitationRedemption,
   computeAccessDecision,
+  isInvitationExpiredButStillPending,
+  canRevokeInvitation,
   addDays,
   DEFAULT_BETA_DAYS,
   type InvitationRow,
+  type InvitationStatus,
   type EntitlementRow,
 } from "../services/beta";
 
@@ -27,18 +30,8 @@ const redeemSchema = z.object({
   name: z.string().min(1).max(200),
 });
 
-/**
- * Public, but only ever succeeds against a valid, unredeemed, unexpired,
- * unrevoked invitation whose email matches case-insensitively. This is the
- * only path that can create a usable Folio account: Better Auth's own
- * sign-up route is blocked below.
- */
-betaRoutes.post("/redeem", async (c) => {
-  const body = redeemSchema.parse(await c.req.json());
-  const db = createDb(c.env);
-  const tokenHash = await hashToken(body.token);
-
-  const [invitationRaw] = await db.query<{
+async function loadInvitationByTokenHash(db: ReturnType<typeof createDb>, tokenHash: string) {
+  const [row] = await db.query<{
     id: string;
     email: string;
     status: string;
@@ -49,60 +42,148 @@ betaRoutes.post("/redeem", async (c) => {
     `SELECT id, email, status, expires_at, redeemed_at, beta_days FROM beta_invitations WHERE token_hash = $1`,
     [tokenHash],
   );
-  const invitation: InvitationRow | null = invitationRaw
-    ? {
-        id: invitationRaw.id,
-        email: invitationRaw.email,
-        status: invitationRaw.status as InvitationRow["status"],
-        expiresAt: invitationRaw.expires_at,
-        redeemedAt: invitationRaw.redeemed_at,
-      }
-    : null;
+  return row;
+}
 
-  const validation = validateInvitationRedemption(invitation, body.email, new Date());
+function toInvitationRow(row: {
+  id: string;
+  email: string;
+  status: string;
+  expires_at: string;
+  redeemed_at: string | null;
+}): InvitationRow {
+  return {
+    id: row.id,
+    email: row.email,
+    status: row.status as InvitationStatus,
+    expiresAt: row.expires_at,
+    redeemedAt: row.redeemed_at,
+  };
+}
+
+/**
+ * Public, but only ever succeeds against a valid, unredeemed, unexpired,
+ * unrevoked invitation whose email matches case-insensitively. This is the
+ * only path that can create a usable Folio account: Better Auth's own
+ * sign-up route is blocked below.
+ *
+ * True cross-database transactions between Neon and D1 are impossible, so
+ * this handler claims the invitation atomically first (preventing
+ * concurrent redemption of the same token), creates the D1 account second,
+ * and explicitly compensates - deleting the just-created D1 account and
+ * restoring the invitation to pending - if the Neon entitlement activation
+ * that must follow ever fails. No usable account is ever left without an
+ * entitlement.
+ */
+betaRoutes.post("/redeem", async (c) => {
+  const body = redeemSchema.parse(await c.req.json());
+  const db = createDb(c.env);
+  const tokenHash = await hashToken(body.token);
+  const now = new Date();
+
+  const invitationRow = await loadInvitationByTokenHash(db, tokenHash);
+  let invitation: InvitationRow | null = invitationRow ? toInvitationRow(invitationRow) : null;
+
+  if (invitation && isInvitationExpiredButStillPending(invitation, now)) {
+    const [expired] = await db.query<{ id: string }>(
+      `UPDATE beta_invitations SET status = 'expired', updated_at = NOW() WHERE id = $1 AND status = 'pending' RETURNING id`,
+      [invitation.id],
+    );
+    if (expired) {
+      await insertBetaAccessEvent(db, {
+        action: "beta_invite_expired",
+        actorUserId: null,
+        affectedUserId: null,
+        affectedEmail: invitation.email,
+        beforeJson: { invitationId: invitation.id, status: "pending" },
+        afterJson: { invitationId: invitation.id, status: "expired" },
+      });
+    }
+    invitation = { ...invitation, status: "expired" };
+  }
+
+  const validation = validateInvitationRedemption(invitation, body.email, now);
   if (!validation.ok) {
     return c.json({ error: "This invitation cannot be redeemed.", code: validation.reason }, 409);
   }
 
+  const [claimed] = await db.query<{ id: string }>(
+    `UPDATE beta_invitations SET status = 'redeemed', redeemed_at = NOW(), updated_at = NOW()
+     WHERE id = $1 AND status = 'pending' AND expires_at > NOW()
+     RETURNING id`,
+    [invitationRow!.id],
+  );
+  if (!claimed) {
+    return c.json({ error: "This invitation cannot be redeemed.", code: "ALREADY_REDEEMED" }, 409);
+  }
+
+  async function restoreInvitationToPending() {
+    await db.query(
+      `UPDATE beta_invitations SET status = 'pending', redeemed_at = NULL, redeemed_by_user_id = NULL, updated_at = NOW() WHERE id = $1`,
+      [invitationRow!.id],
+    );
+  }
+
   const auth = createAuth(c.env);
-  const signUpResponse = await auth.api.signUpEmail({
-    body: { name: body.name, email: body.email, password: body.password },
-    asResponse: true,
-  });
+  let signUpResponse: Response;
+  try {
+    signUpResponse = await auth.api.signUpEmail({
+      body: { name: body.name, email: body.email, password: body.password },
+      asResponse: true,
+    });
+  } catch (error) {
+    await restoreInvitationToPending();
+    console.error(`[beta.redeem] account creation threw for invitation ${invitationRow!.id}:`, error);
+    return c.json({ error: "Could not activate beta access. Please try again.", code: "REDEMPTION_FAILED" }, 500);
+  }
   if (!signUpResponse.ok) {
-    const detail = await signUpResponse.text().catch(() => "");
-    return c.json({ error: "Account creation failed.", detail: detail.slice(0, 300) }, signUpResponse.status as 400);
+    await restoreInvitationToPending();
+    return c.json({ error: "Account creation failed.", code: "ACCOUNT_CREATION_FAILED" }, 400);
   }
   const created = (await signUpResponse.clone().json()) as { user?: { id?: string } };
   const newUserId = created.user?.id;
   if (!newUserId) {
-    return c.json({ error: "Account creation did not return a user id." }, 500);
+    await restoreInvitationToPending();
+    console.error(`[beta.redeem] signUpEmail succeeded without a user id for invitation ${invitationRow!.id}`);
+    return c.json({ error: "Could not activate beta access. Please try again.", code: "REDEMPTION_FAILED" }, 500);
   }
 
-  const now = new Date();
-  const betaDays = invitationRaw!.beta_days || DEFAULT_BETA_DAYS;
+  const betaDays = invitationRow!.beta_days || DEFAULT_BETA_DAYS;
   const expiresAt = addDays(now, betaDays);
 
-  await db.transaction([
-    {
-      query: `UPDATE beta_invitations SET status = 'redeemed', redeemed_at = NOW(), redeemed_by_user_id = $1, updated_at = NOW() WHERE id = $2`,
-      params: [newUserId, invitationRaw!.id],
-    },
-    {
-      query: `INSERT INTO beta_entitlements (user_id, status, starts_at, expires_at)
-              VALUES ($1, 'active', $2, $3)
-              ON CONFLICT (user_id) DO UPDATE SET status = 'active', starts_at = $2, expires_at = $3, revoked_at = NULL, revoked_by_user_id = NULL, revocation_reason = NULL, updated_at = NOW()`,
-      params: [newUserId, now.toISOString(), expiresAt.toISOString()],
-    },
-  ]);
+  try {
+    await db.transaction([
+      {
+        query: `UPDATE beta_invitations SET redeemed_by_user_id = $1, updated_at = NOW() WHERE id = $2`,
+        params: [newUserId, invitationRow!.id],
+      },
+      {
+        query: `INSERT INTO beta_entitlements (user_id, status, starts_at, expires_at)
+                VALUES ($1, 'active', $2, $3)
+                ON CONFLICT (user_id) DO UPDATE SET status = 'active', starts_at = $2, expires_at = $3, revoked_at = NULL, revoked_by_user_id = NULL, revocation_reason = NULL, updated_at = NOW()`,
+        params: [newUserId, now.toISOString(), expiresAt.toISOString()],
+      },
+    ]);
+  } catch (error) {
+    console.error(`[beta.redeem] entitlement activation failed for invitation ${invitationRow!.id}, user ${newUserId}; compensating:`, error);
+    try {
+      await c.env.AUTH_DB.prepare(`DELETE FROM session WHERE userId = ?`).bind(newUserId).run();
+      await c.env.AUTH_DB.prepare(`DELETE FROM account WHERE userId = ?`).bind(newUserId).run();
+      await c.env.AUTH_DB.prepare(`DELETE FROM user WHERE id = ?`).bind(newUserId).run();
+      await restoreInvitationToPending();
+    } catch (compensationError) {
+      console.error(`[beta.redeem] CRITICAL: compensation failed for invitation ${invitationRow!.id}, user ${newUserId}:`, compensationError);
+    }
+    return c.json({ error: "Could not activate beta access. Please try again.", code: "REDEMPTION_FAILED" }, 500);
+  }
 
   await insertBetaAccessEvent(db, {
     action: "beta_invite_redeemed",
     actorUserId: newUserId,
     affectedUserId: newUserId,
     affectedEmail: body.email,
-    beforeJson: { invitationId: invitationRaw!.id, status: "pending" },
-    afterJson: { invitationId: invitationRaw!.id, status: "redeemed" },
+    beforeJson: { invitationId: invitationRow!.id, status: "pending" },
+    afterJson: { invitationId: invitationRow!.id, status: "redeemed" },
   });
   await insertBetaAccessEvent(db, {
     action: "beta_access_activated",
@@ -172,11 +253,68 @@ betaRoutes.post("/invitations", requireSession, requireOwner, async (c) => {
 
 betaRoutes.get("/invitations", requireSession, requireOwner, async (c) => {
   const db = createDb(c.env);
+
+  // Lazily transition any pending invitation whose expiry has passed before
+  // listing, so the owner never sees a misleadingly "pending" row for an
+  // invitation that can no longer be redeemed. Each transition is audited
+  // exactly once via the WHERE status = 'pending' guard.
+  const nowExpired = await db.query<{ id: string; email: string }>(
+    `UPDATE beta_invitations SET status = 'expired', updated_at = NOW()
+     WHERE status = 'pending' AND expires_at <= NOW()
+     RETURNING id, email`,
+  );
+  for (const row of nowExpired) {
+    await insertBetaAccessEvent(db, {
+      action: "beta_invite_expired",
+      actorUserId: null,
+      affectedUserId: null,
+      affectedEmail: row.email,
+      beforeJson: { invitationId: row.id, status: "pending" },
+      afterJson: { invitationId: row.id, status: "expired" },
+    });
+  }
+
   const invitations = await db.query(
     `SELECT id, email, status, issued_at, expires_at, redeemed_at, redeemed_by_user_id, beta_days
      FROM beta_invitations ORDER BY issued_at DESC LIMIT 200`,
   );
   return c.json({ invitations });
+});
+
+const revokeInviteSchema = z.object({ reason: z.string().max(500).optional() });
+
+betaRoutes.post("/invitations/:invitationId/revoke", requireSession, requireOwner, async (c) => {
+  const invitationId = c.req.param("invitationId");
+  const body = revokeInviteSchema.parse(await c.req.json().catch(() => ({})));
+  const db = createDb(c.env);
+
+  const [before] = await db.query<{ id: string; email: string; status: string }>(
+    `SELECT id, email, status FROM beta_invitations WHERE id = $1`,
+    [invitationId],
+  );
+  if (!before) return c.json({ error: "Invitation not found" }, 404);
+  if (!canRevokeInvitation(before.status as InvitationStatus)) {
+    return c.json({ error: "Only a pending invitation can be revoked.", code: "NOT_PENDING" }, 409);
+  }
+
+  const [after] = await db.query<{ id: string; email: string; status: string }>(
+    `UPDATE beta_invitations SET status = 'revoked', updated_at = NOW() WHERE id = $1 AND status = 'pending' RETURNING id, email, status`,
+    [invitationId],
+  );
+  if (!after) {
+    return c.json({ error: "Invitation was no longer pending." }, 409);
+  }
+
+  await insertBetaAccessEvent(db, {
+    action: "beta_invite_revoked",
+    actorUserId: c.get("userId"),
+    affectedUserId: null,
+    affectedEmail: before.email,
+    beforeJson: { invitationId, status: "pending" },
+    afterJson: { invitationId, status: "revoked" },
+    reason: body.reason ?? null,
+  });
+  return c.json({ invitation: after });
 });
 
 betaRoutes.get("/entitlements", requireSession, requireOwner, async (c) => {

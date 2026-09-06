@@ -5,7 +5,16 @@ import type { Env } from "../env";
 
 export const internalRoutes = new Hono<{ Bindings: Env }>();
 
-const SMOKE_FIRM_NAME = "Folio Smoke Test's Firm";
+// Firm names this endpoint is permitted to delete. Both the smoke harness's
+// own firm name and the exact names left behind by earlier manual
+// development reproduction sessions are listed explicitly; nothing else
+// ever qualifies, so this endpoint can never be used to delete a real
+// customer's data even by an attacker holding the shared token.
+const ALLOWED_CLEANUP_FIRM_NAMES = new Set([
+  "Folio Smoke Test's Firm",
+  "Repro's Firm",
+  "Repro2's Firm",
+]);
 
 function requireInternalToken(c: { req: { header: (name: string) => string | undefined }; env: Env }) {
   const provided = c.req.header("x-internal-token");
@@ -16,14 +25,14 @@ function requireInternalToken(c: { req: { header: (name: string) => string | und
 const cleanupSchema = z.object({ firmId: z.string().min(1) });
 
 /**
- * Deletes exactly one synthetic smoke-test tenant: its Neon firm (which
- * cascades to every client-scoped row via existing foreign keys), the R2
- * receipt objects that cascade cannot reach, and the Better Auth D1 user
- * that owns it. Hard-refuses to run against anything whose firm name does
- * not match the literal name the smoke harness itself creates, so this
- * endpoint can never be used to delete real customer data even by an
- * attacker holding the shared token. Not reachable without the token, not
- * exposed in any UI, and never documented as a public API.
+ * Deletes exactly one synthetic tenant: its Neon firm (which cascades to
+ * every client-scoped row via existing foreign keys), the R2 receipt
+ * objects that cascade cannot reach, every beta security row created for
+ * its owner (invitation, entitlement, access-event history), and the
+ * Better Auth D1 user that owns it. Hard-refuses to run against anything
+ * whose firm name is not in the explicit allowlist above. Not reachable
+ * without the token, not exposed in any UI, and never documented as a
+ * public API.
  */
 internalRoutes.post("/smoke-cleanup", async (c) => {
   if (!requireInternalToken(c)) return c.json({ error: "Not found" }, 404);
@@ -35,8 +44,8 @@ internalRoutes.post("/smoke-cleanup", async (c) => {
     [body.firmId],
   );
   if (!firm) return c.json({ error: "Not found", removed: false }, 404);
-  if (firm.name !== SMOKE_FIRM_NAME) {
-    return c.json({ error: "Refusing to clean up a firm that does not match the smoke-test naming convention." }, 400);
+  if (!ALLOWED_CLEANUP_FIRM_NAMES.has(firm.name)) {
+    return c.json({ error: "Refusing to clean up a firm that does not match an allowed cleanup naming convention." }, 400);
   }
 
   const clientRows = await db.query<{ id: string }>(`SELECT id FROM clients WHERE firm_id = $1`, [firm.id]);
@@ -52,6 +61,18 @@ internalRoutes.post("/smoke-cleanup", async (c) => {
     : [];
 
   await db.query(`DELETE FROM firms WHERE id = $1`, [firm.id]);
+
+  const betaMetadataFailures: string[] = [];
+  try {
+    await db.query(
+      `DELETE FROM beta_access_events WHERE affected_user_id = $1 OR actor_user_id = $1`,
+      [firm.owner_user_id],
+    );
+    await db.query(`DELETE FROM beta_entitlements WHERE user_id = $1`, [firm.owner_user_id]);
+    await db.query(`DELETE FROM beta_invitations WHERE redeemed_by_user_id = $1`, [firm.owner_user_id]);
+  } catch (error) {
+    betaMetadataFailures.push(error instanceof Error ? error.message : "unknown Neon error");
+  }
 
   const r2Failures: string[] = [];
   for (const key of r2Keys) {
@@ -71,9 +92,17 @@ internalRoutes.post("/smoke-cleanup", async (c) => {
     authFailures.push(error instanceof Error ? error.message : "unknown D1 error");
   }
 
-  if (r2Failures.length > 0 || authFailures.length > 0) {
+  if (r2Failures.length > 0 || authFailures.length > 0 || betaMetadataFailures.length > 0) {
     return c.json(
-      { removed: true, firmId: firm.id, clientCount: clientIds.length, r2ObjectsRemoved: r2Keys.length - r2Failures.length, r2Failures, authFailures },
+      {
+        removed: true,
+        firmId: firm.id,
+        clientCount: clientIds.length,
+        r2ObjectsRemoved: r2Keys.length - r2Failures.length,
+        r2Failures,
+        authFailures,
+        betaMetadataFailures,
+      },
       207,
     );
   }

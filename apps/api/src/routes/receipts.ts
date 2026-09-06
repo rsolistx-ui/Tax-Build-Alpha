@@ -209,7 +209,9 @@ receiptRoutes.post("/:clientId/receipts", async (c) => {
 
     return c.json({ receipt: await getReceiptDetails(db, receiptId, client.id), jobId, bankTransactionId }, 201);
   } catch (error) {
+    const requestId = crypto.randomUUID();
     const message = error instanceof Error ? error.message : "extract failed";
+    console.error(`[${requestId}] receipt extraction failed for ${receiptId}:`, error);
     await db.transaction([
       {
         query: `UPDATE jobs SET status = 'failed', error = $1, updated_at = NOW() WHERE id = $2`,
@@ -220,7 +222,7 @@ receiptRoutes.post("/:clientId/receipts", async (c) => {
         params: [receiptId],
       },
     ]);
-    return c.json({ receiptId, jobId, error: message }, 500);
+    return c.json({ receiptId, jobId, error: "Receipt extraction failed", code: "EXTRACTION_FAILED", requestId }, 500);
   }
 });
 

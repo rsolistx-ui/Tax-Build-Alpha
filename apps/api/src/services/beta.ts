@@ -90,6 +90,22 @@ export function computeAccessDecision(entitlement: EntitlementRow | null, now: D
   return { allowed: true };
 }
 
+/**
+ * A pending invitation whose expiry instant has passed needs to be lazily
+ * transitioned to "expired" in storage (and audited exactly once) the next
+ * time it is touched - on redemption attempt, or when the owner lists
+ * invitations - rather than staying "pending" forever until a cron job
+ * that does not exist gets around to it.
+ */
+export function isInvitationExpiredButStillPending(invitation: InvitationRow, now: Date): boolean {
+  return invitation.status === "pending" && new Date(invitation.expiresAt).getTime() <= now.getTime();
+}
+
+/** Only a still-pending invitation can be revoked; a redeemed one is a completed account, not a cancellable offer. */
+export function canRevokeInvitation(status: InvitationStatus): boolean {
+  return status === "pending";
+}
+
 export const DEFAULT_BETA_DAYS = 30;
 
 export function addDays(date: Date, days: number): Date {

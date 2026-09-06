@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { formatErrorResponse } from "./services/errors";
 import { cors } from "hono/cors";
 import { createDb } from "./db";
 import type { Env } from "./env";
@@ -9,6 +10,7 @@ import { receiptRoutes } from "./routes/receipts";
 import { pnlRoutes } from "./routes/pnl";
 import { bankRoutes } from "./routes/bank";
 import { requireSession, type AuthedVars } from "./middleware/session";
+import { requireActiveBeta } from "./middleware/beta";
 import { ensureFirm } from "./services/firm";
 import { betaRoutes } from "./routes/beta";
 import { internalRoutes } from "./routes/internal";
@@ -31,6 +33,37 @@ app.use(
     credentials: true,
   }),
 );
+
+/**
+ * Security headers applied to every response. The CSP is intentionally
+ * narrow: only 'self' for scripts and connections, Google Fonts is the one
+ * named third-party origin (already the app's only external dependency),
+ * and object-src/frame-ancestors/base-uri are locked down entirely. This
+ * covers the same-origin SPA+API Worker, the PWA, and the Tauri desktop
+ * webview equally since all three load this exact origin.
+ */
+app.use("*", async (c, next) => {
+  await next();
+  c.header(
+    "Content-Security-Policy",
+    [
+      "default-src 'self'",
+      "script-src 'self'",
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+      "font-src 'self' https://fonts.gstatic.com",
+      "img-src 'self' data:",
+      "connect-src 'self'",
+      "object-src 'none'",
+      "base-uri 'self'",
+      "frame-ancestors 'none'",
+      "form-action 'self'",
+    ].join("; "),
+  );
+  c.header("X-Content-Type-Options", "nosniff");
+  c.header("Referrer-Policy", "strict-origin-when-cross-origin");
+  c.header("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  c.header("X-Frame-Options", "DENY");
+});
 
 app.get("/api/health", (c) =>
   c.json({
@@ -58,7 +91,7 @@ app.on(["POST", "GET"], "/api/auth/*", (c) => createAuth(c.env).handler(c.req.ra
 app.route("/api/beta", betaRoutes);
 app.route("/api/internal", internalRoutes);
 
-app.get("/api/me", requireSession, async (c) => {
+app.get("/api/me", requireSession, requireActiveBeta, async (c) => {
   const firm = await ensureFirm(createDb(c.env), c.get("userId"), c.get("userName"));
   return c.json({
     user: {
@@ -78,12 +111,14 @@ app.route("/api/clients", bankRoutes);
 
 app.notFound((c) => c.json({ error: "Not found" }, 404));
 app.onError((err, c) => {
-  console.error(err);
-  const message = err instanceof Error ? err.message : "Internal error";
-  if (message.includes("ZodError") || err?.name === "ZodError") {
-    return c.json({ error: "Validation failed", detail: message }, 400);
-  }
-  return c.json({ error: message }, 500);
+  const requestId = crypto.randomUUID();
+  // Full detail (which can include SQL text, connection hosts, or other
+  // infrastructure specifics) is logged server-side only, keyed by
+  // requestId. formatErrorResponse never places anything from `err` itself
+  // into the response body.
+  console.error(`[${requestId}]`, err);
+  const { status, body } = formatErrorResponse(err, requestId);
+  return c.json(body, status);
 });
 
 export default app;
