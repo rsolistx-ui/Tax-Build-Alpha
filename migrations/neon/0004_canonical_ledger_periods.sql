@@ -1,21 +1,28 @@
 -- Milestone 4: Canonical Ledger + Periods + Classification
 -- Creates the canonical ledger table, period model, and adds classification fields to bank_transactions.
+-- Replay-safe: uses IF NOT EXISTS for types, handles enum value additions.
 
 -- 1. Accounting classes for transaction classification
-CREATE TYPE accounting_class AS ENUM (
-  'expense',
-  'income',
-  'transfer',
-  'owner_contribution',
-  'owner_draw',
-  'needs_review'
-);
+DO $$ BEGIN
+    CREATE TYPE accounting_class AS ENUM (
+      'expense',
+      'income',
+      'transfer',
+      'owner_contribution',
+      'owner_draw',
+      'needs_review'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 -- 2. Business/Personal treatment (separate from accounting class)
-CREATE TYPE treatment_type AS ENUM (
-  'business',
-  'personal'
-);
+DO $$ BEGIN
+    CREATE TYPE treatment_type AS ENUM (
+      'business',
+      'personal'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 -- 3. Canonical ledger entries - single authoritative source for book activity
 CREATE TABLE IF NOT EXISTS ledger_entries (
@@ -43,6 +50,11 @@ CREATE INDEX IF NOT EXISTS idx_ledger_client_class ON ledger_entries(client_id, 
 CREATE INDEX IF NOT EXISTS idx_ledger_source_bank ON ledger_entries(source_bank_transaction_id) WHERE source_bank_transaction_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_ledger_source_receipt ON ledger_entries(source_receipt_id) WHERE source_receipt_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_ledger_category ON ledger_entries(category_id) WHERE category_id IS NOT NULL;
+
+-- Uniqueness: a bank transaction can own at most one canonical ledger entry
+CREATE UNIQUE INDEX IF NOT EXISTS uq_ledger_source_bank ON ledger_entries(source_bank_transaction_id) WHERE source_bank_transaction_id IS NOT NULL;
+-- Uniqueness: a receipt can own at most one canonical ledger entry (when not also sourced from bank)
+CREATE UNIQUE INDEX IF NOT EXISTS uq_ledger_source_receipt ON ledger_entries(source_receipt_id) WHERE source_receipt_id IS NOT NULL AND source_bank_transaction_id IS NULL;
 
 -- 4. Period close state table
 CREATE TABLE IF NOT EXISTS accounting_periods (
@@ -82,7 +94,10 @@ ALTER TABLE receipts
 ALTER TABLE receipts
   ADD COLUMN IF NOT EXISTS period_key VARCHAR(7);
 
--- 7. Audit event actions for ledger mutations
+-- 7. Add period_key to bank_transactions for import-time period assignment
+-- (already added above)
+
+-- 8. Audit event actions for ledger mutations
 -- These are tracked via the existing audit_events table
 -- Key actions:
 -- - ledger_entry_created

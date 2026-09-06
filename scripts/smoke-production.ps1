@@ -259,15 +259,15 @@ try {
     throw "P&L does not reconcile. Receipt total is $approvedTotal but P&L expenses are $pnlExpenses."
   }
 
-  $firstCategory = @($pnl.byCategory) | Select-Object -First 1
+  $firstCategory = @($pnl.byCategory.expense) | Select-Object -First 1
   if (-not $firstCategory) {
-    throw "P&L returned no category rows."
+    throw "P&L returned no expense category rows."
   }
-  $encodedCategory = [Uri]::EscapeDataString([string]$firstCategory.category)
+  $encodedCategoryId = [Uri]::EscapeDataString([string]$firstCategory.categoryId)
   $drilldown = Invoke-CurlJson @(
     "-c", $cookieJar,
     "-b", $cookieJar,
-    "$BaseUrl/api/clients/$clientId/pnl/drilldown?category=$encodedCategory"
+    "$BaseUrl/api/clients/$clientId/pnl/drilldown?categoryId=$encodedCategoryId&class=expense"
   )
   if (@($drilldown.entries).Count -lt 1) {
     throw "P&L drill-down returned no evidence entries."
@@ -617,7 +617,7 @@ try {
 
   # 5 + 6. Personal and transfer classifications must stay out of ledger P&L.
   Write-Host "Verifying personal and transfer rows are excluded from ledger-backed P&L..."
-  $pnlAug = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/pnl/ledger?period=2026-08")
+  $pnlAug = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/pnl?period=2026-08")
   $expectedAugExpenses = [double]$approvedTotal + 11.11
   if ([Math]::Abs([double]$pnlAug.expenses - $expectedAugExpenses) -gt 0.02) {
     throw "Ledger P&L for 2026-08 is $($pnlAug.expenses); expected $expectedAugExpenses (personal and transfer excluded)."
@@ -632,12 +632,12 @@ try {
 
   # 11. Ledger-backed P&L reconciles to the expected business expense total overall.
   Write-Host "Verifying ledger-backed P&L reconciles across all periods..."
-  $pnlLedger = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/pnl/ledger")
+  $pnlLedger = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/pnl")
   $expectedAllExpenses = (2 * [double]$approvedTotal) + 11.11
   if ([Math]::Abs([double]$pnlLedger.expenses - $expectedAllExpenses) -gt 0.02) {
     throw "Ledger-backed P&L expenses are $($pnlLedger.expenses); expected $expectedAllExpenses."
   }
-  $pnlSept = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/pnl/ledger?period=2026-09")
+  $pnlSept = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/pnl?period=2026-09")
   if ([Math]::Abs([double]$pnlSept.expenses - [double]$approvedTotal) -gt 0.02) {
     throw "Ledger-backed P&L for 2026-09 is $($pnlSept.expenses); expected $approvedTotal."
   }
@@ -710,6 +710,35 @@ try {
   ) 409
   if ($closeAgainRejected -ne 409) {
     throw "Closing an already-closed period must be rejected with HTTP 409."
+  }
+
+  $closedDecisionBody = @{ action = "reject" } | ConvertTo-Json -Compress
+  $closedDecisionPayloadPath = New-JsonPayloadFile $closedDecisionBody
+  $bankDecisionRejected = Invoke-CurlExpectStatus @(
+    "-c", $cookieJar,
+    "-b", $cookieJar,
+    "-H", "Content-Type: application/json",
+    "--data-binary", "@$closedDecisionPayloadPath",
+    "$BaseUrl/api/clients/$clientId/bank-transactions/$missingTransactionId/decision"
+  ) 409
+  Remove-TempFile $closedDecisionPayloadPath
+  if ($bankDecisionRejected -ne 409) {
+    throw "Bank decision against a closed period must be rejected with HTTP 409."
+  }
+
+  $closedImportCsvPath = Join-Path $env:TEMP "folio-smoke-closed-import-$([guid]::NewGuid().ToString('N')).csv"
+  $closedImportCsv = "Date,Description,Amount`r`n2026-08-15,FOLIO CLOSED PERIOD IMPORT SMOKE,-9.99`r`n"
+  [System.IO.File]::WriteAllText($closedImportCsvPath, $closedImportCsv, $utf8)
+  $bankImportRejected = Invoke-CurlExpectStatus @(
+    "-c", $cookieJar,
+    "-b", $cookieJar,
+    "-F", "file=@$closedImportCsvPath",
+    "-F", "mapping=<$bankMappingPayloadPath",
+    "$BaseUrl/api/clients/$clientId/bank-transactions/import"
+  ) 409
+  Remove-TempFile $closedImportCsvPath
+  if ($bankImportRejected -ne 409) {
+    throw "Bank CSV import into a closed period must be rejected with HTTP 409."
   }
 
   # 10. Explicit reopen succeeds and preserves audit history.

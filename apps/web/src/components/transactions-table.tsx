@@ -72,6 +72,7 @@ type Filters = {
   categoryId: string | "all";
   period: string | "all";
   status: "open" | "closed" | "all";
+  page: number;
 };
 
 const CLASS_LABELS: Record<AccountingClass, string> = {
@@ -111,8 +112,8 @@ export function TransactionsTable({
     categoryId: "all",
     period: initialPeriod || "all",
     status: "all",
+    page: 0,
   });
-  const [page, setPage] = useState(0);
   const pageSize = 50;
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -147,12 +148,13 @@ export function TransactionsTable({
     try {
       const params = new URLSearchParams();
       params.set("limit", String(pageSize));
-      params.set("offset", String(page * pageSize));
+      params.set("offset", String(filters.page * pageSize));
       if (filters.search) params.set("search", filters.search);
       if (filters.class !== "all") params.set("class", filters.class);
       if (filters.treatment !== "all") params.set("treatment", filters.treatment);
       if (filters.categoryId !== "all") params.set("categoryId", filters.categoryId);
       if (filters.period !== "all") params.set("period", filters.period);
+      if (filters.status !== "all") params.set("status", filters.status);
 
       const data = await api<{ entries: LedgerEntry[]; total: number }>(
         `/api/clients/${clientId}/ledger?${params.toString()}`,
@@ -173,9 +175,17 @@ export function TransactionsTable({
 
   useEffect(() => {
     loadEntries();
-    setPage(0);
     setSelectedIds(new Set());
-  }, [clientId, filters, page]);
+  }, [clientId, filters]);
+
+  function setPage(page: number) {
+    setFilters(f => ({ ...f, page }));
+  }
+
+  function handlePeriodChange(period: string) {
+    setFilters(f => ({ ...f, period, page: 0 }));
+    onPeriodChange?.(period);
+  }
 
   const allSelected = entries.length > 0 && entries.every((e) => selectedIds.has(e.id));
   const someSelected = entries.some((e) => selectedIds.has(e.id));
@@ -239,31 +249,13 @@ export function TransactionsTable({
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => batchClassify("expense")}>
-                  Classify as Expense
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => batchClassify("income")}>
-                  Classify as Income
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => batchClassify("transfer")}>
-                  Classify as Transfer
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => batchClassify("owner_contribution")}>
-                  Classify as Owner Contribution
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => batchClassify("owner_draw")}>
-                  Classify as Owner Draw
+                <DropdownMenuItem disabled className="text-xs text-[var(--color-muted-foreground)]">
+                  Batch actions require API — not yet implemented
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => batchTreatment("business")}>
-                  Mark as Business
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => batchTreatment("personal")}>
-                  Mark as Personal
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem className="text-destructive" onClick={() => batchDelete()}>
-                  Delete (open periods only)
+                <DropdownMenuItem onClick={clearSelection}>
+                  <X className="mr-1.5 h-3.5 w-3.5" />
+                  Clear Selection
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -320,10 +312,7 @@ export function TransactionsTable({
           </Select>
           <Select
             value={filters.period}
-            onValueChange={(v: string) => {
-              setFilters((f) => ({ ...f, period: v }));
-              onPeriodChange?.(v);
-            }}
+            onValueChange={handlePeriodChange}
           >
             <SelectTrigger className="w-[140px] h-9 text-sm">
               <SelectValue placeholder="Period" />
@@ -544,22 +533,22 @@ export function TransactionsTable({
         {total > pageSize && (
           <div className="flex items-center justify-between px-4 py-3 border-t border-[var(--color-border)]">
             <span className="text-sm text-[var(--color-muted-foreground)]">
-              Page {page + 1} of {Math.ceil(total / pageSize)}
+              Page {filters.page + 1} of {Math.ceil(total / pageSize)}
             </span>
             <div className="flex items-center gap-2">
               <Button
                 variant="outline"
                 size="sm"
-                disabled={page === 0}
-                onClick={() => setPage((p) => p - 1)}
+                disabled={filters.page === 0}
+                onClick={() => setPage(filters.page - 1)}
               >
                 <ArrowLeft className="h-3.5 w-3.5" />
               </Button>
               <Button
                 variant="outline"
                 size="sm"
-                disabled={page >= Math.ceil(total / pageSize) - 1}
-                onClick={() => setPage((p) => p + 1)}
+                disabled={filters.page >= Math.ceil(total / pageSize) - 1}
+                onClick={() => setPage(filters.page + 1)}
               >
                 <ArrowRight className="h-3.5 w-3.5" />
               </Button>
@@ -623,16 +612,4 @@ function RowCheckbox({
       {checked === "none" && <Square className="h-3 w-3" />}
     </button>
   );
-}
-
-function batchClassify(_accountingClass: AccountingClass) {
-  // Will be implemented with batch API
-}
-
-function batchTreatment(_treatment: Treatment) {
-  // Will be implemented with batch API
-}
-
-function batchDelete() {
-  // Will be implemented with batch API
 }

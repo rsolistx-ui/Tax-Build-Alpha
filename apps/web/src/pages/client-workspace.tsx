@@ -5,6 +5,7 @@ import { TransactionsTable } from "@/components/transactions-table";
 import { api } from "@/lib/api";
 import { EmptyState } from "@/components/empty-state";
 import { Inbox } from "lucide-react";
+import { useWorkspace } from "@/lib/workspace-context";
 
 type Client = { id: string; name: string };
 
@@ -19,10 +20,7 @@ type StatusSummary = {
 export function ClientWorkspacePage() {
   const { clientId = "" } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [client, setClient] = useState<Client | null>(null);
-  const [currentPeriod, setCurrentPeriod] = useState<string>(
-    searchParams.get("period") || new Date().toISOString().slice(0, 7),
-  );
+  const { client, setClient, currentPeriod, setCurrentPeriod } = useWorkspace();
   const [statusSummary, setStatusSummary] = useState<StatusSummary>({
     openExceptions: 0,
     pendingReceipts: 0,
@@ -37,20 +35,21 @@ export function ClientWorkspacePage() {
     try {
       const clientData = await api<{ client: Client }>(`/api/clients/${clientId}`);
       setClient(clientData.client);
-      await loadStatusSummary();
+      const period = searchParams.get("period") || new Date().toISOString().slice(0, 7);
+      setCurrentPeriod(period);
+      await loadStatusSummary(period);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load workspace");
     }
   }
 
-  async function loadStatusSummary() {
+  async function loadStatusSummary(periodKey: string) {
     try {
-      const [periodKey] = currentPeriod ? [currentPeriod] : [new Date().toISOString().slice(0, 7)];
       const summary = await api<{
         blockers: string[];
         summary: Record<string, { count: number; total: number }>;
       }>(`/api/clients/${clientId}/periods/${periodKey}/summary`);
-      
+
       let openExceptions = 0;
       let pendingReceipts = 0;
       let uncategorized = 0;
@@ -85,12 +84,13 @@ export function ClientWorkspacePage() {
 
   useEffect(() => {
     void load();
+    return () => setClient(null);
   }, [clientId]);
 
   function handlePeriodChange(period: string) {
     setCurrentPeriod(period);
     setSearchParams({ period }, { replace: true });
-    loadStatusSummary();
+    void loadStatusSummary(period);
   }
 
   if (!client) {
@@ -105,7 +105,7 @@ export function ClientWorkspacePage() {
     <>
       <ClientWorkspaceHeader
         client={client}
-        currentPeriod={currentPeriod}
+        currentPeriod={currentPeriod || undefined}
         onPeriodChange={handlePeriodChange}
         statusSummary={statusSummary}
       />
@@ -117,7 +117,7 @@ export function ClientWorkspacePage() {
       ) : (
         <TransactionsTable
           clientId={clientId}
-          initialPeriod={currentPeriod}
+          initialPeriod={currentPeriod || undefined}
           onPeriodChange={handlePeriodChange}
         />
       )}

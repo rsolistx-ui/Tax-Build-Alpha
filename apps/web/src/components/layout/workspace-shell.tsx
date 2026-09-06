@@ -38,6 +38,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
+import { useWorkspace } from "@/lib/workspace-context";
 
 const NAV_ITEMS = [
   { id: "home", label: "Home", icon: Home, href: "/" },
@@ -84,19 +85,14 @@ function isClientRoot(href: string): boolean {
 export function WorkspaceShell({
   firmName,
   userName,
-  client,
-  currentPeriod,
-  onPeriodChange,
 }: {
   firmName?: string;
   userName?: string;
-  client?: { id: string; name: string } | null;
-  currentPeriod?: string;
-  onPeriodChange?: (period: string) => void;
 }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const { client, currentPeriod, setCurrentPeriod } = useWorkspace();
 
   async function signOut() {
     await authClient.signOut();
@@ -184,7 +180,7 @@ export function WorkspaceShell({
                   <span className="font-medium text-[var(--color-foreground)]">{client.name}</span>
                 </div>
 
-                <Select value={currentPeriod || ""} onValueChange={onPeriodChange || (() => {})}>
+                <Select value={currentPeriod || ""} onValueChange={setCurrentPeriod}>
                   <SelectTrigger className="w-[140px] h-8 text-xs">
                     <SelectValue placeholder="Period" />
                   </SelectTrigger>

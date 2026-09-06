@@ -20,7 +20,13 @@ export type LedgerEntryInput = {
   createdByUserId: string;
 };
 
-export async function createLedgerEntry(db: Db, input: LedgerEntryInput): Promise<string> {
+/**
+ * Pure statement builder for a new ledger entry. Callers that need this write
+ * to be atomic with other mutations (e.g. classifying a bank transaction)
+ * should batch the returned statement into their own db.transaction() call
+ * instead of executing it here.
+ */
+export function buildCreateLedgerEntryStatement(input: LedgerEntryInput): { id: string; statement: DbStatement } {
   const entryId = newId("le");
   const sourceBankTransactionId = input.source.type === "bank_transaction" || input.source.type === "both"
     ? input.source.bankTransactionId
@@ -29,31 +35,48 @@ export async function createLedgerEntry(db: Db, input: LedgerEntryInput): Promis
     ? input.source.receiptId
     : null;
 
-  await db.query(
-    `INSERT INTO ledger_entries
-      (id, client_id, period_key, entry_date, description, amount, currency,
-       accounting_class, treatment, category_id,
-       source_bank_transaction_id, source_receipt_id,
-       created_by_user_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
-    [
-      entryId,
-      input.clientId,
-      input.periodKey,
-      input.entryDate,
-      input.description,
-      input.amount,
-      input.currency,
-      input.accountingClass,
-      input.treatment,
-      input.categoryId,
-      sourceBankTransactionId,
-      sourceReceiptId,
-      input.createdByUserId,
-    ],
-  );
+  return {
+    id: entryId,
+    statement: {
+      query: `INSERT INTO ledger_entries
+        (id, client_id, period_key, entry_date, description, amount, currency,
+         accounting_class, treatment, category_id,
+         source_bank_transaction_id, source_receipt_id,
+         created_by_user_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+      params: [
+        entryId,
+        input.clientId,
+        input.periodKey,
+        input.entryDate,
+        input.description,
+        input.amount,
+        input.currency,
+        input.accountingClass,
+        input.treatment,
+        input.categoryId,
+        sourceBankTransactionId,
+        sourceReceiptId,
+        input.createdByUserId,
+      ],
+    },
+  };
+}
 
-  return entryId;
+export async function createLedgerEntry(db: Db, input: LedgerEntryInput): Promise<string> {
+  const { id, statement } = buildCreateLedgerEntryStatement(input);
+  await db.query(statement.query, statement.params);
+  return id;
+}
+
+/** Pure statement builder ensuring an accounting_periods row exists for periodKey. */
+export function buildEnsurePeriodStatement(clientId: string, periodKey: string): DbStatement {
+  return {
+    query: `INSERT INTO accounting_periods (client_id, period_key)
+     VALUES ($1, $2)
+     ON CONFLICT DO NOTHING`,
+    params: [clientId, periodKey],
+  };
 }
 
 export async function getOrCreatePeriodKey(db: Db, clientId: string, date: string): Promise<string> {
@@ -293,7 +316,14 @@ export async function rebuildLedgerForClient(db: Db, clientId: string, userId: s
   return { created, updated, errors };
 }
 
-export async function classifyBankTransaction(
+/**
+ * Reads current state and returns the statements needed to classify a bank
+ * transaction and keep its ledger entry in sync. Returns statements rather
+ * than executing them so the caller can batch them into one db.transaction()
+ * alongside the bank_transactions update and audit event, making the whole
+ * classify operation atomic.
+ */
+export async function planClassifyBankTransaction(
   db: Db,
   clientId: string,
   transactionId: string,
@@ -301,8 +331,7 @@ export async function classifyBankTransaction(
   accountingClass: "expense" | "income" | "transfer" | "owner_contribution" | "owner_draw" | "needs_review",
   treatment: "business" | "personal",
   categoryId: string | null,
-): Promise<void> {
-  // Get the bank transaction
+): Promise<DbStatement[]> {
   const [bt] = await db.query<{
     id: string;
     txn_date: string | null;
@@ -317,9 +346,9 @@ export async function classifyBankTransaction(
   );
   if (!bt || !bt.txn_date) throw new Error("Bank transaction not found or missing date");
 
-  const actualPeriodKey = await getOrCreatePeriodKey(db, clientId, bt.txn_date);
+  const actualPeriodKey = bt.txn_date.slice(0, 7);
+  const statements: DbStatement[] = [buildEnsurePeriodStatement(clientId, actualPeriodKey)];
 
-  // Check if ledger entry exists for this bank transaction
   const existing = await db.query<{ id: string }>(
     `SELECT id FROM ledger_entries
      WHERE client_id = $1
@@ -328,19 +357,17 @@ export async function classifyBankTransaction(
   );
 
   if (existing[0]) {
-    await db.query(
-      `UPDATE ledger_entries SET
+    statements.push({
+      query: `UPDATE ledger_entries SET
          accounting_class = $1,
          treatment = $2,
          category_id = $3,
          reviewed_at = NOW(),
          reviewed_by_user_id = $4
        WHERE id = $5`,
-      [accountingClass, treatment, categoryId, userId, existing[0].id],
-    );
+      params: [accountingClass, treatment, categoryId, userId, existing[0].id],
+    });
   } else if (bt.matched_receipt_id) {
-    // A reconciled receipt may already own a receipt-only ledger entry. Merge the
-    // bank transaction source into it instead of double counting the activity.
     const [byReceipt] = await db.query<{ id: string }>(
       `SELECT id FROM ledger_entries
        WHERE client_id = $1
@@ -350,8 +377,8 @@ export async function classifyBankTransaction(
     );
 
     if (byReceipt) {
-      await db.query(
-        `UPDATE ledger_entries SET
+      statements.push({
+        query: `UPDATE ledger_entries SET
            source_bank_transaction_id = $1,
            entry_date = $2,
            period_key = $3,
@@ -361,10 +388,28 @@ export async function classifyBankTransaction(
            reviewed_at = NOW(),
            reviewed_by_user_id = $7
          WHERE id = $8`,
-        [bt.id, bt.txn_date, actualPeriodKey, accountingClass, treatment, categoryId, userId, byReceipt.id],
-      );
+        params: [bt.id, bt.txn_date, actualPeriodKey, accountingClass, treatment, categoryId, userId, byReceipt.id],
+      });
     } else {
-      await createLedgerEntry(db, {
+      statements.push(
+        buildCreateLedgerEntryStatement({
+          clientId,
+          periodKey: actualPeriodKey,
+          entryDate: bt.txn_date,
+          description: bt.description,
+          amount: Math.abs(bt.amount),
+          currency: bt.currency,
+          accountingClass,
+          treatment,
+          categoryId: categoryId || bt.category_id,
+          source: { type: "both", bankTransactionId: bt.id, receiptId: bt.matched_receipt_id },
+          createdByUserId: userId,
+        }).statement,
+      );
+    }
+  } else {
+    statements.push(
+      buildCreateLedgerEntryStatement({
         clientId,
         periodKey: actualPeriodKey,
         entryDate: bt.txn_date,
@@ -374,53 +419,41 @@ export async function classifyBankTransaction(
         accountingClass,
         treatment,
         categoryId: categoryId || bt.category_id,
-        source: { type: "both", bankTransactionId: bt.id, receiptId: bt.matched_receipt_id },
+        source: { type: "bank_transaction", bankTransactionId: bt.id },
         createdByUserId: userId,
-      });
-    }
-  } else {
-    // Create ledger entry
-    await createLedgerEntry(db, {
-      clientId,
-      periodKey: actualPeriodKey,
-      entryDate: bt.txn_date,
-      description: bt.description,
-      amount: Math.abs(bt.amount),
-      currency: bt.currency,
-      accountingClass,
-      treatment,
-      categoryId: categoryId || bt.category_id,
-      source: { type: "bank_transaction", bankTransactionId: bt.id },
-      createdByUserId: userId,
-    });
+      }).statement,
+    );
   }
+
+  return statements;
 }
 
 /**
  * When a bank transaction is confirmed against a receipt that already produced a
  * receipt-only ledger entry, attach the bank transaction as the second source so
- * the activity is never counted twice.
+ * the activity is never counted twice. Returns the statement to run (or null if
+ * there is nothing to attach) so callers can batch it into their own transaction.
  */
-export async function attachBankSourceToReceiptLedgerEntry(
+export async function planAttachBankSourceToReceiptLedgerEntry(
   db: Db,
   clientId: string,
   receiptId: string,
   bankTransactionId: string,
-): Promise<void> {
+): Promise<DbStatement | null> {
   const [bank] = await db.query<{ txn_date: string | null }>(
     `SELECT txn_date FROM bank_transactions WHERE id = $1 AND client_id = $2`,
     [bankTransactionId, clientId],
   );
-  if (!bank?.txn_date) return;
+  if (!bank?.txn_date) return null;
 
-  await db.query(
-    `UPDATE ledger_entries SET
+  return {
+    query: `UPDATE ledger_entries SET
        source_bank_transaction_id = $3,
        entry_date = $4,
        period_key = $5
      WHERE client_id = $1
        AND source_receipt_id = $2
        AND source_bank_transaction_id IS NULL`,
-    [clientId, receiptId, bankTransactionId, bank.txn_date, bank.txn_date.slice(0, 7)],
-  );
+    params: [clientId, receiptId, bankTransactionId, bank.txn_date, bank.txn_date.slice(0, 7)],
+  };
 }

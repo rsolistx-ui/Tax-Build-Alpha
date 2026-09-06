@@ -13,7 +13,7 @@ import {
   type BankColumnMapping,
   type NormalizedBankRow,
 } from "../services/bank-csv";
-import { classifyBankTransaction, attachBankSourceToReceiptLedgerEntry } from "../services/ledger";
+import { planClassifyBankTransaction, planAttachBankSourceToReceiptLedgerEntry } from "../services/ledger";
 import {
   suggestReceiptMatch,
   type ReceiptMatchCandidate,
@@ -97,6 +97,40 @@ bankRoutes.get("/:clientId/bank-transactions", async (c) => {
       (counts.receipt_pending ?? 0),
   };
   return c.json({ transactions, counts, summary });
+});
+
+bankRoutes.get("/:clientId/bank-transactions/:transactionId", async (c) => {
+  const { db, client } = await authorizedClient(c);
+  if (!client) return c.json({ error: "Not found" }, 404);
+  const transactionId = c.req.param("transactionId");
+
+  const [txn] = await db.query<Record<string, unknown>>(
+    `SELECT
+       bt.*,
+       sr.extracted_date AS suggested_receipt_date,
+       sr.extracted_merchant AS suggested_receipt_merchant,
+       sr.extracted_total AS suggested_receipt_total,
+       sr.filename AS suggested_receipt_filename,
+       mr.extracted_date AS matched_receipt_date,
+       mr.extracted_merchant AS matched_receipt_merchant,
+       mr.extracted_total AS matched_receipt_total,
+       mr.filename AS matched_receipt_filename,
+       pr.status AS pending_receipt_status,
+       pr.extracted_date AS pending_receipt_date,
+       pr.extracted_merchant AS pending_receipt_merchant,
+       pr.extracted_total AS pending_receipt_total,
+       pr.filename AS pending_receipt_filename
+     FROM bank_transactions bt
+     LEFT JOIN receipts sr ON sr.id = bt.suggested_receipt_id AND sr.client_id = bt.client_id
+     LEFT JOIN receipts mr ON mr.id = bt.matched_receipt_id AND mr.client_id = bt.client_id
+     LEFT JOIN receipts pr ON pr.id = bt.pending_receipt_id AND pr.client_id = bt.client_id
+     WHERE bt.client_id = $1 AND bt.id = $2`,
+    [client.id, transactionId],
+  );
+
+  if (!txn) return c.json({ error: "Not found" }, 404);
+
+  return c.json({ transaction: serializeTransaction(txn, client.id) });
 });
 
 bankRoutes.get("/:clientId/bank-transactions/:transactionId/audit", async (c) => {
@@ -210,6 +244,21 @@ bankRoutes.post("/:clientId/bank-transactions/import", async (c) => {
     return c.json({ error: "CSV did not contain any valid transaction rows", rowErrors: normalized.errors }, 400);
   }
 
+  // Closed-period guard: reject import if any row falls in a closed period
+  const periodKeys = new Set<string>();
+  for (const row of normalized.rows) {
+    if (row.date) {
+      periodKeys.add(row.date.slice(0, 7));
+    }
+  }
+  for (const periodKey of periodKeys) {
+    try {
+      await checkPeriodOpen(db, client.id, periodKey);
+    } catch {
+      return c.json({ error: `Cannot import: period ${periodKey} is closed` }, 409);
+    }
+  }
+
   const receipts = await db.query<ReceiptMatchCandidate>(
     `SELECT id, extracted_date, extracted_merchant, extracted_total, filename
      FROM receipts
@@ -317,11 +366,22 @@ bankRoutes.post("/:clientId/bank-transactions/:transactionId/decision", async (c
   if (!client) return c.json({ error: "Not found" }, 404);
 
   const transactionId = c.req.param("transactionId");
+  const userId = c.get("userId");
   const [before] = await db.query<Record<string, unknown>>(
     `SELECT * FROM bank_transactions WHERE id = $1 AND client_id = $2`,
     [transactionId, client.id],
   );
   if (!before) return c.json({ error: "Not found" }, 404);
+
+  // Closed-period guard: all bank decisions are accounting mutations
+  if (before.txn_date) {
+    const periodKey = String(before.txn_date).slice(0, 7);
+    try {
+      await checkPeriodOpen(db, client.id, periodKey);
+    } catch {
+      return c.json({ error: "Cannot mutate accounting in a closed period" }, 409);
+    }
+  }
 
   if (body.action === "confirm") {
     const receiptId = body.receiptId || String(before.suggested_receipt_id || "");
@@ -332,18 +392,41 @@ bankRoutes.post("/:clientId/bank-transactions/:transactionId/decision", async (c
     );
     if (!receipt) return c.json({ error: "Filed receipt evidence was not found" }, 404);
 
-    const [after] = await db.query<Record<string, unknown>>(
-      `UPDATE bank_transactions SET
-         triage = 'matched', matched_receipt_id = $1, pending_receipt_id = NULL,
-         resolution_reason = NULL, resolved_at = NOW(), resolved_by_user_id = $2,
-         reviewed_at = NOW(), reviewed_by_user_id = $2
-       WHERE id = $3 AND client_id = $4
-       RETURNING *`,
-      [receiptId, c.get("userId"), transactionId, client.id],
-    );
-    await attachBankSourceToReceiptLedgerEntry(db, client.id, receiptId, transactionId);
-    await logBankAudit(db, client.id, receiptId, c.get("userId"), "bank_match_confirmed", before, after);
-    return c.json({ transaction: after });
+    const afterSnapshot = {
+      ...before,
+      triage: "matched",
+      matched_receipt_id: receiptId,
+      pending_receipt_id: null,
+      resolution_reason: null,
+      resolved_by_user_id: userId,
+      reviewed_by_user_id: userId,
+    };
+
+    // Transactional: bank decision + ledger merge + audit
+    const statements: DbStatement[] = [
+      {
+        query: `UPDATE bank_transactions SET
+           triage = 'matched', matched_receipt_id = $1, pending_receipt_id = NULL,
+           resolution_reason = NULL, resolved_at = NOW(), resolved_by_user_id = $2,
+           reviewed_at = NOW(), reviewed_by_user_id = $2
+         WHERE id = $3 AND client_id = $4
+         RETURNING *`,
+        params: [receiptId, userId, transactionId, client.id],
+      },
+    ];
+
+    const ledgerStatement = await planAttachBankSourceToReceiptLedgerEntry(db, client.id, receiptId, transactionId);
+    if (ledgerStatement) statements.push(ledgerStatement);
+
+    statements.push({
+      query: `INSERT INTO audit_events
+        (id, client_id, receipt_id, actor_user_id, action, before_json, after_json)
+        VALUES ($1, $2, $3, $4, 'bank_match_confirmed', $5::jsonb, $6::jsonb)`,
+      params: [newId("aud"), client.id, receiptId, userId, before, afterSnapshot],
+    });
+
+    const [bankResults] = await db.transaction(statements);
+    return c.json({ transaction: bankResults[0] });
   }
 
   if (body.action === "link_receipt") {
@@ -355,52 +438,80 @@ bankRoutes.post("/:clientId/bank-transactions/:transactionId/decision", async (c
     if (!receipt) return c.json({ error: "Receipt evidence was not found" }, 404);
 
     if (receipt.status === "filed") {
-      const [after] = await db.query<Record<string, unknown>>(
-        `UPDATE bank_transactions SET
-           triage = 'matched', matched_receipt_id = $1,
-           suggested_receipt_id = NULL, suggested_score = NULL, suggested_reason = NULL,
-           pending_receipt_id = NULL, resolution_reason = NULL,
-           resolved_at = NOW(), resolved_by_user_id = $2,
-           reviewed_at = NOW(), reviewed_by_user_id = $2
-         WHERE id = $3 AND client_id = $4
-         RETURNING *`,
-        [receipt.id, c.get("userId"), transactionId, client.id],
-      );
-      await attachBankSourceToReceiptLedgerEntry(db, client.id, receipt.id, transactionId);
-      await logBankAudit(
-        db,
-        client.id,
-        receipt.id,
-        c.get("userId"),
-        "bank_match_confirmed",
-        before,
-        { ...after, resolutionSource: "manual_link" },
-      );
-      return c.json({ transaction: after });
+      const afterSnapshot = {
+        ...before,
+        triage: "matched",
+        matched_receipt_id: receipt.id,
+        suggested_receipt_id: null,
+        pending_receipt_id: null,
+        resolution_reason: null,
+        resolved_by_user_id: userId,
+        reviewed_by_user_id: userId,
+        resolutionSource: "manual_link",
+      };
+
+      // Transactional: bank decision + ledger merge + audit
+      const statements: DbStatement[] = [
+        {
+          query: `UPDATE bank_transactions SET
+             triage = 'matched', matched_receipt_id = $1,
+             suggested_receipt_id = NULL, suggested_score = NULL, suggested_reason = NULL,
+             pending_receipt_id = NULL, resolution_reason = NULL,
+             resolved_at = NOW(), resolved_by_user_id = $2,
+             reviewed_at = NOW(), reviewed_by_user_id = $2
+           WHERE id = $3 AND client_id = $4
+           RETURNING *`,
+          params: [receipt.id, userId, transactionId, client.id],
+        },
+      ];
+
+      const ledgerStatement = await planAttachBankSourceToReceiptLedgerEntry(db, client.id, receipt.id, transactionId);
+      if (ledgerStatement) statements.push(ledgerStatement);
+
+      statements.push({
+        query: `INSERT INTO audit_events
+          (id, client_id, receipt_id, actor_user_id, action, before_json, after_json)
+          VALUES ($1, $2, $3, $4, 'bank_match_confirmed', $5::jsonb, $6::jsonb)`,
+        params: [newId("aud"), client.id, receipt.id, userId, before, afterSnapshot],
+      });
+
+      const [bankResults] = await db.transaction(statements);
+      return c.json({ transaction: bankResults[0] });
     }
 
     if (receipt.status === "review") {
-      const [after] = await db.query<Record<string, unknown>>(
-        `UPDATE bank_transactions SET
-           triage = 'receipt_pending', pending_receipt_id = $1,
-           suggested_receipt_id = NULL, suggested_score = NULL, suggested_reason = NULL,
-           matched_receipt_id = NULL, resolution_reason = NULL,
-           resolved_at = NULL, resolved_by_user_id = NULL,
-           reviewed_at = NOW(), reviewed_by_user_id = $2
-         WHERE id = $3 AND client_id = $4
-         RETURNING *`,
-        [receipt.id, c.get("userId"), transactionId, client.id],
-      );
-      await logBankAudit(
-        db,
-        client.id,
-        receipt.id,
-        c.get("userId"),
-        "bank_receipt_linked_pending_review",
-        before,
-        after,
-      );
-      return c.json({ transaction: after });
+      const afterSnapshot = {
+        ...before,
+        triage: "receipt_pending",
+        pending_receipt_id: receipt.id,
+        suggested_receipt_id: null,
+        matched_receipt_id: null,
+        resolution_reason: null,
+        reviewed_by_user_id: userId,
+      };
+
+      const statements: DbStatement[] = [
+        {
+          query: `UPDATE bank_transactions SET
+             triage = 'receipt_pending', pending_receipt_id = $1,
+             suggested_receipt_id = NULL, suggested_score = NULL, suggested_reason = NULL,
+             matched_receipt_id = NULL, resolution_reason = NULL,
+             resolved_at = NULL, resolved_by_user_id = NULL,
+             reviewed_at = NOW(), reviewed_by_user_id = $2
+           WHERE id = $3 AND client_id = $4
+           RETURNING *`,
+          params: [receipt.id, userId, transactionId, client.id],
+        },
+        {
+          query: `INSERT INTO audit_events
+            (id, client_id, receipt_id, actor_user_id, action, before_json, after_json)
+            VALUES ($1, $2, $3, $4, 'bank_receipt_linked_pending_review', $5::jsonb, $6::jsonb)`,
+          params: [newId("aud"), client.id, receipt.id, userId, before, afterSnapshot],
+        },
+      ];
+
+      const [bankResults] = await db.transaction(statements);
+      return c.json({ transaction: bankResults[0] });
     }
 
     return c.json({ error: "Only receipts in review or filed status can resolve a bank exception" }, 409);
@@ -409,49 +520,77 @@ bankRoutes.post("/:clientId/bank-transactions/:transactionId/decision", async (c
   if (body.action === "no_receipt_required") {
     if (!body.reason) return c.json({ error: "A reason is required" }, 400);
     const priorReceiptId = before.matched_receipt_id || before.pending_receipt_id || before.suggested_receipt_id || null;
-    const [after] = await db.query<Record<string, unknown>>(
-      `UPDATE bank_transactions SET
-         triage = 'no_receipt_required', suggested_receipt_id = NULL, suggested_score = NULL,
-         suggested_reason = NULL, matched_receipt_id = NULL, pending_receipt_id = NULL,
-         resolution_reason = $1, resolved_at = NOW(), resolved_by_user_id = $2,
-         reviewed_at = NOW(), reviewed_by_user_id = $2
-       WHERE id = $3 AND client_id = $4
-       RETURNING *`,
-      [body.reason, c.get("userId"), transactionId, client.id],
-    );
-    await logBankAudit(
-      db,
-      client.id,
-      priorReceiptId ? String(priorReceiptId) : null,
-      c.get("userId"),
-      "bank_no_receipt_required",
-      before,
-      after,
-    );
-    return c.json({ transaction: after });
+    const afterSnapshot = {
+      ...before,
+      triage: "no_receipt_required",
+      suggested_receipt_id: null,
+      matched_receipt_id: null,
+      pending_receipt_id: null,
+      resolution_reason: body.reason,
+      resolved_by_user_id: userId,
+      reviewed_by_user_id: userId,
+    };
+
+    // Transactional: bank decision + audit
+    const statements: DbStatement[] = [
+      {
+        query: `UPDATE bank_transactions SET
+           triage = 'no_receipt_required', suggested_receipt_id = NULL, suggested_score = NULL,
+           suggested_reason = NULL, matched_receipt_id = NULL, pending_receipt_id = NULL,
+           resolution_reason = $1, resolved_at = NOW(), resolved_by_user_id = $2,
+           reviewed_at = NOW(), reviewed_by_user_id = $2
+         WHERE id = $3 AND client_id = $4
+         RETURNING *`,
+        params: [body.reason, userId, transactionId, client.id],
+      },
+      {
+        query: `INSERT INTO audit_events
+          (id, client_id, receipt_id, actor_user_id, action, before_json, after_json)
+          VALUES ($1, $2, $3, $4, 'bank_no_receipt_required', $5::jsonb, $6::jsonb)`,
+        params: [newId("aud"), client.id, priorReceiptId, userId, before, afterSnapshot],
+      },
+    ];
+
+    const [bankResults] = await db.transaction(statements);
+    return c.json({ transaction: bankResults[0] });
   }
 
+  // Reject action
   const rejectedReceiptId = before.matched_receipt_id || before.pending_receipt_id || before.suggested_receipt_id || null;
-  const [after] = await db.query<Record<string, unknown>>(
-    `UPDATE bank_transactions SET
-       triage = 'unmatched', suggested_receipt_id = NULL, suggested_score = NULL,
-       suggested_reason = NULL, matched_receipt_id = NULL, pending_receipt_id = NULL,
-       resolution_reason = NULL, resolved_at = NULL, resolved_by_user_id = NULL,
-       reviewed_at = NOW(), reviewed_by_user_id = $1
-     WHERE id = $2 AND client_id = $3
-     RETURNING *`,
-    [c.get("userId"), transactionId, client.id],
-  );
-  await logBankAudit(
-    db,
-    client.id,
-    rejectedReceiptId ? String(rejectedReceiptId) : null,
-    c.get("userId"),
-    "bank_match_rejected",
-    before,
-    after,
-  );
-  return c.json({ transaction: after });
+  const rejectAfterSnapshot = {
+    ...before,
+    triage: "unmatched",
+    suggested_receipt_id: null,
+    matched_receipt_id: null,
+    pending_receipt_id: null,
+    resolution_reason: null,
+    resolved_at: null,
+    resolved_by_user_id: null,
+    reviewed_by_user_id: userId,
+  };
+
+  // Transactional: bank decision + audit
+  const rejectStatements: DbStatement[] = [
+    {
+      query: `UPDATE bank_transactions SET
+         triage = 'unmatched', suggested_receipt_id = NULL, suggested_score = NULL,
+         suggested_reason = NULL, matched_receipt_id = NULL, pending_receipt_id = NULL,
+         resolution_reason = NULL, resolved_at = NULL, resolved_by_user_id = NULL,
+         reviewed_at = NOW(), reviewed_by_user_id = $1
+       WHERE id = $2 AND client_id = $3
+       RETURNING *`,
+      params: [userId, transactionId, client.id],
+    },
+    {
+      query: `INSERT INTO audit_events
+        (id, client_id, receipt_id, actor_user_id, action, before_json, after_json)
+        VALUES ($1, $2, $3, $4, 'bank_match_rejected', $5::jsonb, $6::jsonb)`,
+      params: [newId("aud"), client.id, rejectedReceiptId, userId, before, rejectAfterSnapshot],
+    },
+  ];
+
+  const [rejectResults] = await db.transaction(rejectStatements);
+  return c.json({ transaction: rejectResults[0] });
 });
 
 // Classify a resolved bank transaction (explicit professional decision)
@@ -490,32 +629,61 @@ bankRoutes.post("/:clientId/bank-transactions/:transactionId/classify", async (c
     if (!category) return c.json({ error: "Category not found" }, 404);
   }
 
-  const [after] = await db.query<Record<string, unknown>>(
-    `UPDATE bank_transactions SET
-       accounting_class = $1,
-       treatment = $2,
-       category_id = $3,
-       classified_at = NOW(),
-       classified_by_user_id = $4
-     WHERE id = $5 AND client_id = $6
-     RETURNING *`,
-    [body.accountingClass, body.treatment, body.categoryId ?? null, userId, transactionId, client.id],
-  );
+  // Transactionally: bank classification + ledger sync + audit, all in one batch
+  const statements: DbStatement[] = [
+    {
+      query: `UPDATE bank_transactions SET
+         accounting_class = $1,
+         treatment = $2,
+         category_id = $3,
+         classified_at = NOW(),
+         classified_by_user_id = $4
+       WHERE id = $5 AND client_id = $6
+       RETURNING *`,
+      params: [body.accountingClass, body.treatment, body.categoryId ?? null, userId, transactionId, client.id],
+    },
+  ];
 
-  await classifyBankTransaction(
-    db,
-    client.id,
-    transactionId,
-    userId,
-    body.accountingClass,
-    body.treatment,
-    body.categoryId ?? null,
-  );
+  if (before.txn_date) {
+    const ledgerStatements = await planClassifyBankTransaction(
+      db,
+      client.id,
+      transactionId,
+      userId,
+      body.accountingClass,
+      body.treatment,
+      body.categoryId ?? null,
+    );
+    statements.push(...ledgerStatements);
+  }
 
-  await logBankAudit(db, client.id, null, userId, "bank_transaction_classified", before, after);
+  const afterSnapshot = {
+    ...before,
+    accounting_class: body.accountingClass,
+    treatment: body.treatment,
+    category_id: body.categoryId ?? null,
+    classified_by_user_id: userId,
+  };
+  statements.push({
+    query: `INSERT INTO audit_events
+      (id, client_id, actor_user_id, action, before_json, after_json)
+      VALUES ($1, $2, $3, 'bank_transaction_classified', $4::jsonb, $5::jsonb)`,
+    params: [newId("aud"), client.id, userId, before, afterSnapshot],
+  });
 
-  return c.json({ transaction: after });
+  const [bankResults] = await db.transaction(statements);
+  return c.json({ transaction: bankResults[0] });
 });
+
+async function checkPeriodOpen(db: ReturnType<typeof createDb>, clientId: string, periodKey: string): Promise<void> {
+  const [period] = await db.query<{ state: string }>(
+    `SELECT state FROM accounting_periods WHERE client_id = $1 AND period_key = $2`,
+    [clientId, periodKey],
+  );
+  if (period?.state === "closed") {
+    throw new Error("Period is closed");
+  }
+}
 
 async function authorizedClient(c: {
   env: Env;
@@ -606,23 +774,6 @@ function tokenSet(value: string): Set<string> {
       .split(/\s+/)
       .map((token) => token.trim())
       .filter((token) => token.length >= 3),
-  );
-}
-
-async function logBankAudit(
-  db: ReturnType<typeof createDb>,
-  clientId: string,
-  receiptId: string | null,
-  userId: string,
-  action: string,
-  before: unknown,
-  after: unknown,
-) {
-  await db.query(
-    `INSERT INTO audit_events
-      (id, client_id, receipt_id, actor_user_id, action, before_json, after_json)
-     VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb)`,
-    [newId("aud"), clientId, receiptId, userId, action, before, after],
   );
 }
 

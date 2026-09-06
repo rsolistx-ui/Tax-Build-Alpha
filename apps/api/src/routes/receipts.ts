@@ -9,7 +9,7 @@ import { getClient, type ClientRow } from "../services/clients";
 import { newId } from "../lib/id";
 import { getLlmProvider, type ReceiptBusinessContext, type ReceiptExtraction } from "../providers/llm";
 import { validateReceipt } from "../services/receipt-validation";
-import { createLedgerEntry, getOrCreatePeriodKey, attachBankSourceToReceiptLedgerEntry } from "../services/ledger";
+import { buildCreateLedgerEntryStatement, buildEnsurePeriodStatement, planAttachBankSourceToReceiptLedgerEntry } from "../services/ledger";
 
 export const receiptRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 receiptRoutes.use("*", requireSession);
@@ -108,6 +108,21 @@ receiptRoutes.post("/:clientId/receipts", async (c) => {
     customMetadata: { filename: file.name, clientId: client.id },
   });
 
+  if (bankTransactionId) {
+    const [bankTx] = await db.query<{ txn_date: string | null }>(
+      `SELECT txn_date FROM bank_transactions WHERE id = $1 AND client_id = $2`,
+      [bankTransactionId, client.id],
+    );
+    if (bankTx?.txn_date) {
+      const periodKey = String(bankTx.txn_date).slice(0, 7);
+      try {
+        await checkPeriodOpen(db, client.id, periodKey);
+      } catch {
+        return c.json({ error: "Cannot link receipt: bank transaction period is closed" }, 409);
+      }
+    }
+  }
+
   await db.transaction([
     {
       query: `INSERT INTO receipts
@@ -198,62 +213,44 @@ receiptRoutes.post("/:clientId/receipts", async (c) => {
             receiptId,
             c.get("userId"),
             bankTransactionBefore,
-            { id: bankTransactionId, transactionId: bankTransactionId, triage: "receipt_pending", pending_receipt_id: receiptId },
+            {
+              id: bankTransactionId,
+              transactionId: bankTransactionId,
+              triage: "receipt_pending",
+              pending_receipt_id: receiptId,
+              resolutionSource: "receipt_uploaded",
+            },
           ],
         },
       );
     }
 
     await db.transaction(statements);
-
     return c.json({ receipt: await getReceiptDetails(db, receiptId, client.id), jobId, bankTransactionId }, 201);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "extract failed";
+  } catch (e) {
     await db.transaction([
-      {
-        query: `UPDATE jobs SET status = 'failed', error = $1, updated_at = NOW() WHERE id = $2`,
-        params: [message, jobId],
-      },
       {
         query: `UPDATE receipts SET status = 'failed', updated_at = NOW() WHERE id = $1`,
         params: [receiptId],
       },
+      {
+        query: `UPDATE jobs SET status = 'failed', updated_at = NOW() WHERE id = $1`,
+        params: [jobId],
+      },
     ]);
-    return c.json({ receiptId, jobId, error: message }, 500);
+    throw e;
   }
 });
 
 receiptRoutes.get("/:clientId/review", async (c) => {
   const { db, client } = await authorizedClient(c);
   if (!client) return c.json({ error: "Not found" }, 404);
-
   const receipts = await db.query<{ id: string }>(
     `SELECT id FROM receipts WHERE client_id = $1 AND status = 'review' ORDER BY created_at DESC`,
     [client.id],
   );
   const detailed = await Promise.all(receipts.map((receipt) => getReceiptDetails(db, receipt.id, client.id)));
-  return c.json({ receipts: detailed.filter(Boolean) });
-});
-
-receiptRoutes.get("/:clientId/receipts/:receiptId/source", async (c) => {
-  const { db, client } = await authorizedClient(c);
-  if (!client) return c.json({ error: "Not found" }, 404);
-  const [receipt] = await db.query<{ r2_key: string; content_type: string | null; filename: string }>(
-    `SELECT r2_key, content_type, filename FROM receipts WHERE id = $1 AND client_id = $2`,
-    [c.req.param("receiptId"), client.id],
-  );
-  if (!receipt) return c.json({ error: "Not found" }, 404);
-
-  const object = await c.env.RECEIPTS.get(receipt.r2_key);
-  if (!object) return c.json({ error: "Source object missing" }, 404);
-  const filename = receipt.filename.replace(/["\r\n]/g, "");
-  return new Response(object.body, {
-    headers: {
-      "content-type": receipt.content_type || object.httpMetadata?.contentType || "application/octet-stream",
-      "content-disposition": `inline; filename="${filename}"`,
-      "cache-control": "private, no-store",
-    },
-  });
+  return c.json({ receipts: detailed });
 });
 
 receiptRoutes.patch("/:clientId/receipts/:receiptId", async (c) => {
@@ -263,58 +260,51 @@ receiptRoutes.patch("/:clientId/receipts/:receiptId", async (c) => {
   const receiptId = c.req.param("receiptId");
   const before = await getReceiptDetails(db, receiptId, client.id);
   if (!before) return c.json({ error: "Not found" }, 404);
-  if (before.status !== "review") return c.json({ error: "Only receipts in review can be edited" }, 409);
+  if (before.status !== "review") return c.json({ error: "Receipt is not in review" }, 409);
 
-  const extraction: ReceiptExtraction = {
-    date: body.date,
-    merchant: body.merchant,
-    subtotal: body.subtotal,
-    tax: body.tax,
-    tip: body.tip,
-    total: body.total,
-    currency: body.currency.toUpperCase(),
-    category: body.category,
-    confidence: body.confidence,
-    lineItems: body.lineItems,
-  };
-  const validation = validateReceipt(extraction);
+  let categoryId: string | null = null;
+  if (body.category) {
+    const [category] = await db.query<{ id: string }>(
+      `SELECT id FROM categories WHERE client_id = $1 AND slug = $2 LIMIT 1`,
+      [client.id, String(body.category).toLowerCase()],
+    );
+    categoryId = category?.id ?? null;
+  }
+
   const statements: DbStatement[] = [
     {
       query: `UPDATE receipts SET
         extracted_date = $1, extracted_merchant = $2, extracted_subtotal = $3,
         extracted_tax = $4, extracted_tip = $5, extracted_total = $6,
         extracted_currency = $7, extracted_category = $8, confidence = $9,
-        validation_status = $10, validation_json = $11::jsonb, updated_at = NOW()
-        WHERE id = $12 AND client_id = $13`,
+        category_id = $10, updated_at = NOW()
+        WHERE id = $11 AND client_id = $12`,
       params: [
-        extraction.date,
-        extraction.merchant,
-        extraction.subtotal,
-        extraction.tax,
-        extraction.tip,
-        extraction.total,
-        extraction.currency,
-        extraction.category,
-        extraction.confidence,
-        validation.status,
-        validation,
-        receiptId,
-        client.id,
+        body.date, body.merchant, body.subtotal, body.tax, body.tip, body.total,
+        body.currency, body.category, body.confidence, categoryId, receiptId, client.id,
       ],
     },
-    { query: `DELETE FROM receipt_line_items WHERE receipt_id = $1`, params: [receiptId] },
-    ...lineItemStatements(receiptId, extraction),
     {
       query: `INSERT INTO audit_events
         (id, client_id, receipt_id, actor_user_id, action, before_json, after_json)
-        VALUES ($1, $2, $3, $4, 'receipt_review_edited', $5::jsonb, $6::jsonb)`,
-      params: [newId("aud"), client.id, receiptId, c.get("userId"), before, { extraction, validation }],
+        VALUES ($1, $2, $3, $4, 'receipt_edited', $5::jsonb, $6::jsonb)`,
+      params: [
+        newId("aud"), client.id, receiptId, c.get("userId"),
+        before, { ...before, ...body, category_id: categoryId },
+      ],
     },
   ];
 
-  const beforeCategory = typeof before.extracted_category === "string" ? before.extracted_category : null;
-  if (extraction.merchant && extraction.category && extraction.category !== beforeCategory) {
-    statements.push(correctionRuleStatement(client.id, extraction.merchant, extraction.category));
+  await db.query(`DELETE FROM receipt_line_items WHERE receipt_id = $1`, [receiptId]);
+  for (let i = 0; i < body.lineItems.length; i++) {
+    const item = body.lineItems[i];
+    await db.query(
+      `INSERT INTO receipt_line_items
+        (id, receipt_id, line_no, description, quantity, unit_price, amount, category, confidence)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [newId("li"), receiptId, i + 1, item.description, item.quantity,
+        item.unitPrice, item.amount, item.category, item.confidence],
+    );
   }
 
   await db.transaction(statements);
@@ -331,6 +321,15 @@ receiptRoutes.post("/:clientId/receipts/:receiptId/approve", async (c) => {
   if (receipt.status !== "review") return c.json({ error: "Receipt is not in review" }, 409);
   if (receipt.validation_status === "fail" && !body.confirmOverride) {
     return c.json({ error: "Validation failed. Confirm the evidence before overriding." }, 409);
+  }
+
+  if (receipt.extracted_date) {
+    const periodKey = String(receipt.extracted_date).slice(0, 7);
+    try {
+      await checkPeriodOpen(db, client.id, periodKey);
+    } catch {
+      return c.json({ error: "Cannot mutate accounting in a closed period" }, 409);
+    }
   }
 
   let categoryId: string | null = null;
@@ -360,10 +359,7 @@ receiptRoutes.post("/:clientId/receipts/:receiptId/approve", async (c) => {
         (id, client_id, receipt_id, actor_user_id, action, after_json)
         VALUES ($1, $2, $3, $4, 'receipt_filed', $5::jsonb)`,
       params: [
-        newId("aud"),
-        client.id,
-        receiptId,
-        c.get("userId"),
+        newId("aud"), client.id, receiptId, c.get("userId"),
         { validation_status: receipt.validation_status, override: Boolean(body.confirmOverride) },
       ],
     },
@@ -386,10 +382,7 @@ receiptRoutes.post("/:clientId/receipts/:receiptId/approve", async (c) => {
           (id, client_id, receipt_id, actor_user_id, action, before_json, after_json)
           VALUES ($1, $2, $3, $4, 'bank_match_confirmed', $5::jsonb, $6::jsonb)`,
         params: [
-          newId("aud"),
-          client.id,
-          receiptId,
-          c.get("userId"),
+          newId("aud"), client.id, receiptId, c.get("userId"),
           bankTransaction,
           {
             id: transactionId,
@@ -401,21 +394,15 @@ receiptRoutes.post("/:clientId/receipts/:receiptId/approve", async (c) => {
         ],
       },
     );
+
+    const ledgerStatement = await planAttachBankSourceToReceiptLedgerEntry(db, client.id, receiptId, transactionId);
+    if (ledgerStatement) statements.push(ledgerStatement);
   }
 
-  await db.transaction(statements);
-
-  // Resolved bank transactions now trace to this filing; attach the bank source to
-  // any receipt-only ledger entry so the activity is never counted twice.
-  for (const bankTransaction of pendingBankTransactions) {
-    await attachBankSourceToReceiptLedgerEntry(db, client.id, receiptId, String(bankTransaction.id));
-  }
-
-  // Create ledger entry for this receipt if it doesn't have a bank transaction
   if (pendingBankTransactions.length === 0 && receipt.extracted_date && receipt.extracted_total !== null) {
     const extractedDate = String(receipt.extracted_date);
     const extractedTotal = Number(receipt.extracted_total);
-    const periodKey = await getOrCreatePeriodKey(db, client.id, extractedDate);
+    const periodKey = extractedDate.slice(0, 7);
     const existing = await db.query<{ id: string }>(
       `SELECT id FROM ledger_entries
        WHERE client_id = $1
@@ -425,27 +412,43 @@ receiptRoutes.post("/:clientId/receipts/:receiptId/approve", async (c) => {
     );
 
     if (!existing[0]) {
-      await createLedgerEntry(db, {
-        clientId: client.id,
-        periodKey,
-        entryDate: extractedDate,
-        description: String(receipt.extracted_merchant || "Receipt"),
-        amount: extractedTotal,
-        currency: String(receipt.extracted_currency || "USD"),
-        accountingClass: "expense",
-        treatment: "business",
-        categoryId,
-        source: { type: "receipt", receiptId },
-        createdByUserId: c.get("userId"),
-      });
+      statements.push(buildEnsurePeriodStatement(client.id, periodKey));
+      statements.push(
+        buildCreateLedgerEntryStatement({
+          clientId: client.id,
+          periodKey,
+          entryDate: extractedDate,
+          description: String(receipt.extracted_merchant || "Receipt"),
+          amount: extractedTotal,
+          currency: String(receipt.extracted_currency || "USD"),
+          accountingClass: "expense",
+          treatment: "business",
+          categoryId,
+          source: { type: "receipt", receiptId },
+          createdByUserId: c.get("userId"),
+        }).statement,
+      );
     }
   }
+
+  await db.transaction(statements);
 
   return c.json({
     receipt: await getReceiptDetails(db, receiptId, client.id),
     resolvedBankTransactions: pendingBankTransactions.map((transaction) => String(transaction.id)),
   });
 });
+
+
+async function checkPeriodOpen(db: ReturnType<typeof createDb>, clientId: string, periodKey: string): Promise<void> {
+  const [period] = await db.query<{ state: string }>(
+    `SELECT state FROM accounting_periods WHERE client_id = $1 AND period_key = $2`,
+    [clientId, periodKey],
+  );
+  if (period?.state === "closed") {
+    throw new Error("Period is closed");
+  }
+}
 
 async function authorizedClient(c: {
   env: Env;
