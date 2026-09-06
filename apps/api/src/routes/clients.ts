@@ -4,6 +4,7 @@ import { createDb } from "../db";
 import type { Env } from "../env";
 import type { AuthedVars } from "../middleware/session";
 import { requireSession } from "../middleware/session";
+import { requireActiveBeta } from "../middleware/beta";
 import * as clients from "../services/clients";
 import { ensureFirm } from "../services/firm";
 import { normalizeCurrencyCode } from "../services/pnl";
@@ -42,6 +43,7 @@ const profileSchema = z.object({
 
 export const clientRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 clientRoutes.use("*", requireSession);
+clientRoutes.use("*", requireActiveBeta);
 
 clientRoutes.get("/", async (c) => {
   const db = createDb(c.env);

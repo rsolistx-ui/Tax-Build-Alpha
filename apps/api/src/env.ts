@@ -25,4 +25,8 @@ export type Env = {
   APP_ORIGIN?: string;
   GEMINI_API_KEY?: string;
   LLM_PROVIDER?: string;
+  /** Case-insensitive email identifying the beta owner/operator. Set as a Worker secret, never hardcoded. */
+  OWNER_EMAIL?: string;
+  /** Shared secret required by the internal smoke-cleanup endpoint. Never exposed to any client. */
+  SMOKE_CLEANUP_TOKEN?: string;
 };

@@ -10,6 +10,8 @@ import { pnlRoutes } from "./routes/pnl";
 import { bankRoutes } from "./routes/bank";
 import { requireSession, type AuthedVars } from "./middleware/session";
 import { ensureFirm } from "./services/firm";
+import { betaRoutes } from "./routes/beta";
+import { internalRoutes } from "./routes/internal";
 
 const app = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 
@@ -42,7 +44,19 @@ app.get("/api/health", (c) =>
   }),
 );
 
+// Public registration is closed: Folio is invitation-only during the beta.
+// This specific route is registered before the wildcard below, so Hono
+// matches it first and Better Auth's own sign-up endpoint never runs for a
+// direct caller. The only path that creates an account is POST
+// /api/beta/redeem, which calls auth.api.signUpEmail() as a direct method
+// call (not an HTTP route match), so it is unaffected by this block.
+app.post("/api/auth/sign-up/email", (c) =>
+  c.json({ error: "Registration requires a beta invitation.", code: "BETA_REQUIRED" }, 403),
+);
 app.on(["POST", "GET"], "/api/auth/*", (c) => createAuth(c.env).handler(c.req.raw));
+
+app.route("/api/beta", betaRoutes);
+app.route("/api/internal", internalRoutes);
 
 app.get("/api/me", requireSession, async (c) => {
   const firm = await ensureFirm(createDb(c.env), c.get("userId"), c.get("userName"));

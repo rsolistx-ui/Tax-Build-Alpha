@@ -4,6 +4,7 @@ import { createDb, type Db, type DbStatement } from "../db";
 import type { Env } from "../env";
 import type { AuthedVars } from "../middleware/session";
 import { requireSession } from "../middleware/session";
+import { requireActiveBeta } from "../middleware/beta";
 import { ensureFirm } from "../services/firm";
 import { getClient, type ClientRow } from "../services/clients";
 import { newId } from "../lib/id";
@@ -12,6 +13,7 @@ import { validateReceipt } from "../services/receipt-validation";
 
 export const receiptRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 receiptRoutes.use("*", requireSession);
+receiptRoutes.use("*", requireActiveBeta);
 
 const lineItemSchema = z.object({
   description: z.string().max(500),

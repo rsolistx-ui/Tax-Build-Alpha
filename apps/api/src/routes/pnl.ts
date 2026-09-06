@@ -3,6 +3,7 @@ import { createDb } from "../db";
 import type { Env } from "../env";
 import type { AuthedVars } from "../middleware/session";
 import { requireSession } from "../middleware/session";
+import { requireActiveBeta } from "../middleware/beta";
 import { ensureFirm } from "../services/firm";
 import { getClient } from "../services/clients";
 import {
@@ -22,6 +23,7 @@ import {
 
 export const pnlRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 pnlRoutes.use("*", requireSession);
+pnlRoutes.use("*", requireActiveBeta);
 
 const CONFLICTING_DISPOSITIONS = [
   "personal",

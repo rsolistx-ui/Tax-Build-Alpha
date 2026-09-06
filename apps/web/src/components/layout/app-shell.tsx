@@ -1,5 +1,5 @@
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
-import { Building2, LogOut, Users } from "lucide-react";
+import { Building2, LogOut, ShieldCheck, Users } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -7,9 +7,11 @@ import { cn } from "@/lib/utils";
 export function AppShell({
   firmName,
   userName,
+  isOwner,
 }: {
   firmName?: string;
   userName?: string;
+  isOwner?: boolean;
 }) {
   const navigate = useNavigate();
 
@@ -45,6 +47,22 @@ export function AppShell({
                   Clients
                 </span>
               </NavLink>
+              {isOwner ? (
+                <NavLink
+                  to="/beta-admin"
+                  className={({ isActive }) =>
+                    cn(
+                      "rounded-md px-3 py-1.5 text-sm text-[var(--color-muted-foreground)] hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)]",
+                      isActive && "bg-[var(--color-muted)] text-[var(--color-foreground)]",
+                    )
+                  }
+                >
+                  <span className="inline-flex items-center gap-1.5">
+                    <ShieldCheck className="h-3.5 w-3.5" />
+                    Beta Access
+                  </span>
+                </NavLink>
+              ) : null}
             </nav>
           </div>
           <div className="flex items-center gap-3">

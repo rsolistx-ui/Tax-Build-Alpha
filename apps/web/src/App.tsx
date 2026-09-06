@@ -4,6 +4,7 @@ import { LoginPage } from "@/pages/login";
 import { SignupPage } from "@/pages/signup";
 import { ClientsPage } from "@/pages/clients";
 import { ClientWorkspacePage } from "@/pages/client-workspace";
+import { BetaAdminPage } from "@/pages/beta-admin";
 
 export default function App() {
   return (
@@ -14,6 +15,7 @@ export default function App() {
         <Route element={<ProtectedLayout />}>
           <Route path="/" element={<ClientsPage />} />
           <Route path="/clients/:clientId" element={<ClientWorkspacePage />} />
+          <Route path="/beta-admin" element={<BetaAdminPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
