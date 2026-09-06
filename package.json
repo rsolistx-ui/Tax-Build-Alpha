@@ -19,9 +19,11 @@
     "deploy:api": "npm run build -w @folio/web && npm run deploy -w @folio/api",
     "deploy:web": "npm run build -w @folio/web",
     "deploy:production": "powershell -ExecutionPolicy Bypass -File scripts/bootstrap-production.ps1",
-    "test": "npm run test -w @folio/api && npm run test -w @folio/web && node --test scripts/lib/*.test.mjs"
+    "test": "npm run test -w @folio/api && npm run test -w @folio/web && node --test scripts/lib/*.test.mjs",
+    "tauri": "tauri"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2",
     "concurrently": "^9.1.2",
     "typescript": "^5.8.2"
   },

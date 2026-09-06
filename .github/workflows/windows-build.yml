@@ -1,0 +1,59 @@
+name: windows-build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - run: npm ci
+
+      - run: npm run typecheck
+
+      - run: npm run test
+
+      - run: npm run build -w @folio/web
+
+      - name: Compute short commit SHA
+        id: vars
+        shell: bash
+        run: echo "sha_short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Build Tauri Windows beta
+        run: npx tauri build
+
+      - name: Collect installer artifacts
+        id: collect
+        shell: bash
+        run: |
+          set -e
+          mkdir -p dist-windows
+          version="0.1.0"
+          sha="${{ steps.vars.outputs.sha_short }}"
+          name="folio-beta-windows-${version}-${sha}"
+          echo "artifact_name=$name" >> "$GITHUB_OUTPUT"
+          find src-tauri/target/release/bundle -type f \( -iname "*.exe" -o -iname "*.msi" \) -print
+          for f in $(find src-tauri/target/release/bundle -type f \( -iname "*.exe" -o -iname "*.msi" \)); do
+            ext="${f##*.}"
+            cp "$f" "dist-windows/${name}.${ext}"
+          done
+          ls -la dist-windows
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.collect.outputs.artifact_name }}
+          path: dist-windows/*
+          if-no-files-found: error

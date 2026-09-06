@@ -302,10 +302,56 @@ npm run test
 
 A build is not considered production-ready until the Neon schema has been applied, real Cloudflare bindings and secrets are present, and the production smoke test passes.
 
+## Beta access
+
+Folio is invitation-only during the paid beta. There is no public sign-up. The
+owner issues a one-time invitation (email + beta duration, 30 days by
+default) from the in-app Beta Access page; the invitation token is hashed
+before storage and can only be redeemed once, by the exact invited email.
+Every protected business API call is checked server-side against a
+Neon-stored entitlement (`active` / `expired` / `revoked`) with the server's
+own clock as the sole authority — a changed local clock, a copied installer,
+or a copied `.exe` cannot extend or fabricate access. Expiration and
+revocation never delete, modify, or corrupt Neon rows or R2 receipt files;
+the server simply refuses further protected operations and the client shows
+a dedicated locked screen instead of broken API errors or a fake $0 report.
+
+## Windows beta distribution
+
+The Windows beta (`Folio Beta`) is a Tauri desktop wrapper around the same
+production web client at the same origin; it holds no `DATABASE_URL`,
+Better Auth secret, Cloudflare credential, Neon credential, AI key, or any
+other server credential. The desktop window can only navigate within the
+production origin — any other link opens in the user's normal browser
+instead of inside the app. `.github/workflows/windows-build.yml` builds an
+NSIS `.exe` (and MSI where the toolchain supports it) on `windows-latest`
+and uploads it as a GitHub Actions artifact named
+`folio-beta-windows-<version>-<shortsha>`.
+
+**The installer is unsigned in this alpha.** No paid Windows code-signing
+certificate is used. Windows SmartScreen will very likely warn that the
+publisher is unrecognized on first run ("Windows protected your PC"). This is
+expected or an unsigned beta binary and not a sign of tampering; testers can
+proceed via "More info" -> "Run anyway". Do not disable Windows Defender,
+SmartScreen, or any other OS protection to install this beta.
+
+## Mobile beta (PWA)
+
+Phyllis can install Folio to a phone home screen today without waiting for
+App Store distribution: `apps/web/public/manifest.webmanifest` plus
+`apps/web/public/sw.js` make the production site installable on Android
+("Add to Home screen") and iOS/iPadOS (Share -> "Add to Home Screen"). The
+service worker only ever caches a fixed list of static shell assets (icons
+and the manifest); it never intercepts `/api/*`, receipt source responses,
+bank data, P&L responses, authentication responses, or any other financial
+or session data — those always go straight to the network, uncached.
+
 ## Security notes
 
 - Receipt sources remain private in R2.
-- `DATABASE_URL`, `BETTER_AUTH_SECRET`, and optional `GEMINI_API_KEY` are Worker secrets only.
+- `DATABASE_URL`, `BETTER_AUTH_SECRET`, `OWNER_EMAIL`, `SMOKE_CLEANUP_TOKEN`, and optional `GEMINI_API_KEY` are Worker secrets only.
+- Public registration is closed; the only way to create a usable account is redeeming a hashed, single-use, owner-issued invitation.
+- The production smoke-cleanup path is a token-gated internal endpoint, never exposed in any UI, and hard-refuses to touch any tenant whose firm name does not match the literal smoke-harness naming convention.
 - No secret belongs in a `VITE_*` browser variable.
 - Production auth cookies are `Secure`, first-party, and `SameSite=Lax` because the SPA and API share one Worker origin.
 - Source endpoints enforce the same authenticated client boundary as receipt, bank, and P&L endpoints.
