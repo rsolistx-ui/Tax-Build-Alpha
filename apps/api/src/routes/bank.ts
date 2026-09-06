@@ -153,12 +153,17 @@ bankRoutes.get("/:clientId/bank-transactions/:transactionId/receipt-options", as
   if (!transaction) return c.json({ error: "Not found" }, 404);
 
   const receipts = await db.query<Record<string, unknown>>(
-    `SELECT id, status, extracted_date, extracted_merchant, extracted_total, filename, created_at
-     FROM receipts
-     WHERE client_id = $1 AND status IN ('review', 'filed')
-     ORDER BY created_at DESC
+    `SELECT r.id, r.status, r.extracted_date, r.extracted_merchant, r.extracted_total, r.filename, r.created_at
+     FROM receipts r
+     WHERE r.client_id = $1 AND r.status IN ('review', 'filed')
+       AND NOT EXISTS (
+         SELECT 1 FROM bank_transactions bt
+         WHERE bt.client_id = r.client_id AND bt.id <> $2
+           AND (bt.matched_receipt_id = r.id OR bt.pending_receipt_id = r.id)
+       )
+     ORDER BY r.created_at DESC
      LIMIT 200`,
-    [client.id],
+    [client.id, transactionId],
   );
 
   const options = receipts
@@ -227,12 +232,16 @@ bankRoutes.post("/:clientId/bank-transactions/import", async (c) => {
 
   const receipts = await db.query<ReceiptMatchCandidate>(
     `SELECT id, extracted_date, extracted_merchant, extracted_total, filename
-     FROM receipts
-     WHERE client_id = $1
-       AND status = 'filed'
-       AND extracted_total IS NOT NULL
-       AND extracted_date IS NOT NULL
-     ORDER BY extracted_date DESC
+     FROM receipts r
+     WHERE r.client_id = $1
+       AND r.status = 'filed'
+       AND r.extracted_total IS NOT NULL
+       AND r.extracted_date IS NOT NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM bank_transactions bt
+         WHERE bt.client_id = r.client_id AND (bt.matched_receipt_id = r.id OR bt.pending_receipt_id = r.id)
+       )
+     ORDER BY r.extracted_date DESC
      LIMIT 5000`,
     [client.id],
   );
@@ -349,6 +358,15 @@ bankRoutes.post("/:clientId/bank-transactions/:transactionId/decision", async (c
     );
     if (!receipt) return c.json({ error: "Filed receipt evidence was not found" }, 404);
 
+    const [conflict] = await db.query<{ id: string }>(
+      `SELECT id FROM bank_transactions
+       WHERE client_id = $1 AND id <> $2 AND (matched_receipt_id = $3 OR pending_receipt_id = $3)`,
+      [client.id, transactionId, receiptId],
+    );
+    if (conflict) {
+      return c.json({ error: `This receipt is already attached to another bank transaction (${conflict.id}). The paid alpha allows one receipt per bank transaction.` }, 409);
+    }
+
     const [after] = await db.query<Record<string, unknown>>(
       `UPDATE bank_transactions SET
          triage = 'matched', matched_receipt_id = $1, pending_receipt_id = NULL,
@@ -369,6 +387,15 @@ bankRoutes.post("/:clientId/bank-transactions/:transactionId/decision", async (c
       [body.receiptId, client.id],
     );
     if (!receipt) return c.json({ error: "Receipt evidence was not found" }, 404);
+
+    const [linkConflict] = await db.query<{ id: string }>(
+      `SELECT id FROM bank_transactions
+       WHERE client_id = $1 AND id <> $2 AND (matched_receipt_id = $3 OR pending_receipt_id = $3)`,
+      [client.id, transactionId, receipt.id],
+    );
+    if (linkConflict) {
+      return c.json({ error: `This receipt is already attached to another bank transaction (${linkConflict.id}). The paid alpha allows one receipt per bank transaction.` }, 409);
+    }
 
     if (receipt.status === "filed") {
       const [after] = await db.query<Record<string, unknown>>(

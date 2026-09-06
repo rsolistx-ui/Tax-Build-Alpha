@@ -108,6 +108,24 @@ export function isReceiptDispositionConflict(matchedBankDisposition: AnyDisposit
   return matchedBankDisposition !== null && CONTRADICTS_BUSINESS_EXPENSE.has(matchedBankDisposition);
 }
 
+/**
+ * A foreign-currency filed receipt is only a currency conflict when it is
+ * still eligible to be a business expense. Once its matched bank
+ * transaction has been deliberately classified nonbusiness (personal,
+ * transfer, owner activity, loan, other-excluded, or business income), that
+ * receipt is already excluded from operating expenses for that reason
+ * alone, so a mismatched currency must not create a second, inconsistent
+ * definition of "nonbusiness evidence" that separately blocks completeness.
+ */
+export function isReceiptCurrencyConflict(input: {
+  receiptCurrency: string;
+  clientCurrency: string;
+  matchedBankDisposition: AnyDisposition | null;
+}): boolean {
+  if (!isCurrencyMismatch(input.receiptCurrency, input.clientCurrency)) return false;
+  return !isReceiptDispositionConflict(input.matchedBankDisposition);
+}
+
 export type ReceiptCategoryRow = {
   categoryId: string | null;
   category: string;

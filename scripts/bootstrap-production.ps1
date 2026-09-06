@@ -304,6 +304,10 @@ try {
   try {
     & npm run db:migrate:neon
     Assert-ExitCode "Neon migration"
+
+    Write-Host "Verifying the production Neon schema actually reflects every applied migration..."
+    & npm run db:verify:neon
+    Assert-ExitCode "Neon schema verification"
   } finally {
     $env:DATABASE_URL = $previousDatabaseUrl
   }

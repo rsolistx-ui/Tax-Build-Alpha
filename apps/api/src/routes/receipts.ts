@@ -342,9 +342,15 @@ receiptRoutes.post("/:clientId/receipts/:receiptId/approve", async (c) => {
     categoryId = category?.id ?? null;
   }
 
+  // One receipt may resolve at most one bank transaction in the paid alpha.
+  // If legacy data somehow left more than one transaction pending on the
+  // same receipt, only the earliest is resolved here; any others remain
+  // pending_receipt_id and are caught by the unique-index migration cleanup.
   const pendingBankTransactions = await db.query<Record<string, unknown>>(
     `SELECT * FROM bank_transactions
-     WHERE client_id = $1 AND pending_receipt_id = $2 AND triage = 'receipt_pending'`,
+     WHERE client_id = $1 AND pending_receipt_id = $2 AND triage = 'receipt_pending'
+     ORDER BY created_at ASC, id ASC
+     LIMIT 1`,
     [client.id, receiptId],
   );
 

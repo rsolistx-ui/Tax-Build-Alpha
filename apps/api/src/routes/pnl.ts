@@ -33,6 +33,8 @@ const CONFLICTING_DISPOSITIONS = [
   "business_income",
 ] as const;
 
+const CONFLICTING_DISPOSITIONS_SQL_LIST = CONFLICTING_DISPOSITIONS.map((d) => `'${d}'`).join(", ");
+
 /**
  * Build the expense ledger from approved evidence while preserving an exact
  * receipt-total reconciliation.
@@ -68,9 +70,7 @@ receipt_conflict AS (
   SELECT r.id AS receipt_id
   FROM receipts r
   JOIN bank_transactions bt ON bt.matched_receipt_id = r.id AND bt.client_id = r.client_id
-  WHERE bt.disposition IN (
-    'personal', 'transfer', 'owner_contribution', 'owner_draw', 'loan', 'other_excluded', 'business_income'
-  )
+  WHERE bt.disposition IN (${CONFLICTING_DISPOSITIONS_SQL_LIST})
 ),
 expense_lines AS (
   SELECT
@@ -211,6 +211,11 @@ pnlRoutes.get("/:clientId/pnl", async (c) => {
     `SELECT COUNT(DISTINCT r.id)::text AS count
      FROM receipts r
      WHERE r.client_id = $1 AND r.status = 'filed' AND UPPER(r.extracted_currency) != UPPER($4)
+       AND NOT EXISTS (
+         SELECT 1 FROM bank_transactions bt
+         WHERE bt.matched_receipt_id = r.id AND bt.client_id = r.client_id
+           AND bt.disposition IN (${CONFLICTING_DISPOSITIONS_SQL_LIST})
+       )
        AND ($2::date IS NULL OR r.extracted_date >= $2::date)
        AND ($3::date IS NULL OR r.extracted_date <= $3::date)`,
     [clientId, startDate, endDate, clientCurrency],
@@ -231,7 +236,7 @@ pnlRoutes.get("/:clientId/pnl", async (c) => {
      FROM receipts r
      JOIN bank_transactions bt ON bt.matched_receipt_id = r.id AND bt.client_id = r.client_id
      WHERE r.client_id = $1 AND r.status = 'filed'
-       AND bt.disposition IN ('personal', 'transfer', 'owner_contribution', 'owner_draw', 'loan', 'other_excluded', 'business_income')
+       AND bt.disposition IN (${CONFLICTING_DISPOSITIONS_SQL_LIST})
        AND ($2::date IS NULL OR r.extracted_date >= $2::date)
        AND ($3::date IS NULL OR r.extracted_date <= $3::date)
      ORDER BY r.extracted_date DESC NULLS LAST`,
@@ -418,16 +423,27 @@ pnlRoutes.get("/:clientId/pnl/drilldown", async (c) => {
     const entries = filterByDateRange(
       incomeRows
         .filter((row) => !isCurrencyMismatch((row.currency || "USD").toUpperCase(), clientCurrency))
-        .map((row) => ({
-          date: row.txn_date ? String(row.txn_date) : null,
-          bankTransactionId: row.id,
-          description: row.description,
-          amount: Number(row.amount ?? 0),
-          reportedAmount: Number(row.amount ?? 0),
-          category: row.category_name || "Uncategorized",
-          dispositionNote: row.disposition_note,
-          rawImportedRow: row.raw_json ?? null,
-        })),
+        .map((row) => {
+          const raw = (row.raw_json ?? {}) as {
+            importBatchId?: string;
+            sourceFilename?: string;
+            sourceRow?: number;
+            original?: unknown;
+          };
+          return {
+            date: row.txn_date ? String(row.txn_date) : null,
+            bankTransactionId: row.id,
+            description: row.description,
+            amount: Number(row.amount ?? 0),
+            reportedAmount: Number(row.amount ?? 0),
+            category: row.category_name || "Uncategorized",
+            dispositionNote: row.disposition_note,
+            sourceFilename: raw.sourceFilename ?? null,
+            sourceRow: typeof raw.sourceRow === "number" ? raw.sourceRow : null,
+            importBatchId: raw.importBatchId ?? null,
+            originalRow: raw.original ?? null,
+          };
+        }),
       startDate,
       endDate,
     );

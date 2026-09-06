@@ -13,6 +13,7 @@ import {
   isValidCalendarDate,
   isCurrencyMismatch,
   normalizeCurrencyCode,
+  isReceiptCurrencyConflict,
   type BankTxnForPnl,
 } from "./pnl";
 
@@ -444,6 +445,46 @@ describe("isCurrencyMismatch", () => {
 
   it("is true when currencies differ", () => {
     expect(isCurrencyMismatch("EUR", "USD")).toBe(true);
+  });
+});
+
+describe("isReceiptCurrencyConflict", () => {
+  it("is a conflict when currencies differ and the receipt is still eligible as a business expense", () => {
+    expect(
+      isReceiptCurrencyConflict({ receiptCurrency: "EUR", clientCurrency: "USD", matchedBankDisposition: null }),
+    ).toBe(true);
+  });
+
+  it("is a conflict when currencies differ and the matched bank transaction is unclassified", () => {
+    expect(
+      isReceiptCurrencyConflict({ receiptCurrency: "EUR", clientCurrency: "USD", matchedBankDisposition: "unclassified" }),
+    ).toBe(true);
+  });
+
+  it("is a conflict when currencies differ and the matched bank transaction is business_expense", () => {
+    expect(
+      isReceiptCurrencyConflict({ receiptCurrency: "EUR", clientCurrency: "USD", matchedBankDisposition: "business_expense" }),
+    ).toBe(true);
+  });
+
+  it("is not a conflict when currencies match", () => {
+    expect(
+      isReceiptCurrencyConflict({ receiptCurrency: "USD", clientCurrency: "usd", matchedBankDisposition: null }),
+    ).toBe(false);
+  });
+
+  it("is not a conflict when the matched bank transaction is already excluded as nonbusiness (personal)", () => {
+    expect(
+      isReceiptCurrencyConflict({ receiptCurrency: "EUR", clientCurrency: "USD", matchedBankDisposition: "personal" }),
+    ).toBe(false);
+  });
+
+  it("is not a conflict for any nonbusiness disposition (transfer, owner, loan, other-excluded, business income)", () => {
+    for (const disposition of ["transfer", "owner_contribution", "owner_draw", "loan", "other_excluded", "business_income"] as const) {
+      expect(
+        isReceiptCurrencyConflict({ receiptCurrency: "EUR", clientCurrency: "USD", matchedBankDisposition: disposition }),
+      ).toBe(false);
+    }
   });
 });
 

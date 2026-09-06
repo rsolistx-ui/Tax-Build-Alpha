@@ -646,6 +646,44 @@ try {
   if (-not $excludedEntry -or $excludedEntry.bankTransactionId -ne $bankTransactionId -or $excludedEntry.bankDisposition -ne "personal" -or -not $excludedEntry.sourceUrl) {
     throw "excludedFiledReceipts did not surface the excluded receipt with its matched bank transaction and source link."
   }
+  Write-Host "Verifying one receipt cannot be matched to a second bank transaction (409)..."
+  $dupMatchCsvPath = Join-Path $env:TEMP "folio-smoke-dupmatch-$([guid]::NewGuid().ToString('N')).csv"
+  $dupMatchCsv = "Date,Description,Amount`r`n2026-12-15,FOLIO DUPLICATE MATCH ATTEMPT SMOKE,-5.00`r`n"
+  [System.IO.File]::WriteAllText($dupMatchCsvPath, $dupMatchCsv, $utf8)
+  $dupMatchImport = Invoke-CurlJson @(
+    "-c", $cookieJar, "-b", $cookieJar,
+    "-F", "file=@$dupMatchCsvPath",
+    "-F", "mapping=<$bankMappingPayloadPath",
+    "$BaseUrl/api/clients/$clientId/bank-transactions/import"
+  )
+  if ($dupMatchImport.insertedCount -ne 1) { throw "Duplicate-match smoke CSV did not insert the probe transaction." }
+  Remove-TempFile $dupMatchCsvPath
+
+  $dupMatchQueue = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/bank-transactions")
+  $dupMatchTxn = @($dupMatchQueue.transactions) | Where-Object { $_.description -eq "FOLIO DUPLICATE MATCH ATTEMPT SMOKE" } | Select-Object -First 1
+  if (-not $dupMatchTxn) { throw "Duplicate-match probe transaction was not persisted." }
+
+  $dupConfirmBody = @{ action = "confirm"; receiptId = $receiptId } | ConvertTo-Json -Compress
+  $dupConfirmPayloadPath = New-JsonPayloadFile $dupConfirmBody
+  $dupConfirmStatus = ""
+  $previousPreference = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    $dupConfirmStatus = (& curl.exe --silent --output NUL --write-out "%{http_code}" -c $cookieJar -b $cookieJar -H "Content-Type: application/json" --data-binary "@$dupConfirmPayloadPath" "$BaseUrl/api/clients/$clientId/bank-transactions/$([string]$dupMatchTxn.id)/decision")
+  } finally {
+    $ErrorActionPreference = $previousPreference
+  }
+  Remove-TempFile $dupConfirmPayloadPath
+  if ($dupConfirmStatus -ne "409") {
+    throw "Confirming a receipt that is already matched to another bank transaction must return HTTP 409, got $dupConfirmStatus."
+  }
+
+  Write-Host "Verifying an already-matched receipt is excluded from future receipt-option suggestions..."
+  $receiptOptions = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/bank-transactions/$([string]$dupMatchTxn.id)/receipt-options")
+  if (@($receiptOptions.receipts) | Where-Object { $_.id -eq $receiptId }) {
+    throw "An already-matched receipt must not be offered as a receipt-option suggestion for another bank transaction."
+  }
+
 
   Write-Host "Verifying signed accounting: a vendor refund reduces net expense rather than adding to it..."
   $refundCsvPath = Join-Path $env:TEMP "folio-smoke-refund-$([guid]::NewGuid().ToString('N')).csv"
@@ -928,6 +966,7 @@ try {
   Write-Host "Receipt -> R2 -> Workers AI -> line items -> validation -> review -> filed ledger -> P&L -> source drill-down -> CSV -> duplicate protection -> suggested match -> explicit confirmation -> exception inbox -> missing receipt upload -> receipt review -> resolved match -> documented no-receipt resolution -> audit"
   Write-Host "Signed accounting refund/reversal netting -> receipt/bank disposition conflict exclusion -> uncategorized completeness -> invalid date rejection -> accrual guardrail"
   Write-Host "Income drilldown -> foreign-currency completeness -> currency normalization -> duplicate category name rejection"
+  Write-Host "One-receipt-to-one-bank-transaction protection (409) -> already-matched receipt excluded from suggestions"
   Write-Host "Test account: $email"
   Write-Host "Test password: $password"
   Write-Host "Test client:  $clientId"
