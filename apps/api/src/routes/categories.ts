@@ -90,6 +90,13 @@ categoryRoutes.get("/:clientId/categories/:categoryId/evidence", async (c) => {
   // A receipt is discoverable via either its own category or any line
   // item's category, so source evidence is never lost due to line-item-level
   // allocation differing from the receipt-level category.
+  //
+  // No DISTINCT here: idx_bank_unique_receipt_claim guarantees at most one
+  // bank transaction can hold a given matched_receipt_id per client, so the
+  // excluded_bt LEFT JOIN can add at most one row per receipt. Adding
+  // DISTINCT back would break ORDER BY (its expressions are not literal
+  // select-list columns) without preventing any duplication DISTINCT would
+  // actually need to remove.
   const receipts = await db.query<{
     id: string;
     extracted_date: string | null;
@@ -99,7 +106,7 @@ categoryRoutes.get("/:clientId/categories/:categoryId/evidence", async (c) => {
     filename: string;
     excluded_bank_disposition: string | null;
   }>(
-    `SELECT DISTINCT r.id, r.extracted_date, r.extracted_merchant, r.extracted_total, r.extracted_currency, r.filename,
+    `SELECT r.id, r.extracted_date, r.extracted_merchant, r.extracted_total, r.extracted_currency, r.filename,
             excluded_bt.disposition AS excluded_bank_disposition
      FROM receipts r
      LEFT JOIN bank_transactions excluded_bt ON excluded_bt.matched_receipt_id = r.id
