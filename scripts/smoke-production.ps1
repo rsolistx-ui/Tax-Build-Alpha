@@ -56,6 +56,21 @@ function New-JsonPayloadFile([string]$Json) {
   return $path
 }
 
+function Get-HttpStatusOnly([string]$Url, [string]$CookieJar) {
+  $previousPreference = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    $status = (& curl.exe --silent --output NUL --write-out "%{http_code}" -c $CookieJar -b $CookieJar $Url)
+    $exitCode = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $previousPreference
+  }
+  if ($exitCode -ne 0) {
+    throw "curl failed while checking status for $Url"
+  }
+  return $status
+}
+
 function Remove-TempFile([string]$Path) {
   if (-not [string]::IsNullOrWhiteSpace($Path)) {
     Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
@@ -609,10 +624,179 @@ try {
     throw "Folder evidence entries must carry filename and source link."
   }
 
+  Write-Host "Verifying a receipt matched to a personal-disposition bank transaction is excluded from P&L (conflict handling)..."
+  $conflictDispositionBody = @{ disposition = "personal" } | ConvertTo-Json -Compress
+  $conflictDispositionPayloadPath = New-JsonPayloadFile $conflictDispositionBody
+  $null = Invoke-CurlJson @(
+    "-c", $cookieJar, "-b", $cookieJar,
+    "-H", "Content-Type: application/json",
+    "-X", "PATCH",
+    "--data-binary", "@$conflictDispositionPayloadPath",
+    "$BaseUrl/api/clients/$clientId/bank-transactions/$bankTransactionId/disposition"
+  )
+  Remove-TempFile $conflictDispositionPayloadPath
+  $pnlAfterConflict = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/pnl")
+  if ([double]$pnlAfterConflict.expenses -ge $pnlExpenses) {
+    throw "A filed receipt whose matched bank transaction is explicitly classified personal must be excluded from expenses."
+  }
+
+  Write-Host "Verifying signed accounting: a vendor refund reduces net expense rather than adding to it..."
+  $refundCsvPath = Join-Path $env:TEMP "folio-smoke-refund-$([guid]::NewGuid().ToString('N')).csv"
+  $refundCsv = "Date,Description,Amount`r`n2026-10-05,FOLIO REFUND SMOKE DEBIT,-100.00`r`n2026-10-06,FOLIO REFUND SMOKE CREDIT,20.00`r`n"
+  [System.IO.File]::WriteAllText($refundCsvPath, $refundCsv, $utf8)
+  $refundImport = Invoke-CurlJson @(
+    "-c", $cookieJar, "-b", $cookieJar,
+    "-F", "file=@$refundCsvPath",
+    "-F", "mapping=<$bankMappingPayloadPath",
+    "$BaseUrl/api/clients/$clientId/bank-transactions/import"
+  )
+  if ($refundImport.insertedCount -ne 2) { throw "Refund smoke CSV did not insert exactly two transactions." }
+  Remove-TempFile $refundCsvPath
+
+  $refundQueue = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/bank-transactions")
+  $refundDebit = @($refundQueue.transactions) | Where-Object { $_.description -eq "FOLIO REFUND SMOKE DEBIT" } | Select-Object -First 1
+  $refundCredit = @($refundQueue.transactions) | Where-Object { $_.description -eq "FOLIO REFUND SMOKE CREDIT" } | Select-Object -First 1
+  if (-not $refundDebit -or -not $refundCredit) { throw "Refund smoke transactions were not persisted." }
+  foreach ($id in @([string]$refundDebit.id, [string]$refundCredit.id)) {
+    $noReceiptBody = @{ action = "no_receipt_required"; reason = "Smoke test refund/contra scenario" } | ConvertTo-Json -Compress
+    $noReceiptPayloadPath = New-JsonPayloadFile $noReceiptBody
+    $null = Invoke-CurlJson @(
+      "-c", $cookieJar, "-b", $cookieJar,
+      "-H", "Content-Type: application/json",
+      "--data-binary", "@$noReceiptPayloadPath",
+      "$BaseUrl/api/clients/$clientId/bank-transactions/$id/decision"
+    )
+    Remove-TempFile $noReceiptPayloadPath
+    $expenseBody = @{ disposition = "business_expense"; categoryId = $smokeCategoryId } | ConvertTo-Json -Compress
+    $expensePayloadPath = New-JsonPayloadFile $expenseBody
+    $null = Invoke-CurlJson @(
+      "-c", $cookieJar, "-b", $cookieJar,
+      "-H", "Content-Type: application/json",
+      "-X", "PATCH",
+      "--data-binary", "@$expensePayloadPath",
+      "$BaseUrl/api/clients/$clientId/bank-transactions/$id/disposition"
+    )
+    Remove-TempFile $expensePayloadPath
+  }
+  $pnlOctober = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/pnl?startDate=2026-10-01&endDate=2026-10-31")
+  if ([Math]::Abs([double]$pnlOctober.expenses - 80.00) -gt 0.01) {
+    throw "Signed accounting is broken: expected a -100 debit plus a 20 refund to net to 80.00 in expenses, got $($pnlOctober.expenses)."
+  }
+
+  Write-Host "Verifying signed accounting: an income reversal reduces net income rather than being ignored..."
+  $reversalCsvPath = Join-Path $env:TEMP "folio-smoke-reversal-$([guid]::NewGuid().ToString('N')).csv"
+  $reversalCsv = "Date,Description,Amount`r`n2026-11-05,FOLIO INCOME REVERSAL SMOKE CREDIT,1000.00`r`n2026-11-06,FOLIO INCOME REVERSAL SMOKE DEBIT,-100.00`r`n2026-11-07,FOLIO UNCATEGORIZED EXPENSE SMOKE,-7.00`r`n"
+  [System.IO.File]::WriteAllText($reversalCsvPath, $reversalCsv, $utf8)
+  $reversalImport = Invoke-CurlJson @(
+    "-c", $cookieJar, "-b", $cookieJar,
+    "-F", "file=@$reversalCsvPath",
+    "-F", "mapping=<$bankMappingPayloadPath",
+    "$BaseUrl/api/clients/$clientId/bank-transactions/import"
+  )
+  if ($reversalImport.insertedCount -ne 3) { throw "Income reversal smoke CSV did not insert exactly three transactions." }
+  Remove-TempFile $reversalCsvPath
+
+  $reversalQueue = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/bank-transactions")
+  $reversalCredit = @($reversalQueue.transactions) | Where-Object { $_.description -eq "FOLIO INCOME REVERSAL SMOKE CREDIT" } | Select-Object -First 1
+  $reversalDebit = @($reversalQueue.transactions) | Where-Object { $_.description -eq "FOLIO INCOME REVERSAL SMOKE DEBIT" } | Select-Object -First 1
+  $uncategorizedExpense = @($reversalQueue.transactions) | Where-Object { $_.description -eq "FOLIO UNCATEGORIZED EXPENSE SMOKE" } | Select-Object -First 1
+  if (-not $reversalCredit -or -not $reversalDebit -or -not $uncategorizedExpense) { throw "Income reversal/uncategorized smoke transactions were not persisted." }
+
+  foreach ($id in @([string]$reversalCredit.id, [string]$reversalDebit.id, [string]$uncategorizedExpense.id)) {
+    $noReceiptBody = @{ action = "no_receipt_required"; reason = "Smoke test income reversal / uncategorized scenario" } | ConvertTo-Json -Compress
+    $noReceiptPayloadPath = New-JsonPayloadFile $noReceiptBody
+    $null = Invoke-CurlJson @(
+      "-c", $cookieJar, "-b", $cookieJar,
+      "-H", "Content-Type: application/json",
+      "--data-binary", "@$noReceiptPayloadPath",
+      "$BaseUrl/api/clients/$clientId/bank-transactions/$id/decision"
+    )
+    Remove-TempFile $noReceiptPayloadPath
+  }
+
+  foreach ($id in @([string]$reversalCredit.id, [string]$reversalDebit.id)) {
+    $incomeBody = @{ disposition = "business_income" } | ConvertTo-Json -Compress
+    $incomePayloadPath = New-JsonPayloadFile $incomeBody
+    $null = Invoke-CurlJson @(
+      "-c", $cookieJar, "-b", $cookieJar,
+      "-H", "Content-Type: application/json",
+      "-X", "PATCH",
+      "--data-binary", "@$incomePayloadPath",
+      "$BaseUrl/api/clients/$clientId/bank-transactions/$id/disposition"
+    )
+    Remove-TempFile $incomePayloadPath
+  }
+
+  $uncategorizedExpenseBody = @{ disposition = "business_expense" } | ConvertTo-Json -Compress
+  $uncategorizedExpensePayloadPath = New-JsonPayloadFile $uncategorizedExpenseBody
+  $null = Invoke-CurlJson @(
+    "-c", $cookieJar, "-b", $cookieJar,
+    "-H", "Content-Type: application/json",
+    "-X", "PATCH",
+    "--data-binary", "@$uncategorizedExpensePayloadPath",
+    "$BaseUrl/api/clients/$clientId/bank-transactions/$([string]$uncategorizedExpense.id)/disposition"
+  )
+  Remove-TempFile $uncategorizedExpensePayloadPath
+
+  $pnlNovember = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/pnl?startDate=2026-11-01&endDate=2026-11-30")
+  if ([Math]::Abs([double]$pnlNovember.income - 900.00) -gt 0.01) {
+    throw "Signed accounting is broken: expected a +1000 credit plus a -100 reversal to net to 900.00 in income, got $($pnlNovember.income)."
+  }
+  if ($pnlNovember.completeness.uncategorizedCount -lt 1) {
+    throw "P&L completeness did not flag the uncategorized business-expense bank transaction."
+  }
+
+  Write-Host "Verifying invalid reporting dates are rejected with HTTP 400 rather than silently unbounded..."
+  $badDateEncoded = [Uri]::EscapeDataString("foo")
+  $invalidDateStatus = Get-HttpStatusOnly "$BaseUrl/api/clients/$clientId/pnl?startDate=$badDateEncoded" $cookieJar
+  if ($invalidDateStatus -ne "400") { throw "A non-date startDate value must return HTTP 400, got $invalidDateStatus." }
+
+  $invalidMonthStatus = Get-HttpStatusOnly "$BaseUrl/api/clients/$clientId/pnl?startDate=2026-13-01" $cookieJar
+  if ($invalidMonthStatus -ne "400") { throw "An out-of-range month must return HTTP 400, got $invalidMonthStatus." }
+
+  $invalidDayStatus = Get-HttpStatusOnly "$BaseUrl/api/clients/$clientId/pnl?startDate=2026-02-30" $cookieJar
+  if ($invalidDayStatus -ne "400") { throw "A calendar-invalid day must return HTTP 400, got $invalidDayStatus." }
+
+  $reversedRangeStatus = Get-HttpStatusOnly "$BaseUrl/api/clients/$clientId/pnl?startDate=2026-06-01&endDate=2026-01-01" $cookieJar
+  if ($reversedRangeStatus -ne "400") { throw "startDate after endDate must return HTTP 400, got $reversedRangeStatus." }
+
+  Write-Host "Verifying accrual-basis clients receive an explicit guardrail instead of a cash-derived P&L..."
+  $accrualProfileBody = @{ accounting_basis = "accrual" } | ConvertTo-Json -Compress
+  $accrualProfilePayloadPath = New-JsonPayloadFile $accrualProfileBody
+  $null = Invoke-CurlJson @(
+    "-c", $cookieJar, "-b", $cookieJar,
+    "-H", "Content-Type: application/json",
+    "-X", "PATCH",
+    "--data-binary", "@$accrualProfilePayloadPath",
+    "$BaseUrl/api/clients/$clientId/profile"
+  )
+  Remove-TempFile $accrualProfilePayloadPath
+  $pnlAccrual = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/pnl")
+  if ($pnlAccrual.accrualSupported -ne $false -or -not $pnlAccrual.warning) {
+    throw "An accrual-basis client must receive an explicit unsupported warning, not a cash-derived P&L."
+  }
+  if ($null -ne $pnlAccrual.income -or $null -ne $pnlAccrual.expenses) {
+    throw "An accrual-basis client must never receive cash-derived income/expense figures presented as accrual."
+  }
+
+  $cashProfileBody = @{ accounting_basis = "cash" } | ConvertTo-Json -Compress
+  $cashProfilePayloadPath = New-JsonPayloadFile $cashProfileBody
+  $null = Invoke-CurlJson @(
+    "-c", $cookieJar, "-b", $cookieJar,
+    "-H", "Content-Type: application/json",
+    "-X", "PATCH",
+    "--data-binary", "@$cashProfilePayloadPath",
+    "$BaseUrl/api/clients/$clientId/profile"
+  )
+  Remove-TempFile $cashProfilePayloadPath
+
+
   Write-Host ""
   Write-Host "END-TO-END PAID-ALPHA SMOKE TEST PASSED" -ForegroundColor Green
   Write-Host "BANK EXCEPTION WORKFLOW PRODUCTION VERIFICATION PASSED" -ForegroundColor Green
+  Write-Host "BOOKKEEPING CORE AUDIT CORRECTION VERIFICATION PASSED" -ForegroundColor Green
   Write-Host "Receipt -> R2 -> Workers AI -> line items -> validation -> review -> filed ledger -> P&L -> source drill-down -> CSV -> duplicate protection -> suggested match -> explicit confirmation -> exception inbox -> missing receipt upload -> receipt review -> resolved match -> documented no-receipt resolution -> audit"
+  Write-Host "Signed accounting refund/reversal netting -> receipt/bank disposition conflict exclusion -> uncategorized completeness -> invalid date rejection -> accrual guardrail"
   Write-Host "Test account: $email"
   Write-Host "Test password: $password"
   Write-Host "Test client:  $clientId"

@@ -79,6 +79,9 @@ categoryRoutes.get("/:clientId/categories/:categoryId/evidence", async (c) => {
 
   // Filed, professional-approved evidence only. Unreviewed AI extraction
   // never appears here regardless of the category it was tentatively given.
+  // A receipt is discoverable via either its own category or any line
+  // item's category, so source evidence is never lost due to line-item-level
+  // allocation differing from the receipt-level category.
   const receipts = await db.query<{
     id: string;
     extracted_date: string | null;
@@ -87,13 +90,21 @@ categoryRoutes.get("/:clientId/categories/:categoryId/evidence", async (c) => {
     extracted_currency: string;
     filename: string;
   }>(
-    `SELECT r.id, r.extracted_date, r.extracted_merchant, r.extracted_total, r.extracted_currency, r.filename
+    `SELECT DISTINCT r.id, r.extracted_date, r.extracted_merchant, r.extracted_total, r.extracted_currency, r.filename
      FROM receipts r
      WHERE r.client_id = $1
        AND r.status = 'filed'
-       AND (r.category_id = $2 OR LOWER(r.extracted_category) = LOWER($3))
+       AND (
+         r.category_id = $2
+         OR LOWER(r.extracted_category) = LOWER($3)
+         OR EXISTS (
+           SELECT 1 FROM receipt_line_items li
+           WHERE li.receipt_id = r.id
+             AND (LOWER(li.category) = LOWER($3) OR LOWER(li.category) = LOWER($4))
+         )
+       )
      ORDER BY ${orderBy}`,
-    [clientId, category.id, category.slug],
+    [clientId, category.id, category.slug, category.name],
   );
 
   return c.json({

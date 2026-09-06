@@ -796,6 +796,7 @@ function auditLabel(action: string): string {
   if (action === "bank_receipt_uploaded") return "Missing receipt uploaded";
   if (action === "bank_receipt_linked_pending_review") return "Existing receipt linked pending review";
   if (action === "bank_no_receipt_required") return "Resolved with no receipt required";
+  if (action === "bank_disposition_changed") return "Accounting disposition changed";
   return action.replace(/_/g, " ");
 }
 

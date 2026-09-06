@@ -132,7 +132,8 @@ bankRoutes.get("/:clientId/bank-transactions/:transactionId/audit", async (c) =>
          'bank_match_rejected',
          'bank_receipt_linked_pending_review',
          'bank_receipt_uploaded',
-         'bank_no_receipt_required'
+         'bank_no_receipt_required',
+         'bank_disposition_changed'
        )
        AND (before_json->>'id' = $2 OR after_json->>'id' = $2 OR after_json->>'transactionId' = $2)
      ORDER BY created_at ASC`,

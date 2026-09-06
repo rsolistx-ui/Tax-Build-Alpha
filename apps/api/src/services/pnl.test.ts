@@ -3,10 +3,15 @@ import {
   filterByDateRange,
   selectBankExpenseTransactions,
   selectBankIncomeTransactions,
-  sumAmount,
+  sumBankExpenseAmount,
+  sumBankIncomeAmount,
+  isReceiptDispositionConflict,
   mergeExpenseCategories,
   computeCompleteness,
   isUnresolvedTriage,
+  isAccrualBasisSupported,
+  isValidCalendarDate,
+  isCurrencyMismatch,
   type BankTxnForPnl,
 } from "./pnl";
 
@@ -16,7 +21,9 @@ function txn(overrides: Partial<BankTxnForPnl> & { id: string }): BankTxnForPnl 
     amount: -50,
     disposition: "unclassified",
     triage: "unmatched",
+    categoryId: null,
     categoryName: null,
+    currency: "USD",
     ...overrides,
   };
 }
@@ -121,28 +128,105 @@ describe("selectBankExpenseTransactions - exclusions and double-count prevention
   });
 });
 
-describe("sumAmount", () => {
-  it("sums absolute values regardless of sign", () => {
-    expect(sumAmount([{ amount: -10 }, { amount: 25.5 }])).toBeCloseTo(35.5);
+describe("sumBankExpenseAmount - signed accounting", () => {
+  it("a normal debit expense of -100 nets to expense of 100", () => {
+    expect(sumBankExpenseAmount([{ amount: -100 }])).toBeCloseTo(100);
+  });
+
+  it("a vendor refund/contra credit reduces the net expense: -100 debit + 20 refund = 80", () => {
+    expect(sumBankExpenseAmount([{ amount: -100 }, { amount: 20 }])).toBeCloseTo(80);
+  });
+
+  it("multiple mixed-sign transactions net correctly", () => {
+    expect(sumBankExpenseAmount([{ amount: -40 }, { amount: -60 }, { amount: 15 }, { amount: -5 }])).toBeCloseTo(90);
+  });
+
+  it("a fully offset debit and refund nets to zero", () => {
+    expect(sumBankExpenseAmount([{ amount: -100 }, { amount: 100 }])).toBeCloseTo(0);
   });
 });
 
-describe("mergeExpenseCategories", () => {
-  it("combines receipt and bank rows for the same category case-insensitively", () => {
-    const merged = mergeExpenseCategories(
-      [{ category: "Office Supplies", count: 3, receiptCount: 2, total: 120 }],
-      [{ category: "office supplies", count: 1, total: 40 }],
-    );
-    expect(merged).toHaveLength(1);
-    expect(merged[0]).toMatchObject({ receiptCount: 2, bankCount: 1, count: 4, total: 160 });
+describe("sumBankIncomeAmount - signed accounting", () => {
+  it("a normal income credit of +1000 nets to income of 1000", () => {
+    expect(sumBankIncomeAmount([{ amount: 1000 }])).toBeCloseTo(1000);
   });
 
-  it("keeps categories that only exist on one side", () => {
+  it("an income reversal debit reduces net income: +1000 - 100 reversal = 900", () => {
+    expect(sumBankIncomeAmount([{ amount: 1000 }, { amount: -100 }])).toBeCloseTo(900);
+  });
+
+  it("a fully reversed income transaction nets to zero", () => {
+    expect(sumBankIncomeAmount([{ amount: 1000 }, { amount: -1000 }])).toBeCloseTo(0);
+  });
+});
+
+describe("isReceiptDispositionConflict", () => {
+  it("is false when there is no matched bank transaction", () => {
+    expect(isReceiptDispositionConflict(null)).toBe(false);
+  });
+
+  it("is false when the matched bank transaction is also business_expense", () => {
+    expect(isReceiptDispositionConflict("business_expense")).toBe(false);
+  });
+
+  it("is true when the matched bank transaction is personal", () => {
+    expect(isReceiptDispositionConflict("personal")).toBe(true);
+  });
+
+  it("is true when the matched bank transaction is a transfer", () => {
+    expect(isReceiptDispositionConflict("transfer")).toBe(true);
+  });
+
+  it("is true for owner_contribution, owner_draw, loan, other_excluded, and business_income", () => {
+    for (const disposition of ["owner_contribution", "owner_draw", "loan", "other_excluded", "business_income"] as const) {
+      expect(isReceiptDispositionConflict(disposition)).toBe(true);
+    }
+  });
+});
+
+describe("mergeExpenseCategories - canonical category identity", () => {
+  it("merges Supplies/supplies into one category when they share a category id", () => {
     const merged = mergeExpenseCategories(
-      [{ category: "Travel", count: 1, receiptCount: 1, total: 200 }],
-      [{ category: "Utilities", count: 1, total: 80 }],
+      [{ categoryId: "cat_1", category: "Supplies", count: 3, receiptCount: 2, total: 120 }],
+      [{ categoryId: "cat_1", category: "supplies", count: 1, total: 40 }],
     );
-    expect(merged.map((r) => r.category).sort()).toEqual(["Travel", "Utilities"]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({ categoryId: "cat_1", receiptCount: 2, bankCount: 1, count: 4, total: 160 });
+  });
+
+  it("merges Office Supplies/office-supplies display-name mismatches sharing a category id", () => {
+    const merged = mergeExpenseCategories(
+      [{ categoryId: "cat_2", category: "Office Supplies", count: 1, receiptCount: 1, total: 50 }],
+      [{ categoryId: "cat_2", category: "office-supplies", count: 2, total: 30 }],
+    );
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({ count: 3, total: 80 });
+  });
+
+  it("keeps a custom category distinct from other categories", () => {
+    const merged = mergeExpenseCategories(
+      [{ categoryId: "cat_custom", category: "Client Gifts & Swag", count: 1, receiptCount: 1, total: 200 }],
+      [{ categoryId: "cat_other", category: "Utilities", count: 1, total: 80 }],
+    );
+    expect(merged.map((r) => r.category).sort()).toEqual(["Client Gifts & Swag", "Utilities"]);
+  });
+
+  it("merges a receipt row and a bank row for the same category into one row, not two", () => {
+    const merged = mergeExpenseCategories(
+      [{ categoryId: "cat_3", category: "Travel", count: 2, receiptCount: 2, total: 300 }],
+      [{ categoryId: "cat_3", category: "Travel", count: 1, total: 75 }],
+    );
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({ count: 3, receiptCount: 2, bankCount: 1, total: 375 });
+  });
+
+  it("groups uncategorized receipt and bank rows into a single uncategorized bucket", () => {
+    const merged = mergeExpenseCategories(
+      [{ categoryId: null, category: "Uncategorized", count: 1, receiptCount: 1, total: 20 }],
+      [{ categoryId: null, category: "Uncategorized", count: 1, total: 15 }],
+    );
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({ categoryId: null, count: 2, total: 35 });
   });
 });
 
@@ -150,19 +234,79 @@ describe("computeCompleteness", () => {
   it("flags unclassified and unresolved-triage counts and reports incomplete", () => {
     const transactions = [
       txn({ id: "1", disposition: "unclassified", triage: "unmatched" }),
-      txn({ id: "2", disposition: "business_expense", triage: "needs_review" }),
-      txn({ id: "3", disposition: "business_expense", triage: "no_receipt_required" }),
+      txn({ id: "2", disposition: "business_expense", triage: "needs_review", categoryId: "cat_1" }),
+      txn({ id: "3", disposition: "business_expense", triage: "no_receipt_required", categoryId: "cat_1" }),
     ];
-    const completeness = computeCompleteness(transactions);
-    expect(completeness).toEqual({ unclassifiedCount: 1, unresolvedTriageCount: 2, isComplete: false });
+    const completeness = computeCompleteness({
+      transactions,
+      uncategorizedReceiptLineCount: 0,
+      currencyConflictCount: 0,
+    });
+    expect(completeness).toEqual({
+      unclassifiedCount: 1,
+      unresolvedTriageCount: 2,
+      uncategorizedCount: 0,
+      currencyConflictCount: 0,
+      isComplete: false,
+    });
   });
 
-  it("reports complete when nothing is unclassified or unresolved", () => {
+  it("counts uncategorized business-expense and business-income bank transactions", () => {
     const transactions = [
-      txn({ id: "1", disposition: "business_expense", triage: "no_receipt_required" }),
+      txn({ id: "1", disposition: "business_expense", triage: "no_receipt_required", categoryId: null }),
+      txn({ id: "2", disposition: "business_income", triage: "matched", categoryId: null }),
+      txn({ id: "3", disposition: "personal", triage: "matched", categoryId: null }),
+    ];
+    const completeness = computeCompleteness({
+      transactions,
+      uncategorizedReceiptLineCount: 0,
+      currencyConflictCount: 0,
+    });
+    expect(completeness.uncategorizedCount).toBe(2);
+    expect(completeness.isComplete).toBe(false);
+  });
+
+  it("does not require a category on excluded/personal transactions", () => {
+    const transactions = [txn({ id: "1", disposition: "personal", triage: "matched", categoryId: null })];
+    const completeness = computeCompleteness({
+      transactions,
+      uncategorizedReceiptLineCount: 0,
+      currencyConflictCount: 0,
+    });
+    expect(completeness.uncategorizedCount).toBe(0);
+    expect(completeness.isComplete).toBe(true);
+  });
+
+  it("includes uncategorized filed-receipt expense lines in the count and blocks completeness", () => {
+    const completeness = computeCompleteness({
+      transactions: [],
+      uncategorizedReceiptLineCount: 3,
+      currencyConflictCount: 0,
+    });
+    expect(completeness.uncategorizedCount).toBe(3);
+    expect(completeness.isComplete).toBe(false);
+  });
+
+  it("blocks completeness when there is a currency conflict", () => {
+    const completeness = computeCompleteness({
+      transactions: [],
+      uncategorizedReceiptLineCount: 0,
+      currencyConflictCount: 1,
+    });
+    expect(completeness.isComplete).toBe(false);
+  });
+
+  it("reports complete when nothing is unclassified, unresolved, uncategorized, or in currency conflict", () => {
+    const transactions = [
+      txn({ id: "1", disposition: "business_expense", triage: "no_receipt_required", categoryId: "cat_1" }),
       txn({ id: "2", disposition: "personal", triage: "matched" }),
     ];
-    expect(computeCompleteness(transactions).isComplete).toBe(true);
+    const completeness = computeCompleteness({
+      transactions,
+      uncategorizedReceiptLineCount: 0,
+      currencyConflictCount: 0,
+    });
+    expect(completeness.isComplete).toBe(true);
   });
 });
 
@@ -176,5 +320,52 @@ describe("isUnresolvedTriage", () => {
     for (const state of ["unmatched", "needs_review", "likely_match", "receipt_pending"]) {
       expect(isUnresolvedTriage(state)).toBe(true);
     }
+  });
+});
+
+describe("isAccrualBasisSupported", () => {
+  it("supports cash basis", () => {
+    expect(isAccrualBasisSupported("cash")).toBe(true);
+  });
+
+  it("supports an unset basis (defaults to cash-derived reporting)", () => {
+    expect(isAccrualBasisSupported(null)).toBe(true);
+  });
+
+  it("does not support accrual basis", () => {
+    expect(isAccrualBasisSupported("accrual")).toBe(false);
+  });
+});
+
+describe("isValidCalendarDate", () => {
+  it("accepts a real calendar date", () => {
+    expect(isValidCalendarDate("2026-03-15")).toBe(true);
+  });
+
+  it("rejects a non-date string", () => {
+    expect(isValidCalendarDate("foo")).toBe(false);
+  });
+
+  it("rejects an out-of-range month", () => {
+    expect(isValidCalendarDate("2026-13-01")).toBe(false);
+  });
+
+  it("rejects a day that does not exist in the given month", () => {
+    expect(isValidCalendarDate("2026-02-30")).toBe(false);
+  });
+
+  it("accepts a leap-day date only in a leap year", () => {
+    expect(isValidCalendarDate("2024-02-29")).toBe(true);
+    expect(isValidCalendarDate("2026-02-29")).toBe(false);
+  });
+});
+
+describe("isCurrencyMismatch", () => {
+  it("is false when currencies match, case-insensitively", () => {
+    expect(isCurrencyMismatch("usd", "USD")).toBe(false);
+  });
+
+  it("is true when currencies differ", () => {
+    expect(isCurrencyMismatch("EUR", "USD")).toBe(true);
   });
 });

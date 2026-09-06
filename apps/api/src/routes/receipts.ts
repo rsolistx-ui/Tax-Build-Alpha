@@ -334,9 +334,10 @@ receiptRoutes.post("/:clientId/receipts/:receiptId/approve", async (c) => {
 
   let categoryId: string | null = null;
   if (receipt.extracted_category) {
+    const normalized = String(receipt.extracted_category).trim().toLowerCase();
     const [category] = await db.query<{ id: string }>(
-      `SELECT id FROM categories WHERE client_id = $1 AND slug = $2 LIMIT 1`,
-      [client.id, String(receipt.extracted_category).toLowerCase()],
+      `SELECT id FROM categories WHERE client_id = $1 AND (LOWER(slug) = $2 OR LOWER(name) = $2) LIMIT 1`,
+      [client.id, normalized],
     );
     categoryId = category?.id ?? null;
   }

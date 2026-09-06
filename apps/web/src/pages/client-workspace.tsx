@@ -50,23 +50,28 @@ type Pnl = {
   periodStart: string | null;
   periodEnd: string | null;
   currency: string;
-  income: number;
-  expenses: number;
-  net: number;
-  categorizedExpenses: PnlCategoryRow[];
-  categorizedIncome: PnlIncomeCategoryRow[];
-  counts: {
+  accountingBasis?: "cash" | "accrual" | null;
+  accrualSupported?: boolean;
+  warning?: string;
+  income?: number;
+  expenses?: number;
+  net?: number;
+  categorizedExpenses?: PnlCategoryRow[];
+  categorizedIncome?: PnlIncomeCategoryRow[];
+  counts?: {
     filedReceipts: number;
     matchedBankTransactions: number;
     noReceiptBusinessExpenses: number;
     businessIncomeTransactions: number;
   };
-  completeness: {
+  completeness?: {
     unclassifiedCount: number;
     unresolvedTriageCount: number;
+    uncategorizedCount: number;
+    currencyConflictCount: number;
     isComplete: boolean;
   };
-  note: string;
+  note?: string;
 };
 
 type DrilldownEntry = {
@@ -606,14 +611,26 @@ export function ClientWorkspacePage() {
             </CardContent>
           </Card>
 
-          {pnl && !pnl.completeness.isComplete ? (
+          {pnl && pnl.accrualSupported === false ? (
+            <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <div>
+                <p className="font-medium">Accrual-basis reporting is not available.</p>
+                <p className="mt-0.5 text-xs text-amber-800">{pnl.warning}</p>
+              </div>
+            </div>
+          ) : null}
+
+          {pnl && pnl.completeness && !pnl.completeness.isComplete ? (
             <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
               <div>
                 <p className="font-medium">This report is not complete for the selected period.</p>
                 <p className="mt-0.5 text-xs text-amber-800">
                   {pnl.completeness.unclassifiedCount > 0 ? `${pnl.completeness.unclassifiedCount} bank transaction(s) have no accounting disposition yet. ` : ""}
-                  {pnl.completeness.unresolvedTriageCount > 0 ? `${pnl.completeness.unresolvedTriageCount} bank transaction(s) are still unresolved in the bank exception inbox.` : ""}
+                  {pnl.completeness.unresolvedTriageCount > 0 ? `${pnl.completeness.unresolvedTriageCount} bank transaction(s) are still unresolved in the bank exception inbox. ` : ""}
+                  {pnl.completeness.uncategorizedCount > 0 ? `${pnl.completeness.uncategorizedCount} business transaction(s) or receipt line(s) have no category yet. ` : ""}
+                  {pnl.completeness.currencyConflictCount > 0 ? `${pnl.completeness.currencyConflictCount} transaction(s) are in a currency other than ${pnl.currency} and are excluded until resolved.` : ""}
                 </p>
               </div>
             </div>
@@ -632,7 +649,7 @@ export function ClientWorkspacePage() {
                   <Summary label="Net" value={pnl?.net ?? 0} />
                 </div>
 
-                {pnl ? (
+                {pnl?.counts ? (
                   <div className="flex flex-wrap gap-2 text-xs text-[var(--color-muted-foreground)]">
                     <span>{pnl.counts.filedReceipts} filed receipt(s)</span>
                     <span>·</span>
