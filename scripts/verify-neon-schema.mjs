@@ -47,6 +47,14 @@ const checks = [
     label: "chk_bank_single_receipt_relationship (a transaction cannot hold both a matched and a pending receipt relationship)",
     query: `SELECT 1 FROM pg_constraint WHERE conname = 'chk_bank_single_receipt_relationship'`,
   },
+  {
+    label: "beta_invitations table (invitation-only beta registration)",
+    query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'beta_invitations'`,
+  },
+  {
+    label: "beta_entitlements table (server-authoritative beta access)",
+    query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'beta_entitlements'`,
+  },
 ];
 
 // The pre-0007 per-state indexes are superseded by idx_bank_unique_receipt_claim
