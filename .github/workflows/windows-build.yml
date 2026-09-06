@@ -46,10 +46,10 @@ jobs:
           name="folio-beta-windows-${version}-${sha}"
           echo "artifact_name=$name" >> "$GITHUB_OUTPUT"
           find src-tauri/target/release/bundle -type f \( -iname "*.exe" -o -iname "*.msi" \) -print
-          for f in $(find src-tauri/target/release/bundle -type f \( -iname "*.exe" -o -iname "*.msi" \)); do
+          while IFS= read -r -d '' f; do
             ext="${f##*.}"
             cp "$f" "dist-windows/${name}.${ext}"
-          done
+          done < <(find src-tauri/target/release/bundle -type f \( -iname "*.exe" -o -iname "*.msi" \) -print0)
           ls -la dist-windows
 
       - uses: actions/upload-artifact@v4
