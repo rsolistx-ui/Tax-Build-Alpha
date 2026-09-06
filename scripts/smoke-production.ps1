@@ -1100,10 +1100,11 @@ try {
           throw "Cleanup endpoint did not report removal for firm $firmId."
         }
         Write-Host "Cleanup removed firm $firmId ($($cleanupResult.clientCount) client(s), $($cleanupResult.r2ObjectsRemoved) R2 object(s) removed)."
-        if ($cleanupResult.r2Failures -and @($cleanupResult.r2Failures).Count -gt 0) {
+        $resultProps = $cleanupResult.PSObject.Properties.Name
+        if (($resultProps -contains "r2Failures") -and @($cleanupResult.r2Failures).Count -gt 0) {
           throw "Cleanup could not remove R2 object(s): $($cleanupResult.r2Failures -join ', ')"
         }
-        if ($cleanupResult.authFailures -and @($cleanupResult.authFailures).Count -gt 0) {
+        if (($resultProps -contains "authFailures") -and @($cleanupResult.authFailures).Count -gt 0) {
           throw "Cleanup could not remove the synthetic auth account: $($cleanupResult.authFailures -join ', ')"
         }
       } catch {
