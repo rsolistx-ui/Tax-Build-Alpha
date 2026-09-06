@@ -16,6 +16,8 @@ type StatusSummary = {
   needsReview: number;
 };
 
+type PeriodState = { state: "open" | "closed"; canClose: boolean };
+
 export type ClientOutletContext = {
   currentPeriod: string | undefined;
   onPeriodChange: (period: string) => void;
@@ -32,6 +34,7 @@ export function ClientWorkspacePage() {
     reviewItems: 0,
     needsReview: 0,
   });
+  const [periodState, setPeriodState] = useState<PeriodState | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function load() {
@@ -50,9 +53,13 @@ export function ClientWorkspacePage() {
   async function loadStatusSummary(periodKey: string) {
     try {
       const summary = await api<{
+        state: "open" | "closed";
+        canClose: boolean;
         blockers: string[];
         summary: Record<string, { count: number; total: number }>;
       }>(`/api/clients/${clientId}/periods/${periodKey}/summary`);
+
+      setPeriodState({ state: summary.state, canClose: summary.canClose });
 
       let openExceptions = 0;
       let pendingReceipts = 0;
@@ -97,6 +104,33 @@ export function ClientWorkspacePage() {
     void loadStatusSummary(period);
   }
 
+  async function closePeriod() {
+    if (!currentPeriod) return;
+    setError(null);
+    try {
+      await api(`/api/clients/${clientId}/periods/${currentPeriod}/close`, { method: "POST", body: "{}" });
+      await loadStatusSummary(currentPeriod);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not close the period");
+    }
+  }
+
+  async function reopenPeriod() {
+    if (!currentPeriod) return;
+    const reason = window.prompt("Why is this period being reopened? (required, at least 5 characters)");
+    if (!reason || reason.trim().length < 5) return;
+    setError(null);
+    try {
+      await api(`/api/clients/${clientId}/periods/${currentPeriod}/reopen`, {
+        method: "POST",
+        body: JSON.stringify({ reason: reason.trim() }),
+      });
+      await loadStatusSummary(currentPeriod);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not reopen the period");
+    }
+  }
+
   // Registers this page's full period-change handler (URL sync + summary
   // reload) so the permanent shell's top-level period selector invokes it
   // instead of only updating shared state. Runs every render (cheap ref
@@ -121,6 +155,9 @@ export function ClientWorkspacePage() {
         currentPeriod={currentPeriod || undefined}
         onPeriodChange={handlePeriodChange}
         statusSummary={statusSummary}
+        periodState={periodState}
+        onClosePeriod={() => void closePeriod()}
+        onReopenPeriod={() => void reopenPeriod()}
       />
 
       {error ? (

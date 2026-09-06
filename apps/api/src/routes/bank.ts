@@ -415,8 +415,8 @@ bankRoutes.post("/:clientId/bank-transactions/:transactionId/decision", async (c
       },
     ];
 
-    const ledgerStatement = await planAttachBankSourceToReceiptLedgerEntry(db, client.id, receiptId, transactionId);
-    if (ledgerStatement) statements.push(ledgerStatement);
+    const ledgerStatements = await planAttachBankSourceToReceiptLedgerEntry(db, client.id, receiptId, transactionId);
+    statements.push(...ledgerStatements);
 
     statements.push({
       query: `INSERT INTO audit_events
@@ -465,8 +465,8 @@ bankRoutes.post("/:clientId/bank-transactions/:transactionId/decision", async (c
         },
       ];
 
-      const ledgerStatement = await planAttachBankSourceToReceiptLedgerEntry(db, client.id, receipt.id, transactionId);
-      if (ledgerStatement) statements.push(ledgerStatement);
+      const ledgerStatements = await planAttachBankSourceToReceiptLedgerEntry(db, client.id, receipt.id, transactionId);
+      statements.push(...ledgerStatements);
 
       statements.push({
         query: `INSERT INTO audit_events

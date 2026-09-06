@@ -192,7 +192,11 @@ export function TransactionsTable({
 
   function handlePeriodChange(period: string) {
     setFilters(f => ({ ...f, period, page: 0 }));
-    onPeriodChange?.(period);
+    // "All periods" is a local table filter only. It is not a real
+    // YYYY-MM period, so it must never propagate to the shared workspace
+    // period model (which drives period-summary and P&L endpoints keyed
+    // by an actual month).
+    if (period !== "all") onPeriodChange?.(period);
   }
 
   const allSelected = entries.length > 0 && entries.every((e) => selectedIds.has(e.id));
@@ -541,6 +545,12 @@ export function TransactionsTable({
                               <DetailRow label="Category" value={entry.category.name} />
                             )}
                           </div>
+                          <ClassifyPanel
+                            entry={entry}
+                            categories={categories}
+                            clientId={clientId}
+                            onSaved={loadEntries}
+                          />
                         </td>
                       </tr>
                     )}
@@ -589,6 +599,104 @@ export function TransactionsTable({
           </Button>
         </div>
       )}
+    </div>
+  );
+}
+
+function ClassifyPanel({
+  entry,
+  categories,
+  clientId,
+  onSaved,
+}: {
+  entry: LedgerEntry;
+  categories: Array<{ id: string; name: string; slug: string }>;
+  clientId: string;
+  onSaved: () => void;
+}) {
+  const [accountingClass, setAccountingClass] = useState<AccountingClass>(entry.accountingClass);
+  const [treatment, setTreatment] = useState<Treatment>(entry.treatment);
+  const [categoryId, setCategoryId] = useState<string>(entry.category?.id ?? "none");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const readOnly = Boolean(entry.closedAt);
+  const dirty = accountingClass !== entry.accountingClass || treatment !== entry.treatment || categoryId !== (entry.category?.id ?? "none");
+
+  async function save() {
+    setSaving(true);
+    setError(null);
+    try {
+      await api(`/api/clients/${clientId}/ledger/${entry.id}/classify`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          accountingClass,
+          treatment,
+          categoryId: categoryId === "none" ? null : categoryId,
+        }),
+      });
+      onSaved();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save classification");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="mt-3 border-t border-[var(--color-border)] pt-3">
+      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--color-muted-foreground)]">
+        Professional classification
+      </p>
+      {readOnly ? (
+        <p className="text-xs text-[var(--color-muted-foreground)]">This period is closed. Reopen it to reclassify this entry.</p>
+      ) : (
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="space-y-1 text-xs font-medium">
+            <span>Class</span>
+            <Select value={accountingClass} onValueChange={(v: string) => setAccountingClass(v as AccountingClass)}>
+              <SelectTrigger className="w-[160px] h-9 text-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {(Object.keys(CLASS_LABELS) as AccountingClass[]).map((c) => (
+                  <SelectItem key={c} value={c}>{CLASS_LABELS[c]}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </label>
+          <label className="space-y-1 text-xs font-medium">
+            <span>Treatment</span>
+            <Select value={treatment} onValueChange={(v: string) => setTreatment(v as Treatment)}>
+              <SelectTrigger className="w-[140px] h-9 text-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="business">Business</SelectItem>
+                <SelectItem value="personal">Personal</SelectItem>
+              </SelectContent>
+            </Select>
+          </label>
+          <label className="space-y-1 text-xs font-medium">
+            <span>Category</span>
+            <Select value={categoryId} onValueChange={setCategoryId}>
+              <SelectTrigger className="w-[200px] h-9 text-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Uncategorized</SelectItem>
+                {categories.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </label>
+          <Button size="sm" disabled={!dirty || saving} onClick={() => void save()}>
+            {saving ? "Saving…" : "Save classification"}
+          </Button>
+        </div>
+      )}
+      {error ? <p className="mt-2 text-xs text-[var(--color-destructive)]">{error}</p> : null}
     </div>
   );
 }

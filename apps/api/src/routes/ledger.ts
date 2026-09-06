@@ -97,12 +97,12 @@ ledgerRoutes.get("/:clientId/ledger", async (c) => {
     paramIndex++;
   }
   if (search) {
-    whereClause += ` AND (le.description ILIKE ${paramIndex} OR le.amount::text ILIKE ${paramIndex})`;
+    whereClause += ` AND (le.description ILIKE $${paramIndex} OR le.amount::text ILIKE $${paramIndex})`;
     params.push(`%${search}%`);
     paramIndex++;
   }
   if (status === "open" || status === "closed") {
-    whereClause += ` AND COALESCE(ap.state, 'open') = ${paramIndex}`;
+    whereClause += ` AND COALESCE(ap.state, 'open') = $${paramIndex}`;
     params.push(status);
     paramIndex++;
   }

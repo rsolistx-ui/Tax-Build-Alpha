@@ -242,6 +242,30 @@ receiptRoutes.post("/:clientId/receipts", async (c) => {
   }
 });
 
+receiptRoutes.get("/:clientId/receipts/:receiptId/source", async (c) => {
+  const { db, client } = await authorizedClient(c);
+  if (!client) return c.json({ error: "Not found" }, 404);
+  const [receipt] = await db.query<{ r2_key: string; content_type: string | null; filename: string }>(
+    `SELECT r2_key, content_type, filename FROM receipts WHERE id = $1 AND client_id = $2`,
+    [c.req.param("receiptId"), client.id],
+  );
+  if (!receipt) return c.json({ error: "Not found" }, 404);
+
+  const object = await c.env.RECEIPTS.get(receipt.r2_key);
+  if (!object) return c.json({ error: "Source object missing" }, 404);
+  const filename = receipt.filename
+      .split("")
+      .filter((ch) => ch !== '"' && ch.charCodeAt(0) !== 13 && ch.charCodeAt(0) !== 10)
+      .join("");
+  return new Response(object.body, {
+    headers: {
+      "content-type": receipt.content_type || object.httpMetadata?.contentType || "application/octet-stream",
+      "content-disposition": `inline; filename="${filename}"`,
+      "cache-control": "private, no-store",
+    },
+  });
+});
+
 receiptRoutes.get("/:clientId/review", async (c) => {
   const { db, client } = await authorizedClient(c);
   if (!client) return c.json({ error: "Not found" }, 404);
@@ -280,40 +304,54 @@ receiptRoutes.patch("/:clientId/receipts/:receiptId", async (c) => {
     categoryId = category?.id ?? null;
   }
 
+  const extraction: ReceiptExtraction = {
+    date: body.date,
+    merchant: body.merchant,
+    subtotal: body.subtotal,
+    tax: body.tax,
+    tip: body.tip,
+    total: body.total,
+    currency: body.currency.toUpperCase(),
+    category: body.category,
+    confidence: body.confidence,
+    lineItems: body.lineItems,
+  };
+  const validation = validateReceipt(extraction);
+
   const statements: DbStatement[] = [
     {
       query: `UPDATE receipts SET
         extracted_date = $1, extracted_merchant = $2, extracted_subtotal = $3,
         extracted_tax = $4, extracted_tip = $5, extracted_total = $6,
         extracted_currency = $7, extracted_category = $8, confidence = $9,
-        category_id = $10, updated_at = NOW()
-        WHERE id = $11 AND client_id = $12`,
+        category_id = $10, validation_status = $11, validation_json = $12::jsonb, updated_at = NOW()
+        WHERE id = $13 AND client_id = $14`,
       params: [
-        body.date, body.merchant, body.subtotal, body.tax, body.tip, body.total,
-        body.currency, body.category, body.confidence, categoryId, receiptId, client.id,
+        extraction.date, extraction.merchant, extraction.subtotal, extraction.tax, extraction.tip, extraction.total,
+        extraction.currency, extraction.category, extraction.confidence, categoryId,
+        validation.status, validation, receiptId, client.id,
       ],
     },
     {
       query: `DELETE FROM receipt_line_items WHERE receipt_id = $1`,
       params: [receiptId],
     },
-    ...body.lineItems.map((item, i) => ({
-      query: `INSERT INTO receipt_line_items
-        (id, receipt_id, line_no, description, quantity, unit_price, amount, category, confidence)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-      params: [newId("li"), receiptId, i + 1, item.description, item.quantity,
-        item.unitPrice, item.amount, item.category, item.confidence],
-    })),
+    ...lineItemStatements(receiptId, extraction),
     {
       query: `INSERT INTO audit_events
         (id, client_id, receipt_id, actor_user_id, action, before_json, after_json)
-        VALUES ($1, $2, $3, $4, 'receipt_edited', $5::jsonb, $6::jsonb)`,
+        VALUES ($1, $2, $3, $4, 'receipt_review_edited', $5::jsonb, $6::jsonb)`,
       params: [
         newId("aud"), client.id, receiptId, c.get("userId"),
-        before, { ...before, ...body, category_id: categoryId },
+        before, { extraction, validation, category_id: categoryId },
       ],
     },
   ];
+
+  const beforeCategory = typeof before.extracted_category === "string" ? before.extracted_category : null;
+  if (extraction.merchant && extraction.category && extraction.category !== beforeCategory) {
+    statements.push(correctionRuleStatement(client.id, extraction.merchant, extraction.category));
+  }
 
   await db.transaction(statements);
   return c.json({ receipt: await getReceiptDetails(db, receiptId, client.id) });
@@ -411,8 +449,8 @@ receiptRoutes.post("/:clientId/receipts/:receiptId/approve", async (c) => {
       },
     );
 
-    const ledgerStatement = await planAttachBankSourceToReceiptLedgerEntry(db, client.id, receiptId, transactionId);
-    if (ledgerStatement) statements.push(ledgerStatement);
+    const ledgerStatements = await planAttachBankSourceToReceiptLedgerEntry(db, client.id, receiptId, transactionId);
+    statements.push(...ledgerStatements);
   }
 
   if (pendingBankTransactions.length === 0 && receipt.extracted_date && receipt.extracted_total !== null) {

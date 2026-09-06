@@ -18,6 +18,8 @@ import {
   Clock,
   Tag,
   FileText as FileTextIcon,
+  Lock,
+  Unlock,
 } from "lucide-react";
 import { useState } from "react";
 import { authClient } from "@/lib/auth-client";
@@ -55,8 +57,7 @@ const NAV_ITEMS = [
 ];
 
 const CLIENT_NAV_ITEMS = [
-  { id: "overview", label: "Overview", icon: Home, href: "" },
-  { id: "transactions", label: "Transactions", icon: FileSpreadsheet, href: "transactions" },
+  { id: "transactions", label: "Transactions", icon: FileSpreadsheet, href: "" },
   { id: "receipts", label: "Receipts", icon: FileText, href: "receipts" },
   { id: "banking", label: "Banking", icon: Landmark, href: "banking" },
   { id: "books", label: "Books", icon: BookOpen, href: "books" },
@@ -338,6 +339,9 @@ export function ClientWorkspaceHeader({
   currentPeriod,
   onPeriodChange,
   statusSummary,
+  periodState,
+  onClosePeriod,
+  onReopenPeriod,
 }: {
   client: { id: string; name: string };
   currentPeriod?: string;
@@ -349,6 +353,9 @@ export function ClientWorkspaceHeader({
     reviewItems: number;
     needsReview: number;
   };
+  periodState?: { state: "open" | "closed"; canClose: boolean } | null;
+  onClosePeriod?: () => void;
+  onReopenPeriod?: () => void;
 }) {
   return (
     <div className="mb-6 space-y-4">
@@ -410,6 +417,36 @@ export function ClientWorkspaceHeader({
                   <AlertTriangle className="h-2.5 w-2.5" />
                   {statusSummary.needsReview} need review
                 </Badge>
+              )}
+            </div>
+          )}
+          {periodState && (
+            <div className="flex items-center gap-2">
+              {periodState.state === "closed" ? (
+                <Badge variant="secondary" className="gap-1">
+                  <Lock className="h-2.5 w-2.5" />
+                  Period closed
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="gap-1">
+                  <Unlock className="h-2.5 w-2.5" />
+                  Period open
+                </Badge>
+              )}
+              {periodState.state === "open" ? (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={!periodState.canClose}
+                  title={periodState.canClose ? undefined : "Resolve open items below before closing"}
+                  onClick={onClosePeriod}
+                >
+                  Close period
+                </Button>
+              ) : (
+                <Button size="sm" variant="secondary" onClick={onReopenPeriod}>
+                  Reopen period
+                </Button>
               )}
             </div>
           )}

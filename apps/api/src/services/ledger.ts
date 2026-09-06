@@ -431,31 +431,74 @@ export async function planClassifyBankTransaction(
 /**
  * When a bank transaction is confirmed against a receipt that already produced a
  * receipt-only ledger entry, attach the bank transaction as the second source so
- * the activity is never counted twice. Returns the statement to run (or null if
- * there is nothing to attach) so callers can batch it into their own transaction.
+ * the activity is never counted twice. If the bank transaction was previously
+ * classified on its own (an unresolved-state classification created a bank-only
+ * ledger row before it was later matched to this receipt), that row and the
+ * receipt-only row both exist and must be merged into one surviving row rather
+ * than both trying to claim the same bank_transaction_id, which the unique
+ * ledger index would otherwise reject. Returns the statements to run (empty if
+ * there is nothing to attach) so callers can batch them into their own
+ * transaction.
  */
 export async function planAttachBankSourceToReceiptLedgerEntry(
   db: Db,
   clientId: string,
   receiptId: string,
   bankTransactionId: string,
-): Promise<DbStatement | null> {
+): Promise<DbStatement[]> {
   const [bank] = await db.query<{ txn_date: string | null }>(
     `SELECT txn_date FROM bank_transactions WHERE id = $1 AND client_id = $2`,
     [bankTransactionId, clientId],
   );
-  if (!bank?.txn_date) return null;
+  if (!bank?.txn_date) return [];
 
-  return {
-    query: `UPDATE ledger_entries SET
-       source_bank_transaction_id = $3,
-       entry_date = $4,
-       period_key = $5
-     WHERE client_id = $1
-       AND source_receipt_id = $2
-       AND source_bank_transaction_id IS NULL`,
-    params: [clientId, receiptId, bankTransactionId, bank.txn_date, bank.txn_date.slice(0, 7)],
-  };
+  const [receiptOnlyEntry] = await db.query<{ id: string }>(
+    `SELECT id FROM ledger_entries
+     WHERE client_id = $1 AND source_receipt_id = $2 AND source_bank_transaction_id IS NULL`,
+    [clientId, receiptId],
+  );
+  const [bankOnlyEntry] = await db.query<{ id: string }>(
+    `SELECT id FROM ledger_entries
+     WHERE client_id = $1 AND source_bank_transaction_id = $2 AND source_receipt_id IS NULL`,
+    [clientId, bankTransactionId],
+  );
+
+  if (receiptOnlyEntry && bankOnlyEntry) {
+    return [
+      {
+        query: `UPDATE ledger_entries SET source_receipt_id = $1 WHERE id = $2`,
+        params: [receiptId, bankOnlyEntry.id],
+      },
+      {
+        query: `DELETE FROM ledger_entries WHERE id = $1`,
+        params: [receiptOnlyEntry.id],
+      },
+    ];
+  }
+
+  if (bankOnlyEntry) {
+    return [
+      {
+        query: `UPDATE ledger_entries SET source_receipt_id = $1 WHERE id = $2`,
+        params: [receiptId, bankOnlyEntry.id],
+      },
+    ];
+  }
+
+  if (receiptOnlyEntry) {
+    return [
+      {
+        query: `UPDATE ledger_entries SET
+           source_bank_transaction_id = $1,
+           entry_date = $2,
+           period_key = $3
+         WHERE id = $4`,
+        params: [bankTransactionId, bank.txn_date, bank.txn_date.slice(0, 7), receiptOnlyEntry.id],
+      },
+    ];
+  }
+
+  return [];
 }
 
 /**
