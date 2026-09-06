@@ -28,9 +28,13 @@ The paid alpha intentionally serves the React app and API from one Worker origin
 - Review is evidence-first. The source document is visible beside editable extracted facts and validation results.
 - Clicking Approve always saves the visible draft first, reruns validation, and only then files the receipt.
 - Failed validation cannot be filed without an explicit professional override.
-- Only filed evidence enters the P&L.
+- Only filed receipt evidence and explicitly classified bank activity enter the P&L, never unreviewed extraction or an unconfirmed disposition.
 - Receipt-level tax, tip, discounts, shipping, and rounding are kept as visible adjustment lines so the P&L reconciles to the approved receipt total.
-- Every P&L category drills down to the contributing lines and exact source receipts.
+- Every P&L category drills down to the contributing receipt lines, no-receipt bank transactions, and exact source evidence.
+- The P&L genuinely filters by reporting period (custom range, month, year to date, or tax year) and warns explicitly when unresolved or unclassified activity could make the report incomplete.
+- A bank transaction's accounting disposition (business expense, business income, personal, transfer, owner activity, loan, or excluded) is always an explicit professional decision, never a silent inference, and is fully audited.
+- Filed evidence is browsable by category in real evidence folders, not a placeholder listing category names.
+- A whole box of receipts can be uploaded at once; one bad file never destroys the rest of the batch.
 - Bank CSVs are mapped, normalized, deduplicated, and stored in Neon without requiring a live bank integration.
 - Filed receipts can be deterministically suggested against bank transactions, but no suggested match becomes final without a professional decision.
 - Unmatched bank transactions become an exception inbox instead of a search problem.
@@ -211,11 +215,15 @@ The arithmetic tolerance is two cents for normal rounding differences.
 
 ## P&L traceability
 
-Only receipts in `filed` status enter the P&L. Purchased line items remain their own ledger entries. When the approved receipt total differs from the item sum, Folio creates a visible receipt-level adjustment entry for the difference. This captures tax, tip, discounts, shipping, or rounding without hiding those amounts inside item rows.
+`GET /api/clients/:clientId/pnl` accepts optional `startDate`/`endDate` (YYYY-MM-DD) query parameters and genuinely filters every underlying row by reporting period; omitting both returns all-time totals. The workspace UI offers current month, previous month, year to date, tax year (from the client's configured `tax_year`), and custom range presets.
 
-A filed receipt with no line items falls back to its approved receipt total so evidence is not silently dropped.
+Business expenses combine two sources without double counting: filed receipts (line items plus a visible receipt-level adjustment line when the approved total differs from the item sum) and bank transactions that were deliberately resolved without a receipt (`no_receipt_required`) and then explicitly classified `business_expense`. A bank transaction matched to a filed receipt is never counted a second time; the receipt supplies the expense detail and the bank transaction confirms the cash movement.
 
-`GET /api/clients/:clientId/pnl/drilldown?category=...` returns every contributing entry with its source receipt URL.
+Business income comes only from bank transactions explicitly classified `business_income`. Receipts never represent income.
+
+Personal, transfer, owner contribution, owner draw, loan, other-excluded, and still-unclassified bank activity never enters operating income or expense. The response includes a `completeness` block (`unclassifiedCount`, `unresolvedTriageCount`, `isComplete`), and the workspace UI shows an explicit warning banner whenever a reporting period is not yet complete, so a P&L is never presented as final while unresolved activity remains.
+
+`GET /api/clients/:clientId/pnl/drilldown?category=...&startDate=...&endDate=...` returns every contributing receipt line (with its source receipt URL) plus every no-receipt bank transaction behind that category, including the professional's recorded no-receipt reason.
 
 ## Bank reconciliation and exceptions
 
@@ -231,6 +239,20 @@ The bank exception workflow supports four deliberate outcomes:
 - resolve the transaction without receipt evidence only when a professional records a reason
 
 Matched, rejected, pending-receipt, uploaded-receipt, and no-receipt-required decisions are recorded in `audit_events`.
+
+## Bookkeeping disposition
+
+Receipt matching and accounting disposition are separate professional decisions: a bank transaction can be matched to evidence without deciding whether it is business activity, and disposition can be set independent of matching. `PATCH /api/clients/:clientId/bank-transactions/:transactionId/disposition` sets one of `business_expense`, `business_income`, `personal`, `transfer`, `owner_contribution`, `owner_draw`, `loan`, `other_excluded`, or `unclassified`, with an optional category and note. Every disposition change is recorded in `audit_events` with before/after state.
+
+Import prepares a deterministic `suggestedDisposition` (income-shaped for a positive amount, expense-shaped for a negative one) so the workspace can show a starting point, but every transaction starts and stays `unclassified` until a professional explicitly confirms it. No disposition is ever inferred automatically into the real `disposition` field.
+
+## Evidence folders
+
+`GET /api/clients/:clientId/categories/:categoryId/evidence` returns the filed, professional-approved receipts belonging to one category: date, merchant, total, filename, category, and source link, sortable by date or merchant. Unreviewed AI extraction never appears as folder evidence regardless of its tentative category.
+
+## Batch receipt intake
+
+The upload tray accepts a whole box of receipts in one selection. Each file tracks its own pending/processing/succeeded/failed state; uploads run one at a time so a single bad file is recorded and skipped without aborting or discarding the rest of the batch. Succeeded receipts land in the review inbox as usual, and a failed file can be retried without re-selecting the whole batch. This is a small, self-contained upload tray, not a queue processing system.
 
 ## Client correction memory
 
@@ -265,6 +287,7 @@ Those follow only after the real receipt, bank, and exception workflow is tested
 ```bash
 npm run typecheck
 npm run build
+npm run test
 ```
 
 A build is not considered production-ready until the Neon schema has been applied, real Cloudflare bindings and secrets are present, and the production smoke test passes.

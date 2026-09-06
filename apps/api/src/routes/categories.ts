@@ -57,3 +57,56 @@ categoryRoutes.post("/:clientId/categories", async (c) => {
     throw error;
   }
 });
+
+categoryRoutes.get("/:clientId/categories/:categoryId/evidence", async (c) => {
+  const db = createDb(c.env);
+  const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
+  const clientId = c.req.param("clientId");
+  const client = await getClient(db, clientId, firm.id);
+  if (!client) return c.json({ error: "Not found" }, 404);
+
+  const categoryId = c.req.param("categoryId");
+  const [category] = await db.query<{ id: string; name: string; slug: string }>(
+    `SELECT id, name, slug FROM categories WHERE id = $1 AND client_id = $2`,
+    [categoryId, clientId],
+  );
+  if (!category) return c.json({ error: "Category not found" }, 404);
+
+  const sort = c.req.query("sort") === "merchant" ? "merchant" : "date";
+  const orderBy = sort === "merchant"
+    ? "LOWER(COALESCE(r.extracted_merchant, r.filename)), r.extracted_date DESC NULLS LAST"
+    : "r.extracted_date DESC NULLS LAST, LOWER(COALESCE(r.extracted_merchant, r.filename))";
+
+  // Filed, professional-approved evidence only. Unreviewed AI extraction
+  // never appears here regardless of the category it was tentatively given.
+  const receipts = await db.query<{
+    id: string;
+    extracted_date: string | null;
+    extracted_merchant: string | null;
+    extracted_total: number | null;
+    extracted_currency: string;
+    filename: string;
+  }>(
+    `SELECT r.id, r.extracted_date, r.extracted_merchant, r.extracted_total, r.extracted_currency, r.filename
+     FROM receipts r
+     WHERE r.client_id = $1
+       AND r.status = 'filed'
+       AND (r.category_id = $2 OR LOWER(r.extracted_category) = LOWER($3))
+     ORDER BY ${orderBy}`,
+    [clientId, category.id, category.slug],
+  );
+
+  return c.json({
+    category: { id: category.id, name: category.name, slug: category.slug },
+    receipts: receipts.map((r) => ({
+      id: r.id,
+      date: r.extracted_date,
+      merchant: r.extracted_merchant,
+      total: r.extracted_total === null ? null : Number(r.extracted_total),
+      currency: r.extracted_currency,
+      filename: r.filename,
+      category: category.name,
+      sourceUrl: `/api/clients/${clientId}/receipts/${r.id}/source`,
+    })),
+  });
+});

@@ -222,7 +222,7 @@ try {
     throw "P&L does not reconcile. Receipt total is $approvedTotal but P&L expenses are $pnlExpenses."
   }
 
-  $firstCategory = @($pnl.byCategory) | Select-Object -First 1
+  $firstCategory = @($pnl.categorizedExpenses) | Select-Object -First 1
   if (-not $firstCategory) {
     throw "P&L returned no category rows."
   }
@@ -458,6 +458,155 @@ try {
   $resolvedAudit = @($missingAudit.events) | Where-Object { $_.action -eq "bank_match_confirmed" } | Select-Object -Last 1
   if (-not $uploadedAudit -or -not $resolvedAudit -or $resolvedAudit.receipt_id -ne $exceptionReceiptId) {
     throw "Missing receipt workflow did not preserve the expected upload and confirmation audit history."
+  }
+
+  Write-Host "Fetching client categories for disposition and folder verification..."
+  $categoryList = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/categories")
+  $smokeCategory = @($categoryList.categories) | Where-Object { $_.slug -eq [string]$firstCategory.category -or $_.name -eq [string]$firstCategory.category } | Select-Object -First 1
+  if (-not $smokeCategory) { $smokeCategory = @($categoryList.categories) | Select-Object -First 1 }
+  if (-not $smokeCategory) { throw "No categories exist for the smoke-test client." }
+  $smokeCategoryId = [string]$smokeCategory.id
+
+  Write-Host "Classifying the deliberately no-receipt bank transaction as an explicit business expense..."
+  $expenseDispositionBody = @{ disposition = "business_expense"; categoryId = $smokeCategoryId; note = "Smoke test explicit business expense classification" } | ConvertTo-Json -Compress
+  $expenseDispositionPayloadPath = New-JsonPayloadFile $expenseDispositionBody
+  $expenseDispositionResult = Invoke-CurlJson @(
+    "-c", $cookieJar, "-b", $cookieJar,
+    "-H", "Content-Type: application/json",
+    "-X", "PATCH",
+    "--data-binary", "@$expenseDispositionPayloadPath",
+    "$BaseUrl/api/clients/$clientId/bank-transactions/$noReceiptTransactionId/disposition"
+  )
+  Remove-TempFile $expenseDispositionPayloadPath
+  if ($expenseDispositionResult.transaction.disposition -ne "business_expense") {
+    throw "Bank disposition PATCH did not persist business_expense."
+  }
+
+  $dispositionAudit = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/bank-transactions/$noReceiptTransactionId/audit")
+  $dispositionAuditEvent = @($dispositionAudit.events) | Where-Object { $_.action -eq "bank_disposition_changed" } | Select-Object -First 1
+  if (-not $dispositionAuditEvent -or -not $dispositionAuditEvent.before_json -or -not $dispositionAuditEvent.after_json) {
+    throw "Bank disposition change did not create an audit event with before/after state."
+  }
+
+  # FOLIO NO RECEIPT SMOKE is dated 2026-08-02 earlier in this script.
+  $noReceiptMonthStart = "2026-08-01"
+  $noReceiptMonthEnd = "2026-08-31"
+
+  Write-Host "Verifying the no-receipt business expense enters period-filtered P&L only after classification..."
+  $pnlWithExpense = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/pnl?startDate=$noReceiptMonthStart&endDate=$noReceiptMonthEnd")
+  $expenseCategoryRow = @($pnlWithExpense.categorizedExpenses) | Where-Object { $_.bankCount -gt 0 } | Select-Object -First 1
+  if (-not $expenseCategoryRow) {
+    throw "Explicitly classified no-receipt business expense did not appear in period-filtered P&L."
+  }
+  if ($pnlWithExpense.counts.noReceiptBusinessExpenses -lt 1) {
+    throw "P&L counts did not reflect the classified no-receipt business expense."
+  }
+
+  Write-Host "Importing income and excluded-activity transactions in a different month..."
+  $bookkeepingCsvPath = Join-Path $env:TEMP "folio-smoke-bookkeeping-$([guid]::NewGuid().ToString('N')).csv"
+  $bookkeepingCsv = "Date,Description,Amount`r`n2026-09-10,FOLIO INCOME SMOKE,250.00`r`n2026-09-11,FOLIO PERSONAL SMOKE,-30.00`r`n"
+  [System.IO.File]::WriteAllText($bookkeepingCsvPath, $bookkeepingCsv, $utf8)
+  $bookkeepingImport = Invoke-CurlJson @(
+    "-c", $cookieJar, "-b", $cookieJar,
+    "-F", "file=@$bookkeepingCsvPath",
+    "-F", "mapping=<$bankMappingPayloadPath",
+    "$BaseUrl/api/clients/$clientId/bank-transactions/import"
+  )
+  if ($bookkeepingImport.insertedCount -ne 2) { throw "Income/excluded smoke CSV did not insert exactly two new transactions." }
+  Remove-TempFile $bookkeepingCsvPath
+
+  $bookkeepingQueue = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/bank-transactions")
+  $incomeTxn = @($bookkeepingQueue.transactions) | Where-Object { $_.description -eq "FOLIO INCOME SMOKE" } | Select-Object -First 1
+  $personalTxn = @($bookkeepingQueue.transactions) | Where-Object { $_.description -eq "FOLIO PERSONAL SMOKE" } | Select-Object -First 1
+  if (-not $incomeTxn -or -not $personalTxn) { throw "Income/excluded smoke transactions were not persisted." }
+  $incomeTxnId = [string]$incomeTxn.id
+  $personalTxnId = [string]$personalTxn.id
+
+  foreach ($id in @($incomeTxnId, $personalTxnId)) {
+    $noReceiptBody = @{ action = "no_receipt_required"; reason = "Smoke test: no receipt applies to this cash movement" } | ConvertTo-Json -Compress
+    $noReceiptPayloadPath = New-JsonPayloadFile $noReceiptBody
+    $null = Invoke-CurlJson @(
+      "-c", $cookieJar, "-b", $cookieJar,
+      "-H", "Content-Type: application/json",
+      "--data-binary", "@$noReceiptPayloadPath",
+      "$BaseUrl/api/clients/$clientId/bank-transactions/$id/decision"
+    )
+    Remove-TempFile $noReceiptPayloadPath
+  }
+
+  Write-Host "Classifying one transaction as business income and one as excluded personal activity..."
+  $incomeDispositionBody = @{ disposition = "business_income" } | ConvertTo-Json -Compress
+  $incomeDispositionPayloadPath = New-JsonPayloadFile $incomeDispositionBody
+  $null = Invoke-CurlJson @(
+    "-c", $cookieJar, "-b", $cookieJar,
+    "-H", "Content-Type: application/json",
+    "-X", "PATCH",
+    "--data-binary", "@$incomeDispositionPayloadPath",
+    "$BaseUrl/api/clients/$clientId/bank-transactions/$incomeTxnId/disposition"
+  )
+  Remove-TempFile $incomeDispositionPayloadPath
+
+  $personalDispositionBody = @{ disposition = "personal" } | ConvertTo-Json -Compress
+  $personalDispositionPayloadPath = New-JsonPayloadFile $personalDispositionBody
+  $null = Invoke-CurlJson @(
+    "-c", $cookieJar, "-b", $cookieJar,
+    "-H", "Content-Type: application/json",
+    "-X", "PATCH",
+    "--data-binary", "@$personalDispositionPayloadPath",
+    "$BaseUrl/api/clients/$clientId/bank-transactions/$personalTxnId/disposition"
+  )
+  Remove-TempFile $personalDispositionPayloadPath
+
+  Write-Host "Verifying business income appears and personal activity is excluded for September..."
+  $pnlSeptember = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/pnl?startDate=2026-09-01&endDate=2026-09-30")
+  if ([Math]::Abs([double]$pnlSeptember.income - 250.00) -gt 0.01) {
+    throw "Confirmed business income did not reach period-filtered P&L. Found income $($pnlSeptember.income)."
+  }
+  if ($pnlSeptember.counts.businessIncomeTransactions -lt 1) {
+    throw "P&L counts did not reflect the classified business income transaction."
+  }
+  $personalInExpenses = @($pnlSeptember.categorizedExpenses) | Where-Object { $_.total -eq 30.00 }
+  if (@($personalInExpenses).Count -gt 0) {
+    throw "Personal activity leaked into P&L expenses."
+  }
+
+  Write-Host "Verifying monthly and yearly P&L windows produce different totals..."
+  $pnlAugustOnly = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/pnl?startDate=2026-08-01&endDate=2026-08-31")
+  $pnlFullYear = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/pnl?startDate=2026-01-01&endDate=2026-12-31")
+  if ([double]$pnlAugustOnly.income -eq [double]$pnlFullYear.income -and [double]$pnlFullYear.income -le 0) {
+    throw "Yearly P&L did not include income recorded outside the August window."
+  }
+  if ([double]$pnlFullYear.income -lt [double]$pnlAugustOnly.income) {
+    throw "A wider yearly window must not report less income than a narrower monthly window."
+  }
+
+  Write-Host "Verifying an unclassified/unresolved period is flagged incomplete..."
+  $incompleteCsvPath = Join-Path $env:TEMP "folio-smoke-incomplete-$([guid]::NewGuid().ToString('N')).csv"
+  $incompleteCsv = "Date,Description,Amount`r`n2026-09-20,FOLIO INCOMPLETE SMOKE,-5.00`r`n"
+  [System.IO.File]::WriteAllText($incompleteCsvPath, $incompleteCsv, $utf8)
+  $null = Invoke-CurlJson @(
+    "-c", $cookieJar, "-b", $cookieJar,
+    "-F", "file=@$incompleteCsvPath",
+    "-F", "mapping=<$bankMappingPayloadPath",
+    "$BaseUrl/api/clients/$clientId/bank-transactions/import"
+  )
+  Remove-TempFile $incompleteCsvPath
+  $pnlIncomplete = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/pnl?startDate=2026-09-01&endDate=2026-09-30")
+  if ($pnlIncomplete.completeness.isComplete) {
+    throw "P&L must flag the period incomplete while an unclassified bank transaction exists in it."
+  }
+  if ($pnlIncomplete.completeness.unclassifiedCount -lt 1) {
+    throw "P&L completeness did not count the unclassified transaction."
+  }
+
+  Write-Host "Verifying the evidence folder shows filed receipts, not unreviewed extraction..."
+  $folderEvidence = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/categories/$smokeCategoryId/evidence")
+  $folderReceiptMatch = @($folderEvidence.receipts) | Where-Object { $_.id -eq $receiptId } | Select-Object -First 1
+  if (-not $folderReceiptMatch) {
+    throw "Folder evidence did not include the filed receipt for its category."
+  }
+  if (-not $folderReceiptMatch.sourceUrl -or -not $folderReceiptMatch.filename) {
+    throw "Folder evidence entries must carry filename and source link."
   }
 
   Write-Host ""

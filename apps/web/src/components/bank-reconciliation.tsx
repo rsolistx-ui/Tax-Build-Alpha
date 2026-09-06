@@ -61,6 +61,11 @@ type BankTransaction = {
   matchedReceipt: ReceiptLink | null;
   pendingReceipt: ReceiptLink | null;
   reviewedAt: string | null;
+  disposition: string;
+  suggestedDisposition: string | null;
+  dispositionNote: string | null;
+  dispositionReviewedAt: string | null;
+  category: { id: string; name: string | null; slug: string | null } | null;
 };
 
 type BankSummary = {
@@ -130,6 +135,8 @@ export function BankReconciliation({
   const [history, setHistory] = useState<AuditEvent[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [categories, setCategories] = useState<Array<{ id: string; name: string; slug: string }>>([]);
+  const [dispositionBusyId, setDispositionBusyId] = useState<string | null>(null);
 
   async function loadTransactions() {
     const data = await api<{ transactions: BankTransaction[]; summary: BankSummary }>(
@@ -139,10 +146,38 @@ export function BankReconciliation({
     setSummary(data.summary ?? emptySummary);
   }
 
+  async function loadCategories() {
+    try {
+      const data = await api<{ categories: Array<{ id: string; name: string; slug: string }> }>(
+        `/api/clients/${clientId}/categories`,
+      );
+      setCategories(data.categories);
+    } catch {
+      // ignore
+    }
+  }
+
   useEffect(() => {
     void loadTransactions().catch((e) => setError(e instanceof Error ? e.message : "Failed to load bank transactions"));
+    void loadCategories();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientId]);
+
+  async function setDisposition(transactionId: string, disposition: string, categoryId: string | null, note: string | null) {
+    setDispositionBusyId(transactionId);
+    setError(null);
+    try {
+      await api(`/api/clients/${clientId}/bank-transactions/${transactionId}/disposition`, {
+        method: "PATCH",
+        body: JSON.stringify({ disposition, categoryId, note }),
+      });
+      await loadTransactions();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save the accounting disposition");
+    } finally {
+      setDispositionBusyId(null);
+    }
+  }
 
   async function previewFile(nextFile: File | null) {
     setFile(nextFile);
@@ -556,12 +591,123 @@ export function BankReconciliation({
                       )}
                     </div>
                   ) : null}
+                  <DispositionPanel
+                    transaction={transaction}
+                    categories={categories}
+                    busy={dispositionBusyId === transaction.id}
+                    onSave={(disposition, categoryId, note) => void setDisposition(transaction.id, disposition, categoryId, note)}
+                  />
+
                 </div>
               ))}
             </div>
           )}
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+const DISPOSITION_LABELS: Record<string, string> = {
+  business_expense: "Business expense",
+  business_income: "Business income",
+  personal: "Personal / non-business",
+  transfer: "Transfer",
+  owner_contribution: "Owner contribution",
+  owner_draw: "Owner draw",
+  loan: "Loan",
+  other_excluded: "Other excluded",
+  unclassified: "Unclassified",
+};
+
+function DispositionPanel({
+  transaction,
+  categories,
+  busy,
+  onSave,
+}: {
+  transaction: BankTransaction;
+  categories: Array<{ id: string; name: string; slug: string }>;
+  busy: boolean;
+  onSave: (disposition: string, categoryId: string | null, note: string | null) => void;
+}) {
+  const [disposition, setDisposition] = useState(transaction.disposition);
+  const [categoryId, setCategoryId] = useState(transaction.category?.id ?? "");
+  const [note, setNote] = useState(transaction.dispositionNote ?? "");
+
+  useEffect(() => {
+    setDisposition(transaction.disposition);
+    setCategoryId(transaction.category?.id ?? "");
+    setNote(transaction.dispositionNote ?? "");
+  }, [transaction.id, transaction.disposition, transaction.category?.id, transaction.dispositionNote]);
+
+  const dirty = disposition !== transaction.disposition
+    || categoryId !== (transaction.category?.id ?? "")
+    || note !== (transaction.dispositionNote ?? "");
+
+  return (
+    <div className="mt-3 rounded-md border border-[var(--color-border)] p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-medium">Bookkeeping disposition</p>
+        <Badge className={transaction.disposition === "unclassified" ? "bg-amber-100 text-amber-800" : "bg-stone-200 text-stone-700"}>
+          {DISPOSITION_LABELS[transaction.disposition] ?? transaction.disposition}
+        </Badge>
+      </div>
+      {transaction.disposition === "unclassified" && transaction.suggestedDisposition ? (
+        <p className="mt-1 text-xs text-[var(--color-muted-foreground)]">
+          Prepared, not decided: this looks like {DISPOSITION_LABELS[transaction.suggestedDisposition] ?? transaction.suggestedDisposition} based on the amount direction. A professional must confirm it.
+        </p>
+      ) : null}
+      <div className="mt-2 grid gap-2 sm:grid-cols-3">
+        <label className="space-y-1 text-xs font-medium">
+          <span>Disposition</span>
+          <select
+            value={disposition}
+            onChange={(e) => setDisposition(e.target.value)}
+            className="h-9 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-2 text-sm font-normal"
+          >
+            {Object.entries(DISPOSITION_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>{label}</option>
+            ))}
+          </select>
+        </label>
+        <label className="space-y-1 text-xs font-medium">
+          <span>Category</span>
+          <select
+            value={categoryId}
+            onChange={(e) => setCategoryId(e.target.value)}
+            className="h-9 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-2 text-sm font-normal"
+          >
+            <option value="">Uncategorized</option>
+            {categories.map((category) => (
+              <option key={category.id} value={category.id}>{category.name}</option>
+            ))}
+          </select>
+        </label>
+        <label className="space-y-1 text-xs font-medium">
+          <span>Note (optional)</span>
+          <input
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="Reason or context for this classification"
+            className="h-9 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-2 text-sm font-normal"
+          />
+        </label>
+      </div>
+      <div className="mt-2 flex items-center justify-between">
+        <p className="text-xs text-[var(--color-muted-foreground)]">
+          {transaction.dispositionReviewedAt
+            ? `Last reviewed ${formatTimestamp(transaction.dispositionReviewedAt)}`
+            : "Never explicitly reviewed"}
+        </p>
+        <Button
+          size="sm"
+          disabled={!dirty || busy}
+          onClick={() => onSave(disposition, categoryId || null, note.trim() || null)}
+        >
+          {busy ? "Saving…" : "Save disposition"}
+        </Button>
+      </div>
     </div>
   );
 }

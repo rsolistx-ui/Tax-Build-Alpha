@@ -30,6 +30,24 @@ const mappingSchema = z.object({
   currency: z.string().min(1).nullable().optional(),
 });
 
+const DISPOSITIONS = [
+  "business_expense",
+  "business_income",
+  "personal",
+  "transfer",
+  "owner_contribution",
+  "owner_draw",
+  "loan",
+  "other_excluded",
+  "unclassified",
+] as const;
+
+const dispositionSchema = z.object({
+  disposition: z.enum(DISPOSITIONS),
+  categoryId: z.string().nullable().optional(),
+  note: z.string().trim().max(500).nullable().optional(),
+});
+
 const decisionSchema = z.object({
   action: z.enum(["confirm", "reject", "link_receipt", "no_receipt_required"]),
   receiptId: z.string().min(1).optional(),
@@ -59,11 +77,14 @@ bankRoutes.get("/:clientId/bank-transactions", async (c) => {
        pr.extracted_date AS pending_receipt_date,
        pr.extracted_merchant AS pending_receipt_merchant,
        pr.extracted_total AS pending_receipt_total,
-       pr.filename AS pending_receipt_filename
+       pr.filename AS pending_receipt_filename,
+       cat.name AS category_name,
+       cat.slug AS category_slug
      FROM bank_transactions bt
      LEFT JOIN receipts sr ON sr.id = bt.suggested_receipt_id AND sr.client_id = bt.client_id
      LEFT JOIN receipts mr ON mr.id = bt.matched_receipt_id AND mr.client_id = bt.client_id
      LEFT JOIN receipts pr ON pr.id = bt.pending_receipt_id AND pr.client_id = bt.client_id
+     LEFT JOIN categories cat ON cat.id = bt.category_id AND cat.client_id = bt.client_id
      WHERE bt.client_id = $1 AND ($2::text IS NULL OR bt.triage = $2)
      ORDER BY bt.txn_date DESC NULLS LAST, bt.created_at DESC
      LIMIT 500`,
@@ -244,8 +265,9 @@ bankRoutes.post("/:clientId/bank-transactions/import", async (c) => {
   const statements: DbStatement[] = prepared.map((item) => ({
     query: `INSERT INTO bank_transactions
       (id, client_id, txn_date, description, amount, currency, triage, raw_json,
-       import_fingerprint, suggested_receipt_id, suggested_score, suggested_reason)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12)
+       import_fingerprint, suggested_receipt_id, suggested_score, suggested_reason,
+       suggested_disposition)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12, $13)
       ON CONFLICT DO NOTHING
       RETURNING id`,
     params: [
@@ -266,6 +288,7 @@ bankRoutes.post("/:clientId/bank-transactions/import", async (c) => {
       item.suggestion?.receiptId ?? null,
       item.suggestion?.score ?? null,
       item.suggestion?.reason ?? null,
+      suggestDisposition(item.row.amount),
     ],
   }));
 
@@ -445,6 +468,50 @@ bankRoutes.post("/:clientId/bank-transactions/:transactionId/decision", async (c
   return c.json({ transaction: after });
 });
 
+bankRoutes.patch("/:clientId/bank-transactions/:transactionId/disposition", async (c) => {
+  const body = dispositionSchema.parse(await c.req.json());
+  const { db, client } = await authorizedClient(c);
+  if (!client) return c.json({ error: "Not found" }, 404);
+  const transactionId = c.req.param("transactionId");
+  const userId = c.get("userId");
+
+  const [before] = await db.query<Record<string, unknown>>(
+    `SELECT * FROM bank_transactions WHERE id = $1 AND client_id = $2`,
+    [transactionId, client.id],
+  );
+  if (!before) return c.json({ error: "Not found" }, 404);
+
+  let categoryId: string | null = null;
+  if (body.categoryId) {
+    const [category] = await db.query<{ id: string }>(
+      `SELECT id FROM categories WHERE id = $1 AND client_id = $2`,
+      [body.categoryId, client.id],
+    );
+    if (!category) return c.json({ error: "Category not found" }, 404);
+    categoryId = category.id;
+  }
+
+  const [after] = await db.query<Record<string, unknown>>(
+    `UPDATE bank_transactions SET
+       disposition = $1,
+       category_id = $2,
+       disposition_note = $3,
+       disposition_reviewed_at = NOW(),
+       disposition_reviewed_by_user_id = $4
+     WHERE id = $5 AND client_id = $6
+     RETURNING *`,
+    [body.disposition, categoryId, body.note ?? null, userId, transactionId, client.id],
+  );
+
+  await db.query(
+    `INSERT INTO audit_events (id, client_id, actor_user_id, action, before_json, after_json)
+     VALUES ($1, $2, $3, 'bank_disposition_changed', $4::jsonb, $5::jsonb)`,
+    [newId("aud"), client.id, userId, before, after],
+  );
+
+  return c.json({ transaction: serializeTransaction(after, client.id) });
+});
+
 async function authorizedClient(c: {
   env: Env;
   get(key: "userId" | "userName"): string;
@@ -526,6 +593,17 @@ function receiptOptionRank(
   return amountPenalty + Math.min(datePenalty, 365) - merchantBonus + statusPenalty;
 }
 
+/**
+ * Deterministic, transparent starting point only: a positive amount is a
+ * deposit (income-shaped), a negative amount is a debit (expense-shaped).
+ * This never writes to the real `disposition` column, only the separate
+ * `suggested_disposition` field the professional can accept or override -
+ * the actual disposition always starts unclassified.
+ */
+function suggestDisposition(amount: number): "business_income" | "business_expense" {
+  return amount > 0 ? "business_income" : "business_expense";
+}
+
 function tokenSet(value: string): Set<string> {
   return new Set(
     value
@@ -597,5 +675,14 @@ function serializeTransaction(row: Record<string, unknown>, clientId: string) {
       sourceUrl: `/api/clients/${clientId}/receipts/${pendingReceiptId}/source`,
     } : null,
     reviewedAt: row.reviewed_at ? String(row.reviewed_at) : null,
+    disposition: String(row.disposition ?? "unclassified"),
+    suggestedDisposition: row.suggested_disposition ? String(row.suggested_disposition) : null,
+    dispositionNote: row.disposition_note ? String(row.disposition_note) : null,
+    dispositionReviewedAt: row.disposition_reviewed_at ? String(row.disposition_reviewed_at) : null,
+    category: row.category_id ? {
+      id: String(row.category_id),
+      name: row.category_name ? String(row.category_name) : null,
+      slug: row.category_slug ? String(row.category_slug) : null,
+    } : null,
   };
 }
