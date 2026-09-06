@@ -133,7 +133,8 @@ bankRoutes.get("/:clientId/bank-transactions/:transactionId/audit", async (c) =>
          'bank_receipt_linked_pending_review',
          'bank_receipt_uploaded',
          'bank_no_receipt_required',
-         'bank_disposition_changed'
+         'bank_disposition_changed',
+         'bank_duplicate_receipt_match_reopened'
        )
        AND (before_json->>'id' = $2 OR after_json->>'id' = $2 OR after_json->>'transactionId' = $2)
      ORDER BY created_at ASC`,
@@ -364,18 +365,26 @@ bankRoutes.post("/:clientId/bank-transactions/:transactionId/decision", async (c
       [client.id, transactionId, receiptId],
     );
     if (conflict) {
-      return c.json({ error: `This receipt is already attached to another bank transaction (${conflict.id}). The paid alpha allows one receipt per bank transaction.` }, 409);
+      return c.json({ error: receiptAlreadyAttachedMessage(conflict.id) }, 409);
     }
 
-    const [after] = await db.query<Record<string, unknown>>(
-      `UPDATE bank_transactions SET
-         triage = 'matched', matched_receipt_id = $1, pending_receipt_id = NULL,
-         resolution_reason = NULL, resolved_at = NOW(), resolved_by_user_id = $2,
-         reviewed_at = NOW(), reviewed_by_user_id = $2
-       WHERE id = $3 AND client_id = $4
-       RETURNING *`,
-      [receiptId, c.get("userId"), transactionId, client.id],
-    );
+    let after: Record<string, unknown> | undefined;
+    try {
+      [after] = await db.query<Record<string, unknown>>(
+        `UPDATE bank_transactions SET
+           triage = 'matched', matched_receipt_id = $1, pending_receipt_id = NULL,
+           resolution_reason = NULL, resolved_at = NOW(), resolved_by_user_id = $2,
+           reviewed_at = NOW(), reviewed_by_user_id = $2
+         WHERE id = $3 AND client_id = $4
+         RETURNING *`,
+        [receiptId, c.get("userId"), transactionId, client.id],
+      );
+    } catch (error) {
+      if (error instanceof Error && /unique|duplicate/i.test(error.message)) {
+        return c.json({ error: receiptAlreadyAttachedMessage() }, 409);
+      }
+      throw error;
+    }
     await logBankAudit(db, client.id, receiptId, c.get("userId"), "bank_match_confirmed", before, after);
     return c.json({ transaction: after });
   }
@@ -394,21 +403,29 @@ bankRoutes.post("/:clientId/bank-transactions/:transactionId/decision", async (c
       [client.id, transactionId, receipt.id],
     );
     if (linkConflict) {
-      return c.json({ error: `This receipt is already attached to another bank transaction (${linkConflict.id}). The paid alpha allows one receipt per bank transaction.` }, 409);
+      return c.json({ error: receiptAlreadyAttachedMessage(linkConflict.id) }, 409);
     }
 
     if (receipt.status === "filed") {
-      const [after] = await db.query<Record<string, unknown>>(
-        `UPDATE bank_transactions SET
-           triage = 'matched', matched_receipt_id = $1,
-           suggested_receipt_id = NULL, suggested_score = NULL, suggested_reason = NULL,
-           pending_receipt_id = NULL, resolution_reason = NULL,
-           resolved_at = NOW(), resolved_by_user_id = $2,
-           reviewed_at = NOW(), reviewed_by_user_id = $2
-         WHERE id = $3 AND client_id = $4
-         RETURNING *`,
-        [receipt.id, c.get("userId"), transactionId, client.id],
-      );
+      let after: Record<string, unknown> | undefined;
+      try {
+        [after] = await db.query<Record<string, unknown>>(
+          `UPDATE bank_transactions SET
+             triage = 'matched', matched_receipt_id = $1,
+             suggested_receipt_id = NULL, suggested_score = NULL, suggested_reason = NULL,
+             pending_receipt_id = NULL, resolution_reason = NULL,
+             resolved_at = NOW(), resolved_by_user_id = $2,
+             reviewed_at = NOW(), reviewed_by_user_id = $2
+           WHERE id = $3 AND client_id = $4
+           RETURNING *`,
+          [receipt.id, c.get("userId"), transactionId, client.id],
+        );
+      } catch (error) {
+        if (error instanceof Error && /unique|duplicate/i.test(error.message)) {
+          return c.json({ error: receiptAlreadyAttachedMessage() }, 409);
+        }
+        throw error;
+      }
       await logBankAudit(
         db,
         client.id,
@@ -422,17 +439,25 @@ bankRoutes.post("/:clientId/bank-transactions/:transactionId/decision", async (c
     }
 
     if (receipt.status === "review") {
-      const [after] = await db.query<Record<string, unknown>>(
-        `UPDATE bank_transactions SET
-           triage = 'receipt_pending', pending_receipt_id = $1,
-           suggested_receipt_id = NULL, suggested_score = NULL, suggested_reason = NULL,
-           matched_receipt_id = NULL, resolution_reason = NULL,
-           resolved_at = NULL, resolved_by_user_id = NULL,
-           reviewed_at = NOW(), reviewed_by_user_id = $2
-         WHERE id = $3 AND client_id = $4
-         RETURNING *`,
-        [receipt.id, c.get("userId"), transactionId, client.id],
-      );
+      let after: Record<string, unknown> | undefined;
+      try {
+        [after] = await db.query<Record<string, unknown>>(
+          `UPDATE bank_transactions SET
+             triage = 'receipt_pending', pending_receipt_id = $1,
+             suggested_receipt_id = NULL, suggested_score = NULL, suggested_reason = NULL,
+             matched_receipt_id = NULL, resolution_reason = NULL,
+             resolved_at = NULL, resolved_by_user_id = NULL,
+             reviewed_at = NOW(), reviewed_by_user_id = $2
+           WHERE id = $3 AND client_id = $4
+           RETURNING *`,
+          [receipt.id, c.get("userId"), transactionId, client.id],
+        );
+      } catch (error) {
+        if (error instanceof Error && /unique|duplicate/i.test(error.message)) {
+          return c.json({ error: receiptAlreadyAttachedMessage() }, 409);
+        }
+        throw error;
+      }
       await logBankAudit(
         db,
         client.id,
@@ -628,6 +653,10 @@ function receiptOptionRank(
  * `suggested_disposition` field the professional can accept or override -
  * the actual disposition always starts unclassified.
  */
+function receiptAlreadyAttachedMessage(otherTransactionId?: string): string {
+  return `This receipt is already attached to another bank transaction${otherTransactionId ? ` (${otherTransactionId})` : ""}. The paid alpha allows one receipt per bank transaction.`;
+}
+
 function suggestDisposition(amount: number): "business_income" | "business_expense" {
   return amount > 0 ? "business_income" : "business_expense";
 }

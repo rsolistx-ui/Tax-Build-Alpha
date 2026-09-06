@@ -684,6 +684,28 @@ try {
     throw "An already-matched receipt must not be offered as a receipt-option suggestion for another bank transaction."
   }
 
+  Write-Host "Verifying link_receipt also enforces cross-state receipt claim protection (409)..."
+  $dupLinkBody = @{ action = "link_receipt"; receiptId = $receiptId } | ConvertTo-Json -Compress
+  $dupLinkPayloadPath = New-JsonPayloadFile $dupLinkBody
+  $dupLinkStatus = ""
+  $previousPreference = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    $dupLinkStatus = (& curl.exe --silent --output NUL --write-out "%{http_code}" -c $cookieJar -b $cookieJar -H "Content-Type: application/json" --data-binary "@$dupLinkPayloadPath" "$BaseUrl/api/clients/$clientId/bank-transactions/$([string]$dupMatchTxn.id)/decision")
+  } finally {
+    $ErrorActionPreference = $previousPreference
+  }
+  Remove-TempFile $dupLinkPayloadPath
+  if ($dupLinkStatus -ne "409") {
+    throw "link_receipt on a receipt already claimed by another bank transaction must return HTTP 409, got $dupLinkStatus."
+  }
+
+  Write-Host "Verifying migration-repair audit history (if any) is retrievable through the normal History API..."
+  $dupMatchAudit = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/bank-transactions/$([string]$dupMatchTxn.id)/audit")
+  if ($null -eq $dupMatchAudit.events) {
+    throw "The bank transaction audit endpoint did not return an events array."
+  }
+
 
   Write-Host "Verifying signed accounting: a vendor refund reduces net expense rather than adding to it..."
   $refundCsvPath = Join-Path $env:TEMP "folio-smoke-refund-$([guid]::NewGuid().ToString('N')).csv"
@@ -791,6 +813,14 @@ try {
     throw "P&L completeness did not flag the uncategorized business-expense bank transaction."
   }
 
+  Write-Host "Verifying an income reversal shows a negative signed amount and negative reported contribution in drill-down..."
+  $reversalDrilldownEncoded = [Uri]::EscapeDataString("Uncategorized")
+  $reversalDrilldown = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/pnl/drilldown?type=income&category=$reversalDrilldownEncoded&startDate=2026-11-01&endDate=2026-11-30")
+  $reversalDrilldownEntry = @($reversalDrilldown.entries) | Where-Object { $_.bankTransactionId -eq [string]$reversalDebit.id } | Select-Object -First 1
+  if (-not $reversalDrilldownEntry -or [double]$reversalDrilldownEntry.amount -ge 0 -or [double]$reversalDrilldownEntry.reportedAmount -ge 0) {
+    throw "An income reversal must show a negative signed amount and a negative reported contribution in drill-down."
+  }
+
   Write-Host "Verifying invalid reporting dates are rejected with HTTP 400 rather than silently unbounded..."
   $badDateEncoded = [Uri]::EscapeDataString("foo")
   $invalidDateStatus = Get-HttpStatusOnly "$BaseUrl/api/clients/$clientId/pnl?startDate=$badDateEncoded" $cookieJar
@@ -844,7 +874,19 @@ try {
   if (-not $incomeDrilldownEntry -or [double]$incomeDrilldownEntry.reportedAmount -le 0) {
     throw "Income drill-down did not surface the classified business income transaction with a reported amount."
   }
-  if (-not $incomeDrilldownEntry.rawImportedRow) {
+  if ([double]$incomeDrilldownEntry.amount -ne [double]$incomeDrilldownEntry.reportedAmount) {
+    throw "Income drill-down signed bank amount must equal the reported amount for a normal (non-reversed) income transaction."
+  }
+  if (-not $incomeDrilldownEntry.sourceFilename) {
+    throw "Income drill-down did not surface the source CSV filename."
+  }
+  if ($null -eq $incomeDrilldownEntry.sourceRow) {
+    throw "Income drill-down did not surface the original CSV source row number."
+  }
+  if (-not $incomeDrilldownEntry.importBatchId) {
+    throw "Income drill-down did not surface the import batch id."
+  }
+  if (-not $incomeDrilldownEntry.originalRow) {
     throw "Income drill-down did not preserve the original imported bank row for source traceability."
   }
 

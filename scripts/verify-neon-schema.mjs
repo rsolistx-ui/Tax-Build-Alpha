@@ -40,13 +40,22 @@ const checks = [
     query: `SELECT 1 FROM information_schema.columns WHERE table_name = 'bank_transactions' AND column_name = 'disposition'`,
   },
   {
-    label: "idx_bank_unique_matched_receipt (one receipt to one matched bank transaction)",
-    query: `SELECT 1 FROM pg_indexes WHERE indexname = 'idx_bank_unique_matched_receipt'`,
+    label: "idx_bank_unique_receipt_claim (one receipt claimed by at most one bank transaction, across matched and pending states)",
+    query: `SELECT 1 FROM pg_indexes WHERE indexname = 'idx_bank_unique_receipt_claim'`,
   },
   {
-    label: "idx_bank_unique_pending_receipt (one receipt to one pending bank transaction)",
-    query: `SELECT 1 FROM pg_indexes WHERE indexname = 'idx_bank_unique_pending_receipt'`,
+    label: "chk_bank_single_receipt_relationship (a transaction cannot hold both a matched and a pending receipt relationship)",
+    query: `SELECT 1 FROM pg_constraint WHERE conname = 'chk_bank_single_receipt_relationship'`,
   },
+];
+
+// The pre-0007 per-state indexes are superseded by idx_bank_unique_receipt_claim
+// and are not required to exist; if either is still present (a deployment that
+// has not yet run 0007's DROP INDEX statements), that is reported for
+// visibility only and never fails verification on its own.
+const optionalLegacyChecks = [
+  { label: "idx_bank_unique_matched_receipt (superseded by idx_bank_unique_receipt_claim)", query: `SELECT 1 FROM pg_indexes WHERE indexname = 'idx_bank_unique_matched_receipt'` },
+  { label: "idx_bank_unique_pending_receipt (superseded by idx_bank_unique_receipt_claim)", query: `SELECT 1 FROM pg_indexes WHERE indexname = 'idx_bank_unique_pending_receipt'` },
 ];
 
 console.log(`Verifying ${checks.length} required production schema object(s)...`);
@@ -57,6 +66,13 @@ for (const check of checks) {
   const present = rows.length > 0;
   console.log(`  [${present ? "OK" : "MISSING"}] ${check.label}`);
   if (!present) allPresent = false;
+}
+
+console.log(`Checking ${optionalLegacyChecks.length} superseded index(es) for visibility only (retained is not required)...`);
+for (const check of optionalLegacyChecks) {
+  const result = await runQuery(check.query);
+  const rows = result?.rows ?? [];
+  console.log(`  [${rows.length > 0 ? "RETAINED" : "REMOVED"}] ${check.label}`);
 }
 
 if (!allPresent) {
