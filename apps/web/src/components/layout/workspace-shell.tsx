@@ -68,7 +68,7 @@ const CLIENT_NAV_ITEMS = [
 // Only routes that actually exist are wired. Future sections are shown disabled,
 // never as links to nowhere.
 const REAL_GLOBAL_ROUTES = new Set(["/"]);
-const REAL_CLIENT_ROUTES = new Set([""]);
+const REAL_CLIENT_ROUTES = new Set(["", "receipts", "banking", "reports"]);
 
 function isRealRoute(item: { href: string }, clientScope: boolean): boolean {
   return clientScope ? REAL_CLIENT_ROUTES.has(item.href) : REAL_GLOBAL_ROUTES.has(item.href);
@@ -92,7 +92,7 @@ export function WorkspaceShell({
   const navigate = useNavigate();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const { client, currentPeriod, setCurrentPeriod } = useWorkspace();
+  const { client, currentPeriod, onPeriodChange } = useWorkspace();
 
   async function signOut() {
     await authClient.signOut();
@@ -180,7 +180,7 @@ export function WorkspaceShell({
                   <span className="font-medium text-[var(--color-foreground)]">{client.name}</span>
                 </div>
 
-                <Select value={currentPeriod || ""} onValueChange={setCurrentPeriod}>
+                <Select value={currentPeriod || ""} onValueChange={onPeriodChange}>
                   <SelectTrigger className="w-[140px] h-8 text-xs">
                     <SelectValue placeholder="Period" />
                   </SelectTrigger>

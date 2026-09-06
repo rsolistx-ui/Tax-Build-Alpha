@@ -457,3 +457,31 @@ export async function planAttachBankSourceToReceiptLedgerEntry(
     params: [clientId, receiptId, bankTransactionId, bank.txn_date, bank.txn_date.slice(0, 7)],
   };
 }
+
+/**
+ * When a bank decision moves a transaction away from "matched" (reject or
+ * no_receipt_required), any canonical ledger row still pointing at the old
+ * receipt evidence for this bank transaction must be unlinked from it so the
+ * ledger no longer claims evidence the bank state no longer agrees with. The
+ * bank-sourced ledger row itself (if any) is kept, since the cash movement is
+ * still real; only the stale receipt reference is detached.
+ */
+export async function planDetachReceiptFromBankLedgerEntry(
+  db: Db,
+  clientId: string,
+  bankTransactionId: string,
+): Promise<DbStatement | null> {
+  const [entry] = await db.query<{ id: string }>(
+    `SELECT id FROM ledger_entries
+     WHERE client_id = $1
+       AND source_bank_transaction_id = $2
+       AND source_receipt_id IS NOT NULL`,
+    [clientId, bankTransactionId],
+  );
+  if (!entry) return null;
+
+  return {
+    query: `UPDATE ledger_entries SET source_receipt_id = NULL WHERE id = $1`,
+    params: [entry.id],
+  };
+}

@@ -54,7 +54,7 @@ CREATE INDEX IF NOT EXISTS idx_ledger_category ON ledger_entries(category_id) WH
 -- Uniqueness: a bank transaction can own at most one canonical ledger entry
 CREATE UNIQUE INDEX IF NOT EXISTS uq_ledger_source_bank ON ledger_entries(source_bank_transaction_id) WHERE source_bank_transaction_id IS NOT NULL;
 -- Uniqueness: a receipt can own at most one canonical ledger entry (when not also sourced from bank)
-CREATE UNIQUE INDEX IF NOT EXISTS uq_ledger_source_receipt ON ledger_entries(source_receipt_id) WHERE source_receipt_id IS NOT NULL AND source_bank_transaction_id IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_ledger_source_receipt ON ledger_entries(source_receipt_id) WHERE source_receipt_id IS NOT NULL;
 
 -- 4. Period close state table
 CREATE TABLE IF NOT EXISTS accounting_periods (

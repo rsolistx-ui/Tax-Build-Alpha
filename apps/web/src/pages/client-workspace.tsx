@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
+import { Outlet, useParams, useSearchParams } from "react-router-dom";
 import { ClientWorkspaceHeader } from "@/components/layout/workspace-shell";
-import { TransactionsTable } from "@/components/transactions-table";
 import { api } from "@/lib/api";
 import { EmptyState } from "@/components/empty-state";
 import { Inbox } from "lucide-react";
@@ -17,10 +16,15 @@ type StatusSummary = {
   needsReview: number;
 };
 
+export type ClientOutletContext = {
+  currentPeriod: string | undefined;
+  onPeriodChange: (period: string) => void;
+};
+
 export function ClientWorkspacePage() {
   const { clientId = "" } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { client, setClient, currentPeriod, setCurrentPeriod } = useWorkspace();
+  const { client, setClient, currentPeriod, setCurrentPeriod, setOnPeriodChange } = useWorkspace();
   const [statusSummary, setStatusSummary] = useState<StatusSummary>({
     openExceptions: 0,
     pendingReceipts: 0,
@@ -93,6 +97,15 @@ export function ClientWorkspacePage() {
     void loadStatusSummary(period);
   }
 
+  // Registers this page's full period-change handler (URL sync + summary
+  // reload) so the permanent shell's top-level period selector invokes it
+  // instead of only updating shared state. Runs every render (cheap ref
+  // assignment) so it always points at the latest closure.
+  useEffect(() => {
+    setOnPeriodChange(handlePeriodChange);
+    return () => setOnPeriodChange(null);
+  });
+
   if (!client) {
     return (
       <div className="flex h-[400px] items-center justify-center">
@@ -115,11 +128,7 @@ export function ClientWorkspacePage() {
           {error}
         </div>
       ) : (
-        <TransactionsTable
-          clientId={clientId}
-          initialPeriod={currentPeriod || undefined}
-          onPeriodChange={handlePeriodChange}
-        />
+        <Outlet context={{ currentPeriod: currentPeriod || undefined, onPeriodChange: handlePeriodChange } satisfies ClientOutletContext} />
       )}
     </>
   );

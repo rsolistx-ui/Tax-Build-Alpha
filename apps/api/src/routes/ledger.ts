@@ -68,6 +68,7 @@ ledgerRoutes.get("/:clientId/ledger", async (c) => {
   const treatment = c.req.query("treatment") || null;
   const categoryId = c.req.query("categoryId") || null;
   const search = c.req.query("search") || null;
+  const status = c.req.query("status") || null; // open | closed, filters by the entry's period state
   const limit = Math.min(parseInt(c.req.query("limit") || "200"), 500);
   const offset = parseInt(c.req.query("offset") || "0");
 
@@ -96,8 +97,13 @@ ledgerRoutes.get("/:clientId/ledger", async (c) => {
     paramIndex++;
   }
   if (search) {
-    whereClause += ` AND (le.description ILIKE $${paramIndex} OR le.amount::text ILIKE $${paramIndex})`;
+    whereClause += ` AND (le.description ILIKE ${paramIndex} OR le.amount::text ILIKE ${paramIndex})`;
     params.push(`%${search}%`);
+    paramIndex++;
+  }
+  if (status === "open" || status === "closed") {
+    whereClause += ` AND COALESCE(ap.state, 'open') = ${paramIndex}`;
+    params.push(status);
     paramIndex++;
   }
 
@@ -116,6 +122,7 @@ ledgerRoutes.get("/:clientId/ledger", async (c) => {
      LEFT JOIN categories c ON c.id = le.category_id
      LEFT JOIN bank_transactions bt ON bt.id = le.source_bank_transaction_id
      LEFT JOIN receipts r ON r.id = le.source_receipt_id
+     LEFT JOIN accounting_periods ap ON ap.client_id = le.client_id AND ap.period_key = le.period_key
      ${whereClause}
      ORDER BY le.entry_date DESC NULLS LAST, le.created_at DESC
      LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
@@ -124,7 +131,7 @@ ledgerRoutes.get("/:clientId/ledger", async (c) => {
 
   const entries = rows.map(serializeLedgerEntry);
   const totalResult = await db.query<{ count: string }>(
-    `SELECT COUNT(*)::text AS count FROM ledger_entries le ${whereClause}`,
+    `SELECT COUNT(*)::text AS count FROM ledger_entries le LEFT JOIN accounting_periods ap ON ap.client_id = le.client_id AND ap.period_key = le.period_key ${whereClause}`,
     params,
   );
   const total = parseInt(totalResult[0]?.count || "0", 10);
@@ -162,21 +169,35 @@ ledgerRoutes.patch("/:clientId/ledger/:entryId/classify", async (c) => {
     [entryId, client.id],
   );
 
-  const [after] = await db.query<Record<string, unknown>>(
-    `UPDATE ledger_entries SET
-       accounting_class = $1,
-       treatment = $2,
-       category_id = $3,
-       reviewed_at = NOW(),
-       reviewed_by_user_id = $4
-     WHERE id = $5 AND client_id = $6
-     RETURNING *`,
-    [body.accountingClass, body.treatment, body.categoryId ?? null, userId, entryId, client.id],
-  );
+  const statements: DbStatement[] = [
+    {
+      query: `UPDATE ledger_entries SET
+         accounting_class = $1,
+         treatment = $2,
+         category_id = $3,
+         reviewed_at = NOW(),
+         reviewed_by_user_id = $4
+       WHERE id = $5 AND client_id = $6
+       RETURNING *`,
+      params: [body.accountingClass, body.treatment, body.categoryId ?? null, userId, entryId, client.id],
+    },
+    {
+      query: `INSERT INTO audit_events
+        (id, client_id, actor_user_id, action, before_json, after_json)
+       VALUES ($1, $2, $3, 'ledger_entry_classified', $4::jsonb, $5::jsonb)`,
+      params: [newId("aud"), client.id, userId, before, {
+        ...before,
+        accounting_class: body.accountingClass,
+        treatment: body.treatment,
+        category_id: body.categoryId ?? null,
+        reviewed_by_user_id: userId,
+      }],
+    },
+  ];
 
-  await logLedgerAudit(db, client.id, entryId, userId, "ledger_entry_classified", before, after);
+  const [entryResults] = await db.transaction(statements);
 
-  return c.json({ entry: serializeLedgerEntry(after) });
+  return c.json({ entry: serializeLedgerEntry(entryResults[0]) });
 });
 
 // Update transaction category
@@ -217,19 +238,31 @@ ledgerRoutes.patch("/:clientId/ledger/:entryId/category", async (c) => {
     [entryId, client.id],
   );
 
-  const [after] = await db.query<Record<string, unknown>>(
-    `UPDATE ledger_entries SET
-       category_id = $1,
-       reviewed_at = NOW(),
-       reviewed_by_user_id = $2
-     WHERE id = $3 AND client_id = $4
-     RETURNING *`,
-    [body.categoryId, userId, entryId, client.id],
-  );
+  const statements: DbStatement[] = [
+    {
+      query: `UPDATE ledger_entries SET
+         category_id = $1,
+         reviewed_at = NOW(),
+         reviewed_by_user_id = $2
+       WHERE id = $3 AND client_id = $4
+       RETURNING *`,
+      params: [body.categoryId, userId, entryId, client.id],
+    },
+    {
+      query: `INSERT INTO audit_events
+        (id, client_id, actor_user_id, action, before_json, after_json)
+       VALUES ($1, $2, $3, 'ledger_entry_category_changed', $4::jsonb, $5::jsonb)`,
+      params: [newId("aud"), client.id, userId, before, {
+        ...before,
+        category_id: body.categoryId,
+        reviewed_by_user_id: userId,
+      }],
+    },
+  ];
 
-  await logLedgerAudit(db, client.id, entryId, userId, "ledger_entry_category_changed", before, after);
+  const [entryResults] = await db.transaction(statements);
 
-  return c.json({ entry: serializeLedgerEntry(after) });
+  return c.json({ entry: serializeLedgerEntry(entryResults[0]) });
 });
 
 // Period summary
@@ -572,22 +605,6 @@ async function authorizedClient(c: {
   return { db, firm, client };
 }
 
-async function logLedgerAudit(
-  db: ReturnType<typeof createDb>,
-  clientId: string,
-  entryId: string,
-  userId: string,
-  action: string,
-  before: unknown,
-  after: unknown,
-) {
-  await db.query(
-    `INSERT INTO audit_events
-      (id, client_id, actor_user_id, action, before_json, after_json)
-     VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb)`,
-    [newId("aud"), clientId, userId, action, before, after],
-  );
-}
 
 function serializeLedgerEntry(row: Record<string, unknown>) {
   return {

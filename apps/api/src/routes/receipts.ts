@@ -262,6 +262,15 @@ receiptRoutes.patch("/:clientId/receipts/:receiptId", async (c) => {
   if (!before) return c.json({ error: "Not found" }, 404);
   if (before.status !== "review") return c.json({ error: "Receipt is not in review" }, 409);
 
+  if (body.date) {
+    const periodKey = String(body.date).slice(0, 7);
+    try {
+      await checkPeriodOpen(db, client.id, periodKey);
+    } catch {
+      return c.json({ error: "Cannot mutate accounting in a closed period" }, 409);
+    }
+  }
+
   let categoryId: string | null = null;
   if (body.category) {
     const [category] = await db.query<{ id: string }>(
@@ -285,6 +294,17 @@ receiptRoutes.patch("/:clientId/receipts/:receiptId", async (c) => {
       ],
     },
     {
+      query: `DELETE FROM receipt_line_items WHERE receipt_id = $1`,
+      params: [receiptId],
+    },
+    ...body.lineItems.map((item, i) => ({
+      query: `INSERT INTO receipt_line_items
+        (id, receipt_id, line_no, description, quantity, unit_price, amount, category, confidence)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      params: [newId("li"), receiptId, i + 1, item.description, item.quantity,
+        item.unitPrice, item.amount, item.category, item.confidence],
+    })),
+    {
       query: `INSERT INTO audit_events
         (id, client_id, receipt_id, actor_user_id, action, before_json, after_json)
         VALUES ($1, $2, $3, $4, 'receipt_edited', $5::jsonb, $6::jsonb)`,
@@ -294,18 +314,6 @@ receiptRoutes.patch("/:clientId/receipts/:receiptId", async (c) => {
       ],
     },
   ];
-
-  await db.query(`DELETE FROM receipt_line_items WHERE receipt_id = $1`, [receiptId]);
-  for (let i = 0; i < body.lineItems.length; i++) {
-    const item = body.lineItems[i];
-    await db.query(
-      `INSERT INTO receipt_line_items
-        (id, receipt_id, line_no, description, quantity, unit_price, amount, category, confidence)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-      [newId("li"), receiptId, i + 1, item.description, item.quantity,
-        item.unitPrice, item.amount, item.category, item.confidence],
-    );
-  }
 
   await db.transaction(statements);
   return c.json({ receipt: await getReceiptDetails(db, receiptId, client.id) });
@@ -323,8 +331,22 @@ receiptRoutes.post("/:clientId/receipts/:receiptId/approve", async (c) => {
     return c.json({ error: "Validation failed. Confirm the evidence before overriding." }, 409);
   }
 
+  const pendingBankTransactions = await db.query<Record<string, unknown>>(
+    `SELECT * FROM bank_transactions
+     WHERE client_id = $1 AND pending_receipt_id = $2 AND triage = 'receipt_pending'`,
+    [client.id, receiptId],
+  );
+
+  const periodKeysToCheck = new Set<string>();
   if (receipt.extracted_date) {
-    const periodKey = String(receipt.extracted_date).slice(0, 7);
+    periodKeysToCheck.add(String(receipt.extracted_date).slice(0, 7));
+  }
+  for (const bankTransaction of pendingBankTransactions) {
+    if (bankTransaction.txn_date) {
+      periodKeysToCheck.add(String(bankTransaction.txn_date).slice(0, 7));
+    }
+  }
+  for (const periodKey of periodKeysToCheck) {
     try {
       await checkPeriodOpen(db, client.id, periodKey);
     } catch {
@@ -340,12 +362,6 @@ receiptRoutes.post("/:clientId/receipts/:receiptId/approve", async (c) => {
     );
     categoryId = category?.id ?? null;
   }
-
-  const pendingBankTransactions = await db.query<Record<string, unknown>>(
-    `SELECT * FROM bank_transactions
-     WHERE client_id = $1 AND pending_receipt_id = $2 AND triage = 'receipt_pending'`,
-    [client.id, receiptId],
-  );
 
   const statements: DbStatement[] = [
     {

@@ -13,7 +13,7 @@ import {
   type BankColumnMapping,
   type NormalizedBankRow,
 } from "../services/bank-csv";
-import { planClassifyBankTransaction, planAttachBankSourceToReceiptLedgerEntry } from "../services/ledger";
+import { planClassifyBankTransaction, planAttachBankSourceToReceiptLedgerEntry, planDetachReceiptFromBankLedgerEntry } from "../services/ledger";
 import {
   suggestReceiptMatch,
   type ReceiptMatchCandidate,
@@ -543,13 +543,17 @@ bankRoutes.post("/:clientId/bank-transactions/:transactionId/decision", async (c
          RETURNING *`,
         params: [body.reason, userId, transactionId, client.id],
       },
-      {
-        query: `INSERT INTO audit_events
-          (id, client_id, receipt_id, actor_user_id, action, before_json, after_json)
-          VALUES ($1, $2, $3, $4, 'bank_no_receipt_required', $5::jsonb, $6::jsonb)`,
-        params: [newId("aud"), client.id, priorReceiptId, userId, before, afterSnapshot],
-      },
     ];
+
+    const detachStatement = await planDetachReceiptFromBankLedgerEntry(db, client.id, transactionId);
+    if (detachStatement) statements.push(detachStatement);
+
+    statements.push({
+      query: `INSERT INTO audit_events
+        (id, client_id, receipt_id, actor_user_id, action, before_json, after_json)
+        VALUES ($1, $2, $3, $4, 'bank_no_receipt_required', $5::jsonb, $6::jsonb)`,
+      params: [newId("aud"), client.id, priorReceiptId, userId, before, afterSnapshot],
+    });
 
     const [bankResults] = await db.transaction(statements);
     return c.json({ transaction: bankResults[0] });
@@ -581,13 +585,17 @@ bankRoutes.post("/:clientId/bank-transactions/:transactionId/decision", async (c
        RETURNING *`,
       params: [userId, transactionId, client.id],
     },
-    {
-      query: `INSERT INTO audit_events
-        (id, client_id, receipt_id, actor_user_id, action, before_json, after_json)
-        VALUES ($1, $2, $3, $4, 'bank_match_rejected', $5::jsonb, $6::jsonb)`,
-      params: [newId("aud"), client.id, rejectedReceiptId, userId, before, rejectAfterSnapshot],
-    },
   ];
+
+  const rejectDetachStatement = await planDetachReceiptFromBankLedgerEntry(db, client.id, transactionId);
+  if (rejectDetachStatement) rejectStatements.push(rejectDetachStatement);
+
+  rejectStatements.push({
+    query: `INSERT INTO audit_events
+      (id, client_id, receipt_id, actor_user_id, action, before_json, after_json)
+      VALUES ($1, $2, $3, $4, 'bank_match_rejected', $5::jsonb, $6::jsonb)`,
+    params: [newId("aud"), client.id, rejectedReceiptId, userId, before, rejectAfterSnapshot],
+  });
 
   const [rejectResults] = await db.transaction(rejectStatements);
   return c.json({ transaction: rejectResults[0] });

@@ -173,6 +173,14 @@ export function TransactionsTable({
     loadPeriods();
   }, [clientId]);
 
+  // Keeps the table in sync when the period changes from outside this
+  // component (e.g. the permanent shell's top-level period selector),
+  // rather than only honoring initialPeriod once on mount.
+  useEffect(() => {
+    if (initialPeriod === undefined) return;
+    setFilters((f) => (f.period === initialPeriod ? f : { ...f, period: initialPeriod, page: 0 }));
+  }, [initialPeriod]);
+
   useEffect(() => {
     loadEntries();
     setSelectedIds(new Set());
@@ -324,6 +332,19 @@ export function TransactionsTable({
                   {p}
                 </SelectItem>
               ))}
+            </SelectContent>
+          </Select>
+          <Select
+            value={filters.status}
+            onValueChange={(v: string) => setFilters((f) => ({ ...f, status: v as Filters["status"], page: 0 }))}
+          >
+            <SelectTrigger className="w-[140px] h-9 text-sm">
+              <SelectValue placeholder="Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Statuses</SelectItem>
+              <SelectItem value="open">Open Period</SelectItem>
+              <SelectItem value="closed">Closed Period</SelectItem>
             </SelectContent>
           </Select>
           <Button variant="ghost" size="sm" onClick={() => setShowFilters(false)}>
