@@ -41,9 +41,12 @@ internalRoutes.post("/smoke-cleanup", async (c) => {
 
   const clientRows = await db.query<{ id: string }>(`SELECT id FROM clients WHERE firm_id = $1`, [firm.id]);
   const clientIds = clientRows.map((r) => r.id);
+  // The Db wrapper JSON-stringifies any object/array parameter, so a JS
+  // array parameter arrives as jsonb text rather than a Postgres array
+  // literal; unnest it as jsonb instead of casting to text[].
   const r2Keys = clientIds.length
     ? (await db.query<{ r2_key: string }>(
-        `SELECT r2_key FROM receipts WHERE client_id = ANY($1::text[])`,
+        `SELECT r2_key FROM receipts WHERE client_id IN (SELECT jsonb_array_elements_text($1::jsonb))`,
         [clientIds],
       )).map((r) => r.r2_key)
     : [];
