@@ -56,6 +56,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_ledger_source_bank ON ledger_entries(source
 -- Uniqueness: a receipt can own at most one canonical ledger entry (when not also sourced from bank)
 CREATE UNIQUE INDEX IF NOT EXISTS uq_ledger_source_receipt ON ledger_entries(source_receipt_id) WHERE source_receipt_id IS NOT NULL;
 
+-- Uniqueness at the database level: a receipt can be actively claimed (matched or
+-- pending review) by at most one bank transaction, even under concurrent requests.
+-- The application-level check in checkReceiptNotAlreadyClaimed is a friendly 409
+-- precheck; this index is what actually prevents the race.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_bank_transactions_claimed_receipt
+  ON bank_transactions (client_id, COALESCE(matched_receipt_id, pending_receipt_id))
+  WHERE matched_receipt_id IS NOT NULL OR pending_receipt_id IS NOT NULL;
+
 -- 4. Period close state table
 CREATE TABLE IF NOT EXISTS accounting_periods (
   client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
@@ -106,3 +114,117 @@ ALTER TABLE receipts
 -- - ledger_entry_deleted (soft - only allowed in open periods)
 -- - period_closed
 -- - period_reopened
+-- 9. Backfill: populate the canonical ledger from pre-existing paid-alpha data
+-- so filed receipts and resolved bank activity do not disappear from P&L when
+-- /pnl switches to reading ledger_entries exclusively. Idempotent: each branch
+-- only inserts a row when no ledger_entries row already exists for that
+-- source, so replaying this migration after new activity has been recorded
+-- through the app is safe and will not create duplicates.
+
+-- 9a. Ensure a period row exists for every period this backfill will touch.
+INSERT INTO accounting_periods (client_id, period_key)
+SELECT DISTINCT bt.client_id, to_char(bt.txn_date, 'YYYY-MM')
+FROM bank_transactions bt
+WHERE bt.txn_date IS NOT NULL
+ON CONFLICT DO NOTHING;
+
+INSERT INTO accounting_periods (client_id, period_key)
+SELECT DISTINCT r.client_id, to_char(r.extracted_date, 'YYYY-MM')
+FROM receipts r
+WHERE r.status = 'filed' AND r.extracted_date IS NOT NULL
+ON CONFLICT DO NOTHING;
+
+-- 9b. Matched bank transactions with a linked receipt -> one merged ledger row.
+-- Bank data is authoritative for amount/currency; an accounting_class of
+-- needs_review is used unless the bank transaction was already explicitly
+-- classified, matching the same rule applied going forward at the API level.
+INSERT INTO ledger_entries (
+  id, client_id, period_key, entry_date, description, amount, currency,
+  accounting_class, treatment, category_id,
+  source_bank_transaction_id, source_receipt_id, created_by_user_id
+)
+SELECT
+  'le_' || gen_random_uuid(),
+  bt.client_id,
+  to_char(bt.txn_date, 'YYYY-MM'),
+  bt.txn_date,
+  COALESCE(r.extracted_merchant, bt.description),
+  ABS(bt.amount),
+  bt.currency,
+  COALESCE(bt.accounting_class, 'needs_review'),
+  COALESCE(bt.treatment, 'business'),
+  COALESCE(bt.category_id, r.category_id),
+  bt.id,
+  bt.matched_receipt_id,
+  'system_backfill_0004'
+FROM bank_transactions bt
+JOIN receipts r ON r.id = bt.matched_receipt_id AND r.client_id = bt.client_id
+WHERE bt.triage = 'matched'
+  AND bt.matched_receipt_id IS NOT NULL
+  AND bt.txn_date IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM ledger_entries le
+    WHERE le.client_id = bt.client_id
+      AND (le.source_bank_transaction_id = bt.id OR le.source_receipt_id = bt.matched_receipt_id)
+  );
+
+-- 9c. Bank transactions resolved without a receipt -> bank-only ledger row,
+-- needs_review by default until explicitly classified (unless it already was).
+INSERT INTO ledger_entries (
+  id, client_id, period_key, entry_date, description, amount, currency,
+  accounting_class, treatment, category_id,
+  source_bank_transaction_id, created_by_user_id
+)
+SELECT
+  'le_' || gen_random_uuid(),
+  bt.client_id,
+  to_char(bt.txn_date, 'YYYY-MM'),
+  bt.txn_date,
+  bt.description,
+  ABS(bt.amount),
+  bt.currency,
+  COALESCE(bt.accounting_class, 'needs_review'),
+  COALESCE(bt.treatment, 'business'),
+  bt.category_id,
+  bt.id,
+  'system_backfill_0004'
+FROM bank_transactions bt
+WHERE bt.triage = 'no_receipt_required'
+  AND bt.txn_date IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM ledger_entries le
+    WHERE le.client_id = bt.client_id AND le.source_bank_transaction_id = bt.id
+  );
+
+-- 9d. Filed receipts with no bank transaction reference at all -> receipt-only
+-- ledger row, defaulting to expense/business (the existing, unchanged
+-- contract for receipt-only filings).
+INSERT INTO ledger_entries (
+  id, client_id, period_key, entry_date, description, amount, currency,
+  accounting_class, treatment, category_id,
+  source_receipt_id, created_by_user_id
+)
+SELECT
+  'le_' || gen_random_uuid(),
+  r.client_id,
+  to_char(r.extracted_date, 'YYYY-MM'),
+  r.extracted_date,
+  COALESCE(r.extracted_merchant, 'Receipt'),
+  r.extracted_total,
+  COALESCE(r.extracted_currency, 'USD'),
+  COALESCE(r.accounting_class, 'expense'),
+  COALESCE(r.treatment, 'business'),
+  r.category_id,
+  r.id,
+  'system_backfill_0004'
+FROM receipts r
+WHERE r.status = 'filed'
+  AND r.extracted_date IS NOT NULL
+  AND r.extracted_total IS NOT NULL
+  AND r.id NOT IN (SELECT matched_receipt_id FROM bank_transactions WHERE matched_receipt_id IS NOT NULL)
+  AND r.id NOT IN (SELECT pending_receipt_id FROM bank_transactions WHERE pending_receipt_id IS NOT NULL)
+  AND r.id NOT IN (SELECT suggested_receipt_id FROM bank_transactions WHERE suggested_receipt_id IS NOT NULL)
+  AND NOT EXISTS (
+    SELECT 1 FROM ledger_entries le
+    WHERE le.client_id = r.client_id AND le.source_receipt_id = r.id
+  );

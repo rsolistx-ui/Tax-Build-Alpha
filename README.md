@@ -28,9 +28,8 @@ The paid alpha intentionally serves the React app and API from one Worker origin
 - Review is evidence-first. The source document is visible beside editable extracted facts and validation results.
 - Clicking Approve always saves the visible draft first, reruns validation, and only then files the receipt.
 - Failed validation cannot be filed without an explicit professional override.
-- Only filed evidence enters the P&L.
-- Receipt-level tax, tip, discounts, shipping, and rounding are kept as visible adjustment lines so the P&L reconciles to the approved receipt total.
-- Every P&L category drills down to the contributing lines and exact source receipts.
+- Only filed evidence enters the P&L, sourced from the canonical ledger, never directly from unreviewed extraction.
+- Every P&L category drills down to the exact ledger rows behind it and their source bank transaction and/or receipt.
 - Bank CSVs are mapped, normalized, deduplicated, and stored in Neon without requiring a live bank integration.
 - Filed receipts can be deterministically suggested against bank transactions, but no suggested match becomes final without a professional decision.
 - Unmatched bank transactions become an exception inbox instead of a search problem.
@@ -221,13 +220,11 @@ The arithmetic tolerance is two cents for normal rounding differences.
 
 ## P&L traceability
 
-Only receipts in `filed` status enter the P&L. Purchased line items remain their own ledger entries. When the approved receipt total differs from the item sum, Folio creates a visible receipt-level adjustment entry for the difference. This captures tax, tip, discounts, shipping, or rounding without hiding those amounts inside item rows.
+`GET /api/clients/:clientId/pnl` is the single production P&L source. It builds income and expense totals from the canonical `ledger_entries` table, filtered to confirmed business income and business expense. A reconciled receipt plus bank transaction counts exactly once, since the two collapse into one ledger row on match. Transfers, owner contributions, owner draws, personal rows, and anything still `needs_review` are excluded regardless of source. An optional `period=YYYY-MM` query filters to a single period; omitting it returns all-time totals.
 
-A filed receipt with no line items falls back to its approved receipt total so evidence is not silently dropped.
+The response shape is `{ income, expenses, net, byCategory: { income: [...], expense: [...] }, note }`, where each `byCategory` row carries `categoryId`, `category`, `slug`, `total`, and `count`.
 
-`GET /api/clients/:clientId/pnl/drilldown?category=...` returns every contributing entry with its source receipt URL.
-
-The production P&L is the ledger-backed P&L at `GET /api/clients/:clientId/pnl/ledger`. It builds income and expense totals from the canonical `ledger_entries` table filtered to confirmed business income and business expense. A reconciled receipt plus bank transaction counts exactly once. Transfers, owner contributions, owner draws, and personal rows are excluded regardless of source. `GET /api/clients/:clientId/pnl/ledger/drilldown?categoryId=...&class=...` traces each row to its exact source evidence. An optional `period=YYYY-MM` query filters to a single period.
+`GET /api/clients/:clientId/pnl/drilldown?categoryId=...&class=income|expense` traces every ledger row behind one category/class pair back to its exact source evidence (the matched bank transaction, the receipt, or both), with an optional `period=YYYY-MM` filter.
 
 ## Canonical ledger
 
@@ -236,7 +233,7 @@ A `ledger_entries` row is the single authoritative record of book activity. Ever
 - A bank transaction represents the cash movement when present.
 - A matched receipt is supporting evidence, not a second expense.
 - Receipt-only activity creates a ledger row when no bank row exists.
-- When a bank transaction and a filed receipt are reconciled, the receipt-only row absorbs the bank source so the activity appears exactly once.
+- When a bank transaction and a filed receipt are reconciled, the receipt-only row absorbs the bank source so the activity appears exactly once, adopting the bank amount and currency as authoritative for the cash movement.
 
 Supported transaction classes are expense, income, transfer, owner contribution, owner draw, and needs review. Business/personal treatment is explicit and separate from the class. No silent AI posting: a row enters operating P&L only after a professional classifies it as business income or business expense.
 

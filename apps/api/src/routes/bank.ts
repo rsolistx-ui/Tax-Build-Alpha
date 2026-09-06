@@ -393,8 +393,8 @@ bankRoutes.post("/:clientId/bank-transactions/:transactionId/decision", async (c
   if (body.action === "confirm") {
     const receiptId = body.receiptId || String(before.suggested_receipt_id || "");
     if (!receiptId) return c.json({ error: "A receipt match is required to confirm" }, 400);
-    const [receipt] = await db.query<{ id: string }>(
-      `SELECT id FROM receipts WHERE id = $1 AND client_id = $2 AND status = 'filed'`,
+    const [receipt] = await db.query<{ id: string; extracted_date: string | null }>(
+      `SELECT id, extracted_date FROM receipts WHERE id = $1 AND client_id = $2 AND status = 'filed'`,
       [receiptId, client.id],
     );
     if (!receipt) return c.json({ error: "Filed receipt evidence was not found" }, 404);
@@ -402,6 +402,13 @@ bankRoutes.post("/:clientId/bank-transactions/:transactionId/decision", async (c
       await checkReceiptNotAlreadyClaimed(db, client.id, receiptId, transactionId);
     } catch {
       return c.json({ error: "Receipt is already matched to another bank transaction" }, 409);
+    }
+    if (receipt.extracted_date) {
+      try {
+        await checkPeriodOpen(db, client.id, String(receipt.extracted_date).slice(0, 7));
+      } catch {
+        return c.json({ error: "Cannot mutate accounting in a closed period" }, 409);
+      }
     }
 
     const afterSnapshot = {
@@ -437,14 +444,17 @@ bankRoutes.post("/:clientId/bank-transactions/:transactionId/decision", async (c
       params: [newId("aud"), client.id, receiptId, userId, before, afterSnapshot],
     });
 
-    const [bankResults] = await db.transaction(statements);
-    return c.json({ transaction: bankResults[0] });
+    const outcome = await runClaimingTransaction(db, statements);
+    if (!outcome.ok) {
+      return c.json({ error: "Receipt is already matched to another bank transaction" }, 409);
+    }
+    return c.json({ transaction: outcome.results[0][0] });
   }
 
   if (body.action === "link_receipt") {
     if (!body.receiptId) return c.json({ error: "receiptId is required" }, 400);
-    const [receipt] = await db.query<{ id: string; status: string }>(
-      `SELECT id, status FROM receipts WHERE id = $1 AND client_id = $2`,
+    const [receipt] = await db.query<{ id: string; status: string; extracted_date: string | null }>(
+      `SELECT id, status, extracted_date FROM receipts WHERE id = $1 AND client_id = $2`,
       [body.receiptId, client.id],
     );
     if (!receipt) return c.json({ error: "Receipt evidence was not found" }, 404);
@@ -452,6 +462,13 @@ bankRoutes.post("/:clientId/bank-transactions/:transactionId/decision", async (c
       await checkReceiptNotAlreadyClaimed(db, client.id, receipt.id, transactionId);
     } catch {
       return c.json({ error: "Receipt is already matched to another bank transaction" }, 409);
+    }
+    if (receipt.extracted_date) {
+      try {
+        await checkPeriodOpen(db, client.id, String(receipt.extracted_date).slice(0, 7));
+      } catch {
+        return c.json({ error: "Cannot mutate accounting in a closed period" }, 409);
+      }
     }
 
     if (receipt.status === "filed") {
@@ -492,8 +509,11 @@ bankRoutes.post("/:clientId/bank-transactions/:transactionId/decision", async (c
         params: [newId("aud"), client.id, receipt.id, userId, before, afterSnapshot],
       });
 
-      const [bankResults] = await db.transaction(statements);
-      return c.json({ transaction: bankResults[0] });
+      const outcome = await runClaimingTransaction(db, statements);
+      if (!outcome.ok) {
+        return c.json({ error: "Receipt is already matched to another bank transaction" }, 409);
+      }
+      return c.json({ transaction: outcome.results[0][0] });
     }
 
     if (receipt.status === "review") {
@@ -537,6 +557,19 @@ bankRoutes.post("/:clientId/bank-transactions/:transactionId/decision", async (c
   if (body.action === "no_receipt_required") {
     if (!body.reason) return c.json({ error: "A reason is required" }, 400);
     const priorReceiptId = before.matched_receipt_id || before.pending_receipt_id || before.suggested_receipt_id || null;
+    if (before.matched_receipt_id) {
+      const [priorReceipt] = await db.query<{ extracted_date: string | null }>(
+        `SELECT extracted_date FROM receipts WHERE id = $1 AND client_id = $2`,
+        [before.matched_receipt_id, client.id],
+      );
+      if (priorReceipt?.extracted_date) {
+        try {
+          await checkPeriodOpen(db, client.id, String(priorReceipt.extracted_date).slice(0, 7));
+        } catch {
+          return c.json({ error: "Cannot mutate accounting in a closed period" }, 409);
+        }
+      }
+    }
     const afterSnapshot = {
       ...before,
       triage: "no_receipt_required",
@@ -581,6 +614,19 @@ bankRoutes.post("/:clientId/bank-transactions/:transactionId/decision", async (c
 
   // Reject action
   const rejectedReceiptId = before.matched_receipt_id || before.pending_receipt_id || before.suggested_receipt_id || null;
+  if (before.matched_receipt_id) {
+    const [priorReceipt] = await db.query<{ extracted_date: string | null }>(
+      `SELECT extracted_date FROM receipts WHERE id = $1 AND client_id = $2`,
+      [before.matched_receipt_id, client.id],
+    );
+    if (priorReceipt?.extracted_date) {
+      try {
+        await checkPeriodOpen(db, client.id, String(priorReceipt.extracted_date).slice(0, 7));
+      } catch {
+        return c.json({ error: "Cannot mutate accounting in a closed period" }, 409);
+      }
+    }
+  }
   const rejectAfterSnapshot = {
     ...before,
     triage: "unmatched",
@@ -735,6 +781,21 @@ async function checkReceiptNotAlreadyClaimed(
   );
   if (claim) {
     throw new Error("Receipt is already matched to another bank transaction");
+  }
+}
+
+async function runClaimingTransaction(
+  db: ReturnType<typeof createDb>,
+  statements: DbStatement[],
+): Promise<{ ok: true; results: Record<string, unknown>[][] } | { ok: false }> {
+  try {
+    const results = await db.transaction(statements);
+    return { ok: true, results };
+  } catch (error) {
+    if (error instanceof Error && /unique|duplicate/i.test(error.message)) {
+      return { ok: false };
+    }
+    throw error;
   }
 }
 

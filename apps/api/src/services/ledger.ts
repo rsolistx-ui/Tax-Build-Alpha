@@ -446,8 +446,15 @@ export async function planAttachBankSourceToReceiptLedgerEntry(
   receiptId: string,
   bankTransactionId: string,
 ): Promise<DbStatement[]> {
-  const [bank] = await db.query<{ txn_date: string | null }>(
-    `SELECT txn_date FROM bank_transactions WHERE id = $1 AND client_id = $2`,
+  const [bank] = await db.query<{
+    txn_date: string | null;
+    amount: number;
+    currency: string;
+    accounting_class: string | null;
+    treatment: string | null;
+  }>(
+    `SELECT txn_date, amount, currency, accounting_class, treatment
+     FROM bank_transactions WHERE id = $1 AND client_id = $2`,
     [bankTransactionId, clientId],
   );
   if (!bank?.txn_date) return [];
@@ -464,10 +471,6 @@ export async function planAttachBankSourceToReceiptLedgerEntry(
   );
 
   if (receiptOnlyEntry && bankOnlyEntry) {
-    // The receipt-only row must be removed BEFORE the bank-owned row claims
-    // its receipt_id: uq_ledger_source_receipt is checked immediately per
-    // statement, and both rows would briefly hold the same receipt_id if
-    // the update ran first.
     return [
       {
         query: `DELETE FROM ledger_entries WHERE id = $1`,
@@ -495,9 +498,22 @@ export async function planAttachBankSourceToReceiptLedgerEntry(
         query: `UPDATE ledger_entries SET
            source_bank_transaction_id = $1,
            entry_date = $2,
-           period_key = $3
-         WHERE id = $4`,
-        params: [bankTransactionId, bank.txn_date, bank.txn_date.slice(0, 7), receiptOnlyEntry.id],
+           period_key = $3,
+           amount = $4,
+           currency = $5,
+           accounting_class = $6::accounting_class,
+           treatment = COALESCE($7::treatment_type, treatment)
+         WHERE id = $8`,
+        params: [
+          bankTransactionId,
+          bank.txn_date,
+          bank.txn_date.slice(0, 7),
+          Math.abs(bank.amount),
+          bank.currency,
+          bank.accounting_class || "needs_review",
+          bank.treatment,
+          receiptOnlyEntry.id,
+        ],
       },
     ];
   }
@@ -538,9 +554,12 @@ export async function planDetachReceiptFromBankLedgerEntry(
     },
   ];
 
+  // Excludes the row being detached itself: its queued UPDATE has not run
+  // yet, so without this exclusion it would always find itself here and
+  // wrongly conclude a receipt-only row already exists.
   const [existingReceiptOnly] = await db.query<{ id: string }>(
-    `SELECT id FROM ledger_entries WHERE client_id = $1 AND source_receipt_id = $2`,
-    [clientId, receiptId],
+    `SELECT id FROM ledger_entries WHERE client_id = $1 AND source_receipt_id = $2 AND id != $3`,
+    [clientId, receiptId, entry.id],
   );
   if (existingReceiptOnly) return statements;
 
