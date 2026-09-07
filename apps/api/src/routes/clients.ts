@@ -8,6 +8,7 @@ import { requireActiveBeta } from "../middleware/beta";
 import * as clients from "../services/clients";
 import { ensureFirm } from "../services/firm";
 import { normalizeCurrencyCode } from "../services/pnl";
+import { newId } from "../lib/id";
 
 const createSchema = z.object({
   name: z.string().min(1).max(200),
@@ -56,6 +57,12 @@ clientRoutes.post("/", async (c) => {
   const db = createDb(c.env);
   const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
   const created = await clients.createClient(db, firm.id, body);
+  if (created) {
+    await db.query(
+      "INSERT INTO audit_events (id, client_id, actor_user_id, action, after_json) VALUES ($1, $2, $3, 'client_created', $4::jsonb)",
+      [newId("aud"), created.id, c.get("userId"), { name: created.name }],
+    );
+  }
   return c.json({ client: created }, 201);
 });
 

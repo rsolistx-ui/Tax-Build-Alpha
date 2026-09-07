@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
   ExternalLink,
@@ -75,14 +75,21 @@ type Tab = "folders" | "upload" | "review" | "bank" | "pnl" | "export";
 
 
 
+const VALID_TABS: Tab[] = ["folders", "upload", "review", "bank", "pnl", "export"];
+
 export function ClientWorkspacePage() {
   const { clientId = "" } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const focusId = searchParams.get("focus");
+  const initialTab = (VALID_TABS as string[]).includes(searchParams.get("tab") ?? "")
+    ? (searchParams.get("tab") as Tab)
+    : "folders";
   const [client, setClient] = useState<Client | null>(null);
   const [profile, setProfile] = useState<ClientProfile | null>(null);
   const [editingProfile, setEditingProfile] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
   const [review, setReview] = useState<ReviewReceipt[]>([]);
-  const [tab, setTab] = useState<Tab>("folders");
+  const [tab, setTab] = useState<Tab>(initialTab);
   const [selectedFolder, setSelectedFolder] = useState<Category | null>(null);
   const [folderReceipts, setFolderReceipts] = useState<FolderReceipt[]>([]);
   const [folderSort, setFolderSort] = useState<"date" | "merchant">("date");
@@ -95,6 +102,13 @@ export function ClientWorkspacePage() {
   const [error, setError] = useState<string | null>(null);
   const [batch, setBatch] = useState<BatchFile[]>([]);
   const [batchRunning, setBatchRunning] = useState(false);
+
+  useEffect(() => {
+    if (searchParams.get("tab") || searchParams.get("focus")) {
+      setSearchParams({}, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function load() {
     setError(null);
@@ -493,7 +507,7 @@ export function ClientWorkspacePage() {
             action={<Button variant="secondary" onClick={() => setTab("upload")}>Upload something</Button>}
           />
         ) : (
-          <ReceiptReview clientId={clientId} categories={categories} receipts={review} onReload={load} />
+          <ReceiptReview clientId={clientId} categories={categories} receipts={review} onReload={load} initialSelectedId={focusId} />
         )
       ) : null}
 
@@ -505,6 +519,7 @@ export function ClientWorkspacePage() {
             setTab("review");
             void load();
           }}
+          focusTransactionId={focusId}
         />
       ) : null}
 

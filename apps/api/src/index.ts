@@ -15,6 +15,7 @@ import { ensureFirm } from "./services/firm";
 import { betaRoutes } from "./routes/beta";
 import { internalRoutes } from "./routes/internal";
 import { reportRoutes } from "./routes/reports";
+import { dashboardRoutes } from "./routes/dashboard";
 
 const app = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 
@@ -110,6 +111,7 @@ app.route("/api/clients", receiptRoutes);
 app.route("/api/clients", pnlRoutes);
 app.route("/api/clients", bankRoutes);
 app.route("/api/clients", reportRoutes);
+app.route("/api/dashboard", dashboardRoutes);
 
 app.notFound((c) => c.json({ error: "Not found" }, 404));
 app.onError((err, c) => {

@@ -70,13 +70,17 @@ export function ReceiptReview({
   categories,
   receipts,
   onReload,
+  initialSelectedId,
 }: {
   clientId: string;
   categories: ReviewCategory[];
   receipts: ReviewReceipt[];
   onReload: () => Promise<void>;
+  initialSelectedId?: string | null;
 }) {
-  const [selectedId, setSelectedId] = useState(receipts[0]?.id ?? "");
+  const [selectedId, setSelectedId] = useState(
+    (initialSelectedId && receipts.some((r) => r.id === initialSelectedId) ? initialSelectedId : receipts[0]?.id) ?? "",
+  );
   const selected = useMemo(
     () => receipts.find((receipt) => receipt.id === selectedId) ?? receipts[0],
     [receipts, selectedId],

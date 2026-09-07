@@ -112,10 +112,12 @@ export function BankReconciliation({
   clientId,
   onOpenReview,
   onReceiptAdded,
+  focusTransactionId,
 }: {
   clientId: string;
   onOpenReview?: () => void;
   onReceiptAdded?: () => void;
+  focusTransactionId?: string | null;
 }) {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -162,6 +164,14 @@ export function BankReconciliation({
     void loadCategories();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientId]);
+
+  useEffect(() => {
+    if (!focusTransactionId || transactions.length === 0) return;
+    setFilter("all");
+    const el = document.getElementById(`bank-txn-${focusTransactionId}`);
+    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusTransactionId, transactions.length]);
 
   async function setDisposition(transactionId: string, disposition: string, categoryId: string | null, note: string | null) {
     setDispositionBusyId(transactionId);
@@ -422,7 +432,14 @@ export function BankReconciliation({
           ) : (
             <div className="space-y-2">
               {visibleTransactions.map((transaction) => (
-                <div key={transaction.id} className="rounded-lg border border-[var(--color-border)] p-4">
+                <div
+                  key={transaction.id}
+                  id={`bank-txn-${transaction.id}`}
+                  className={cn(
+                    "rounded-lg border p-4",
+                    transaction.id === focusTransactionId ? "border-[var(--color-primary)] bg-[var(--color-accent)]" : "border-[var(--color-border)]",
+                  )}
+                >
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">

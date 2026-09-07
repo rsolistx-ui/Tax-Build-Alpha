@@ -3,6 +3,7 @@ import { ProtectedLayout } from "@/components/protected";
 import { LoginPage } from "@/pages/login";
 import { SignupPage } from "@/pages/signup";
 import { ClientsPage } from "@/pages/clients";
+import { DashboardPage } from "@/pages/dashboard";
 import { ClientWorkspacePage } from "@/pages/client-workspace";
 import { BetaAdminPage } from "@/pages/beta-admin";
 
@@ -13,7 +14,8 @@ export default function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/signup" element={<SignupPage />} />
         <Route element={<ProtectedLayout />}>
-          <Route path="/" element={<ClientsPage />} />
+          <Route path="/" element={<DashboardPage />} />
+          <Route path="/clients" element={<ClientsPage />} />
           <Route path="/clients/:clientId" element={<ClientWorkspacePage />} />
           <Route path="/beta-admin" element={<BetaAdminPage />} />
         </Route>
