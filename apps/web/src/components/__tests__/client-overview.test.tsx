@@ -22,8 +22,11 @@ const BASE_OVERVIEW = {
     lastActivityAt: null,
   },
   financialStatus: {
+    periodStart: "2026-01-01",
+    periodEnd: "2026-01-31",
     pnlCompleteness: false,
     bankTransactionCount: 5,
+    resolvedCount: 3,
     missingEvidenceCount: 1,
     unclassifiedCount: 1,
     uncategorizedCount: 0,
@@ -91,5 +94,18 @@ describe("ClientOverview", () => {
     );
     render(<ClientOverview clientId="cli_1" onNavigate={() => {}} />);
     expect(await screen.findByText(/Accrual-basis reporting is not supported yet/)).toBeInTheDocument();
+  });
+
+  it("renders resolvedCount and the actual selected reporting-period dates from the API response", async () => {
+    const { api } = await import("@/lib/api");
+    (api as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      mockApi({ ...BASE_OVERVIEW, financialStatus: { ...BASE_OVERVIEW.financialStatus, resolvedCount: 17 } }),
+    );
+    render(<ClientOverview clientId="cli_1" onNavigate={() => {}} />);
+    expect(await screen.findByText("17")).toBeInTheDocument();
+    expect(screen.getByText("Resolved")).toBeInTheDocument();
+    const periodText = await screen.findByTestId("reporting-period-dates");
+    expect(periodText.textContent).toContain("2026-01-01");
+    expect(periodText.textContent).toContain("2026-01-31");
   });
 });

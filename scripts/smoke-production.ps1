@@ -9,6 +9,15 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 $BaseUrl = $BaseUrl.TrimEnd("/")
 
+# Fail fast, before any production mutation happens: a run without a cleanup
+# token can create real synthetic firms/clients/documents/receipts with no
+# way to remove them afterward via the internal cleanup endpoint. Refuse to
+# start rather than warn about this only after the fact.
+if (-not $env:SMOKE_CLEANUP_TOKEN) {
+  Write-Error "SMOKE_CLEANUP_TOKEN is not set. Refusing to start: this script cannot run without a way to clean up the synthetic production data it creates."
+  exit 1
+}
+
 function Invoke-CurlJson([string[]]$CurlArgs) {
   $previousPreference = $ErrorActionPreference
   $ErrorActionPreference = "Continue"

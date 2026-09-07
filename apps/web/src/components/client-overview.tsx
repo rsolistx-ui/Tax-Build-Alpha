@@ -38,8 +38,11 @@ type Overview = {
     lastActivityAt: string | null;
   };
   financialStatus: {
+    periodStart: string;
+    periodEnd: string;
     pnlCompleteness: boolean;
     bankTransactionCount: number;
+    resolvedCount: number;
     missingEvidenceCount: number;
     unclassifiedCount: number;
     uncategorizedCount: number;
@@ -200,6 +203,9 @@ export function ClientOverview({ clientId, onNavigate }: { clientId: string; onN
                 ) : null}
               </div>
             </div>
+            <p className="text-xs text-[var(--color-muted-foreground)]" data-testid="reporting-period-dates">
+              Reporting {financialStatus.periodStart} to {financialStatus.periodEnd}
+            </p>
             {financialPeriod.unsupported ? (
               <p className="text-sm text-[var(--color-muted-foreground)]">{financialPeriod.warning}</p>
             ) : (
@@ -208,6 +214,7 @@ export function ClientOverview({ clientId, onNavigate }: { clientId: string; onN
                 <Metric label="Expenses" value={financialPeriod.expenses.toFixed(2)} />
                 <Metric label="Net" value={financialPeriod.net.toFixed(2)} />
                 <Metric label="Bank transactions" value={financialStatus.bankTransactionCount} />
+                <Metric label="Resolved" value={financialStatus.resolvedCount} />
                 <Metric label="Missing evidence" value={financialStatus.missingEvidenceCount} tone={financialStatus.missingEvidenceCount > 0 ? "warn" : undefined} />
                 <Metric label="Unclassified" value={financialStatus.unclassifiedCount} tone={financialStatus.unclassifiedCount > 0 ? "warn" : undefined} />
                 <Metric label="Uncategorized" value={financialStatus.uncategorizedCount} />

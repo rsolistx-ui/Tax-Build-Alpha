@@ -32,6 +32,16 @@ async function insertAudit(db: Db, clientId: string, actorUserId: string, action
 }
 
 /**
+ * Resolved mirrors the canonical bank-workflow definition (see bank.ts's
+ * summary counts): matched OR no_receipt_required both represent a
+ * professionally closed-out transaction. Pure/exported so the definition
+ * can be unit-tested directly instead of only through the full route.
+ */
+export function countResolvedBankTxns(bankTxns: Array<{ triage: string | null }>): number {
+  return bankTxns.filter((t) => t.triage === "matched" || t.triage === "no_receipt_required").length;
+}
+
+/**
  * Canonical single-client readiness/completeness, shared by the client
  * overview and tax readiness so neither can invent a second, narrower
  * approximation (e.g. bank-only triage) of the same P&L completeness
@@ -157,7 +167,7 @@ workspaceRoutes.get("/:clientId/overview", async (c) => {
         expenses: pnlReport.expenses,
         net: pnlReport.net,
       };
-  const resolvedCount = selected.bankTxns.filter((t) => t.triage === "matched").length;
+  const resolvedCount = countResolvedBankTxns(selected.bankTxns);
 
   const { row, actions, bankTxns, receipts } = canonical;
   const lastActivityAt = await getLastMeaningfulActivity(db, client.id);

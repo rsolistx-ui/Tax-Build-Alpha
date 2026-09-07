@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Db, DbStatement } from "../db";
-import { applyDocumentReviewAction, checkReadinessTransitionAllowed, taxYearRange } from "./workspace";
+import { applyDocumentReviewAction, checkReadinessTransitionAllowed, taxYearRange, countResolvedBankTxns } from "./workspace";
 
 type Rows = Record<string, unknown[]>;
 
@@ -339,5 +339,20 @@ describe("computeCanonicalReadiness cross-tax-year isolation (real date-bound fi
     expect(result2026.ok).toBe(true);
     const result2025 = await checkReadinessTransitionAllowed(db, client, 2025, "ready_for_preparation");
     expect(result2025.ok).toBe(true);
+  });
+});
+
+
+describe("countResolvedBankTxns", () => {
+  it("counts matched transactions as resolved", () => {
+    expect(countResolvedBankTxns([{ triage: "matched" }, { triage: "unclassified" }])).toBe(1);
+  });
+
+  it("counts no_receipt_required transactions as resolved, same as matched", () => {
+    expect(countResolvedBankTxns([{ triage: "matched" }, { triage: "no_receipt_required" }, { triage: "unclassified" }])).toBe(2);
+  });
+
+  it("does not count unresolved triage states", () => {
+    expect(countResolvedBankTxns([{ triage: "unclassified" }, { triage: "review" }, { triage: null }])).toBe(0);
   });
 });
