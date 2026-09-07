@@ -27,14 +27,18 @@ WHERE cd.duplicate_of_document_id IS NOT NULL
   );
 
 -- Composite-key targets for the composite foreign keys below.
+-- A named UNIQUE constraint implicit index can independently already
+-- exist and raise 42P07 (duplicate_table) rather than 42710
+-- (duplicate_object) on replay - both must be treated as already applied
+-- for this migration to stay genuinely replay-safe.
 DO $$ BEGIN
   ALTER TABLE document_checklist_items ADD CONSTRAINT uq_checklist_id_client UNIQUE (id, client_id);
-EXCEPTION WHEN duplicate_object THEN NULL;
+EXCEPTION WHEN duplicate_object OR duplicate_table THEN NULL;
 END $$;
 
 DO $$ BEGIN
   ALTER TABLE client_documents ADD CONSTRAINT uq_documents_id_client UNIQUE (id, client_id);
-EXCEPTION WHEN duplicate_object THEN NULL;
+EXCEPTION WHEN duplicate_object OR duplicate_table THEN NULL;
 END $$;
 
 -- Replace the single-column FKs (scoped to id only) with composite ones

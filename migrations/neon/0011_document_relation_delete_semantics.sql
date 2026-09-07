@@ -1,5 +1,5 @@
 -- Milestone: Final professional workspace contract and period correction.
--- Migration 0010's composite FKs used a blanket ON DELETE SET NULL, but
+-- Migration 0010 composite FKs used a blanket ON DELETE SET NULL, but
 -- client_id participates in both composite keys and is NOT NULL - a
 -- blanket SET NULL tries to null client_id too when the referenced row
 -- disappears, which the NOT NULL constraint would reject. Recreate both
