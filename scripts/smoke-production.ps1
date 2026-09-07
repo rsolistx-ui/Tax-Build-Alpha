@@ -1077,47 +1077,47 @@ try {
   }
   if ([int]$exportPreview.openItemsCount -lt 1) { throw "Expected at least one open item in the export preview." }
 
-  Write-Host "Verifying Wave source/import-batch isolation: distinct CSV uploads remain distinct batches..."
-  $waveBatches = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/export/wave-batches")
-  $batchList = @($waveBatches.batches)
-  if ($batchList.Count -lt 2) { throw "Expected at least two distinct Wave import-batch groupings, found $($batchList.Count)." }
+  Write-Host "Verifying source/import-batch isolation: distinct CSV uploads remain distinct batches..."
+  $importBatches = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/export/import-batches")
+  $batchList = @($importBatches.batches)
+  if ($batchList.Count -lt 2) { throw "Expected at least two distinct import-batch groupings, found $($batchList.Count)." }
 
   $usdBatches = @($batchList | Where-Object { $_.currency -eq "USD" })
   if ($usdBatches.Count -lt 2) { throw "Expected at least two distinct USD import batches from the smoke run's separate CSV uploads." }
 
   $singleBatch = $usdBatches[0]
   $encodedBatchId = [Uri]::EscapeDataString([string]$singleBatch.importBatchId)
-  $waveCsvPath = Join-Path $env:TEMP "folio-smoke-wave-$([guid]::NewGuid().ToString('N')).csv"
+  $bankCsvPath = Join-Path $env:TEMP "folio-smoke-bank-$([guid]::NewGuid().ToString('N')).csv"
   $previousPreference = $ErrorActionPreference
   $ErrorActionPreference = "Continue"
   try {
-    $waveCsvStatus = (& curl.exe --silent --output $waveCsvPath --write-out "%{http_code}" -c $cookieJar -b $cookieJar "$BaseUrl/api/clients/$clientId/export/wave-statement?importBatchId=$encodedBatchId&currency=USD")
+    $bankCsvStatus = (& curl.exe --silent --output $bankCsvPath --write-out "%{http_code}" -c $cookieJar -b $cookieJar "$BaseUrl/api/clients/$clientId/export/bank-transactions-csv?importBatchId=$encodedBatchId&currency=USD")
   } finally {
     $ErrorActionPreference = $previousPreference
   }
-  if ($waveCsvStatus -ne "200") { throw "Single-batch Wave statement CSV download returned HTTP $waveCsvStatus." }
-  $waveCsvLines = @(Get-Content $waveCsvPath)
-  if ($waveCsvLines[0] -ne "Date,Description,Amount") {
-    throw "Wave statement CSV header must be exactly 'Date,Description,Amount', got '$($waveCsvLines[0])'."
+  if ($bankCsvStatus -ne "200") { throw "Single-batch bank transactions CSV download returned HTTP $bankCsvStatus." }
+  $bankCsvLines = @(Get-Content $bankCsvPath)
+  if ($bankCsvLines[0] -ne "Date,Description,Amount") {
+    throw "Bank transactions CSV header must be exactly 'Date,Description,Amount', got '$($bankCsvLines[0])'."
   }
   $expectedRowCount = [int]$singleBatch.transactionCount
-  $actualRowCount = $waveCsvLines.Count - 1
+  $actualRowCount = $bankCsvLines.Count - 1
   if ($actualRowCount -ne $expectedRowCount) {
-    throw "Wave statement CSV row count $actualRowCount does not reconcile to the selected batch's $expectedRowCount transactions."
+    throw "Bank transactions CSV row count $actualRowCount does not reconcile to the selected batch's $expectedRowCount transactions."
   }
-  Remove-TempFile $waveCsvPath
+  Remove-TempFile $bankCsvPath
 
-  Write-Host "Verifying the Wave statement CSV refuses to silently merge two distinct USD import batches..."
+  Write-Host "Verifying the bank transactions CSV refuses to silently merge two distinct USD import batches..."
   $mixedBatchStatus = ""
   $previousPreference = $ErrorActionPreference
   $ErrorActionPreference = "Continue"
   try {
-    $mixedBatchStatus = (& curl.exe --silent --output NUL --write-out "%{http_code}" -c $cookieJar -b $cookieJar "$BaseUrl/api/clients/$clientId/export/wave-statement?currency=USD")
+    $mixedBatchStatus = (& curl.exe --silent --output NUL --write-out "%{http_code}" -c $cookieJar -b $cookieJar "$BaseUrl/api/clients/$clientId/export/bank-transactions-csv?currency=USD")
   } finally {
     $ErrorActionPreference = $previousPreference
   }
   if ($mixedBatchStatus -ne "400") {
-    throw "Requesting a Wave statement across multiple USD import batches without selecting one must return HTTP 400, got $mixedBatchStatus."
+    throw "Requesting a bank transactions CSV across multiple USD import batches without selecting one must return HTTP 400, got $mixedBatchStatus."
   }
 
   Write-Host "Creating a fully resolved dashboard client (Client A) with no open work..."

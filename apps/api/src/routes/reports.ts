@@ -14,12 +14,12 @@ import {
   getReceiptEvidence,
   getOpenItems,
   getExcludedNonbusiness,
-  getWaveHandoffRows,
+  getTransactionReviewRows,
   listImportBatches,
 } from "../services/reporting";
 import { buildWorkbook } from "../services/excel";
-import { buildWaveStatementCsv, validateSingleSourceSelection } from "../services/wave";
-import { buildWorkbookFilename, buildWaveCsvFilename } from "../services/filenames";
+import { buildBankTransactionsCsv, validateSingleSourceSelection } from "../services/bank-export";
+import { buildWorkbookFilename, buildBankCsvFilename } from "../services/filenames";
 
 export const reportRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 reportRoutes.use("*", requireSession);
@@ -107,13 +107,13 @@ reportRoutes.get("/:clientId/export/workbook", async (c) => {
     return c.json({ error: report.warning, code: "ACCRUAL_NOT_SUPPORTED" }, 400);
   }
 
-  const [profile, ledger, receiptEvidence, openItems, excludedNonbusiness, waveHandoff] = await Promise.all([
+  const [profile, ledger, receiptEvidence, openItems, excludedNonbusiness, transactionReview] = await Promise.all([
     db.query<{ tax_year: number | null }>(`SELECT tax_year FROM client_profiles WHERE client_id = $1`, [clientId]),
     getBankLedger(db, clientId, startDate, endDate),
     getReceiptEvidence(db, clientId, startDate, endDate),
     getOpenItems(db, clientId, startDate, endDate),
     getExcludedNonbusiness(db, clientId, startDate, endDate),
-    getWaveHandoffRows(db, clientId, startDate, endDate),
+    getTransactionReviewRows(db, clientId, startDate, endDate),
   ]);
 
   const isDraft = !report.completeness.isComplete;
@@ -131,7 +131,7 @@ reportRoutes.get("/:clientId/export/workbook", async (c) => {
     receiptEvidence,
     openItems,
     excludedNonbusiness,
-    waveHandoff,
+    transactionReview,
   });
 
   const filename = buildWorkbookFilename({ clientName: client.name, startDate, endDate, isDraft });
@@ -144,7 +144,7 @@ reportRoutes.get("/:clientId/export/workbook", async (c) => {
 });
 
 /** Distinct source/import-batch + currency groupings, so the UI can force a single selection. */
-reportRoutes.get("/:clientId/export/wave-batches", async (c) => {
+reportRoutes.get("/:clientId/export/import-batches", async (c) => {
   const db = createDb(c.env);
   const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
   const clientId = c.req.param("clientId");
@@ -161,11 +161,12 @@ reportRoutes.get("/:clientId/export/wave-batches", async (c) => {
 });
 
 /**
- * A deliberately narrow Wave basic statement CSV: Date, Description, Amount
- * only. Never claims to transfer Folio's categorization; the professional
- * reference for that lives in the workbook's Wave Handoff worksheet.
+ * A deliberately narrow generic bank-transaction statement CSV: Date,
+ * Description, Amount only. Never claims to transfer Folio's categorization;
+ * the professional reference for that lives in the workbook's Transaction
+ * Review worksheet.
  */
-reportRoutes.get("/:clientId/export/wave-statement", async (c) => {
+reportRoutes.get("/:clientId/export/bank-transactions-csv", async (c) => {
   const db = createDb(c.env);
   const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
   const clientId = c.req.param("clientId");
@@ -183,10 +184,10 @@ reportRoutes.get("/:clientId/export/wave-statement", async (c) => {
   const importBatchId = importBatchIdParam === "__none__" ? null : (importBatchIdParam ?? undefined);
   const currencyParam = c.req.query("currency");
   if (!currencyParam) {
-    return c.json({ error: "currency is required to build a single-currency Wave statement" }, 400);
+    return c.json({ error: "currency is required to build a single-currency bank transactions statement" }, 400);
   }
 
-  const allRows = await getWaveHandoffRows(db, clientId, startDate, endDate);
+  const allRows = await getTransactionReviewRows(db, clientId, startDate, endDate);
   const selected = allRows.filter((row) => {
     const batchMatches = importBatchId === undefined ? true : row.importBatchId === importBatchId;
     return batchMatches && row.currency.toUpperCase() === currencyParam.toUpperCase();
@@ -208,8 +209,8 @@ reportRoutes.get("/:clientId/export/wave-statement", async (c) => {
     );
   }
 
-  const csv = buildWaveStatementCsv(selected);
-  const filename = buildWaveCsvFilename({ clientName: client.name, startDate, endDate, currency: currencyParam });
+  const csv = buildBankTransactionsCsv(selected);
+  const filename = buildBankCsvFilename({ clientName: client.name, startDate, endDate, currency: currencyParam });
   return new Response(csv, {
     headers: {
       "content-type": "text/csv; charset=utf-8",

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sanitizeFilenameSegment, buildWorkbookFilename, buildWaveCsvFilename } from "./filenames";
+import { sanitizeFilenameSegment, buildWorkbookFilename, buildBankCsvFilename } from "./filenames";
 
 describe("sanitizeFilenameSegment", () => {
   it.each(['a\b', "a/b", "a:b", "a*b", 'a?b', 'a"b', "a<b", "a>b", "a|b"])(
@@ -52,14 +52,14 @@ describe("buildWorkbookFilename", () => {
   });
 });
 
-describe("buildWaveCsvFilename", () => {
+describe("buildBankCsvFilename", () => {
   it("includes the currency and sanitized client name", () => {
-    const filename = buildWaveCsvFilename({
+    const filename = buildBankCsvFilename({
       clientName: "Phyllis Client",
       startDate: "2026-01-01",
       endDate: "2026-01-31",
       currency: "USD",
     });
-    expect(filename).toBe("Phyllis Client - Wave Statement - 2026-01-01 to 2026-01-31 - USD.csv");
+    expect(filename).toBe("Phyllis Client - Bank Transactions - 2026-01-01 to 2026-01-31 - USD.csv");
   });
 });

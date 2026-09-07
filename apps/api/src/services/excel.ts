@@ -10,7 +10,7 @@
 import ExcelJS from "exceljs";
 import { sanitizeSpreadsheetCell } from "./excel-safety";
 import type { PnlReport } from "./reporting";
-import type { BankLedgerRow, ReceiptEvidenceRow, OpenItemRow, ExcludedNonbusinessRow, WaveHandoffRow } from "./reporting";
+import type { BankLedgerRow, ReceiptEvidenceRow, OpenItemRow, ExcludedNonbusinessRow, TransactionReviewRow } from "./reporting";
 
 export type WorkbookInput = {
   clientName: string;
@@ -26,7 +26,7 @@ export type WorkbookInput = {
   receiptEvidence: ReceiptEvidenceRow[];
   openItems: OpenItemRow[];
   excludedNonbusiness: ExcludedNonbusinessRow[];
-  waveHandoff: WaveHandoffRow[];
+  transactionReview: TransactionReviewRow[];
 };
 
 function safeRow(values: Array<string | number | boolean | null>): Array<string | number | boolean | null> {
@@ -138,13 +138,13 @@ export async function buildWorkbook(input: WorkbookInput): Promise<Uint8Array> {
     excluded.addRow(safeRow([row.date, row.description, row.amount, row.currency, row.disposition, row.professionalNote]));
   }
 
-  const waveHandoff = workbook.addWorksheet("WAVE HANDOFF");
-  addHeaderRow(waveHandoff, [
+  const transactionReview = workbook.addWorksheet("TRANSACTION REVIEW");
+  addHeaderRow(transactionReview, [
     "Date", "Description", "Amount", "Folio Disposition", "Folio Category", "Business/Nonbusiness Status",
     "Matched Receipt", "Receipt Filename", "Professional Note", "Source Transaction Id",
   ]);
-  for (const row of input.waveHandoff) {
-    waveHandoff.addRow(
+  for (const row of input.transactionReview) {
+    transactionReview.addRow(
       safeRow([
         row.date, row.description, row.amount, row.disposition, row.category, row.businessStatus,
         row.matchedReceiptId, row.receiptFilename, row.professionalNote, row.sourceTransactionId,

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { buildWaveStatementCsv, validateSingleSourceSelection } from "./wave";
-import type { WaveHandoffRow } from "./reporting";
+import { buildBankTransactionsCsv, validateSingleSourceSelection } from "./bank-export";
+import type { TransactionReviewRow } from "./reporting";
 
-function row(overrides: Partial<WaveHandoffRow> = {}): WaveHandoffRow {
+function row(overrides: Partial<TransactionReviewRow> = {}): TransactionReviewRow {
   return {
     date: "2026-03-01",
     description: "Office Depot",
@@ -41,15 +41,15 @@ describe("validateSingleSourceSelection", () => {
   });
 });
 
-describe("buildWaveStatementCsv", () => {
+describe("buildBankTransactionsCsv", () => {
   it("contains only Date, Description, Amount columns", () => {
-    const csv = buildWaveStatementCsv([row()]);
+    const csv = buildBankTransactionsCsv([row()]);
     const [header] = csv.trim().split("\r\n");
     expect(header).toBe("Date,Description,Amount");
   });
 
   it("never includes a Folio category, disposition, or evidence column", () => {
-    const csv = buildWaveStatementCsv([row()]);
+    const csv = buildBankTransactionsCsv([row()]);
     expect(csv).not.toContain("Supplies");
     expect(csv).not.toContain("business_expense");
     expect(csv).not.toContain("Reviewed");
@@ -58,13 +58,13 @@ describe("buildWaveStatementCsv", () => {
 
   it("reconciles values to the selected source transactions", () => {
     const rows = [row({ date: "2026-03-01", description: "Office Depot", amount: -42.5 })];
-    const csv = buildWaveStatementCsv(rows);
+    const csv = buildBankTransactionsCsv(rows);
     expect(csv).toContain("2026-03-01,Office Depot,-42.5");
   });
 
   it("writes a formula-injection risk description as inert text", () => {
     const rows = [row({ description: "=cmd|'/c calc'!A1" })];
-    const csv = buildWaveStatementCsv(rows);
+    const csv = buildBankTransactionsCsv(rows);
     expect(csv).toContain("'=cmd");
   });
 });

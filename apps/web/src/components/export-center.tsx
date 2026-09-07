@@ -31,7 +31,7 @@ type ExportPreview = {
   };
 };
 
-type WaveBatch = {
+type ImportBatch = {
   importBatchId: string | null;
   currency: string;
   transactionCount: number;
@@ -53,7 +53,7 @@ export function ExportCenter({ clientId, taxYear }: { clientId: string; taxYear:
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
   const [preview, setPreview] = useState<ExportPreview | null>(null);
-  const [batches, setBatches] = useState<WaveBatch[]>([]);
+  const [batches, setBatches] = useState<ImportBatch[]>([]);
   const [selectedBatchKey, setSelectedBatchKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -76,7 +76,7 @@ export function ExportCenter({ clientId, taxYear }: { clientId: string; taxYear:
     setLoading(true);
     Promise.all([
       api<ExportPreview>(`/api/clients/${clientId}/export/preview?${params.toString()}`),
-      api<{ batches: WaveBatch[] }>(`/api/clients/${clientId}/export/wave-batches?${params.toString()}`),
+      api<{ batches: ImportBatch[] }>(`/api/clients/${clientId}/export/import-batches?${params.toString()}`),
     ])
       .then(([previewData, batchData]) => {
         setPreview(previewData);
@@ -90,9 +90,9 @@ export function ExportCenter({ clientId, taxYear }: { clientId: string; taxYear:
   const selectedBatch = batches.find((b) => `${b.importBatchId ?? "__none__"}::${b.currency}` === selectedBatchKey) ?? null;
 
   const workbookUrl = apiUrl(`/api/clients/${clientId}/export/workbook?${params.toString()}`);
-  const waveCsvUrl = selectedBatch
+  const bankCsvUrl = selectedBatch
     ? apiUrl(
-        `/api/clients/${clientId}/export/wave-statement?${params.toString()}&importBatchId=${encodeURIComponent(
+        `/api/clients/${clientId}/export/bank-transactions-csv?${params.toString()}&importBatchId=${encodeURIComponent(
           selectedBatch.importBatchId ?? "__none__",
         )}&currency=${encodeURIComponent(selectedBatch.currency)}`,
       )
@@ -194,9 +194,9 @@ export function ExportCenter({ clientId, taxYear }: { clientId: string; taxYear:
             <CardHeader>
               <CardTitle className="text-base">Downloads</CardTitle>
               <CardDescription>
-                The workbook always contains full evidence and reconciliation detail. The Wave statement CSV
+                The workbook always contains full evidence and reconciliation detail. The transactions CSV
                 transfers only transaction dates, descriptions, and amounts — Folio categories and review
-                decisions are provided separately in the workbook&apos;s Wave Handoff worksheet.
+                decisions are provided separately in the workbook&apos;s Transaction Review worksheet.
               </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
@@ -207,11 +207,12 @@ export function ExportCenter({ clientId, taxYear }: { clientId: string; taxYear:
               </a>
 
               <div className="space-y-2 rounded-md border border-[var(--color-border)] p-3">
-                <p className="text-sm font-medium">Wave statement CSV</p>
+                <p className="text-sm font-medium">Bank transactions CSV</p>
                 <p className="text-xs text-[var(--color-muted-foreground)]">
-                  This file transfers transaction statement data. Folio categories and review decisions are
-                  provided separately in the Wave Handoff worksheet. Select a single source/import batch and
-                  currency — Folio never merges unrelated bank accounts or currencies into one Wave statement.
+                  This file transfers transaction statement data only. Folio categories and review decisions are
+                  provided separately in the workbook&apos;s Transaction Review worksheet. Select a single
+                  source/import batch and currency — Folio never merges unrelated bank accounts or currencies
+                  into one statement file.
                 </p>
                 {batches.length === 0 ? (
                   <p className="text-xs text-[var(--color-muted-foreground)]">No bank transactions in this period.</p>
@@ -232,10 +233,10 @@ export function ExportCenter({ clientId, taxYear }: { clientId: string; taxYear:
                     })}
                   </select>
                 )}
-                {waveCsvUrl ? (
-                  <a href={waveCsvUrl} target="_blank" rel="noreferrer">
+                {bankCsvUrl ? (
+                  <a href={bankCsvUrl} target="_blank" rel="noreferrer">
                     <Button variant="secondary" className="gap-2">
-                      <Download className="h-4 w-4" /> Download Wave Statement CSV
+                      <Download className="h-4 w-4" /> Download Bank Transactions CSV
                     </Button>
                   </a>
                 ) : null}

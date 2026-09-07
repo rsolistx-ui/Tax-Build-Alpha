@@ -713,7 +713,7 @@ export async function getExcludedNonbusiness(
     }));
 }
 
-export type WaveHandoffRow = {
+export type TransactionReviewRow = {
   date: string | null;
   description: string | null;
   amount: number;
@@ -728,23 +728,23 @@ export type WaveHandoffRow = {
   importBatchId: string | null;
 };
 
-function businessStatusFor(disposition: AnyDisposition): WaveHandoffRow["businessStatus"] {
+function businessStatusFor(disposition: AnyDisposition): TransactionReviewRow["businessStatus"] {
   if (disposition === "business_expense" || disposition === "business_income") return "business";
   if (disposition === "unclassified") return "unclassified";
   return "nonbusiness";
 }
 
 /**
- * The professional reference worksheet Phyllis uses while completing or
- * verifying the Wave side. This is not Wave's own import schema - it is
- * Folio's decisions laid out for a human to cross-check by hand.
+ * The professional reference worksheet: Folio's categorization and review
+ * decisions laid out per transaction, so the professional can cross-check
+ * or complete work in any other system by hand.
  */
-export async function getWaveHandoffRows(
+export async function getTransactionReviewRows(
   db: Db,
   clientId: string,
   startDate: string | null,
   endDate: string | null,
-): Promise<WaveHandoffRow[]> {
+): Promise<TransactionReviewRow[]> {
   const ledger = await getBankLedger(db, clientId, startDate, endDate);
   const receiptRows = await db.query<{ id: string; filename: string }>(
     `SELECT id, filename FROM receipts WHERE client_id = $1`,
@@ -779,7 +779,7 @@ export type ImportBatchSummary = {
 /**
  * Distinct import-batch/currency groupings present in the period, so the UI
  * can force the professional to pick exactly one source/account grouping
- * for the Wave statement CSV rather than silently merging accounts.
+ * for the Bank Transactions CSV rather than silently merging accounts.
  */
 export async function listImportBatches(
   db: Db,

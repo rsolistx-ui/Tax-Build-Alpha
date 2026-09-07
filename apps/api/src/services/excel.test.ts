@@ -41,7 +41,7 @@ function baseInput(overrides: Partial<WorkbookInput> = {}): WorkbookInput {
     receiptEvidence: [],
     openItems: [],
     excludedNonbusiness: [],
-    waveHandoff: [],
+    transactionReview: [],
     ...overrides,
   };
 }

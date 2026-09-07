@@ -1,18 +1,19 @@
 /**
- * The Wave basic statement CSV importer only ever accepts Date/Description/
- * Amount. Adding Folio's own columns risks Wave rejecting or misreading the
- * file, so this deliberately stays narrow. Folio's categorization and
- * review decisions belong only in the separate Wave Handoff worksheet.
+ * A deliberately narrow generic bank-transaction statement CSV: Date,
+ * Description, Amount only. This is a portability escape hatch, not the
+ * primary Folio workflow, so it stays free of any third-party import
+ * format's naming or column assumptions. Folio's categorization and
+ * review decisions belong in the workbook's Transaction Review worksheet.
  */
 import { sanitizeSpreadsheetCell } from "./excel-safety";
-import type { WaveHandoffRow } from "./reporting";
+import type { TransactionReviewRow } from "./reporting";
 
-export type WaveStatementSelection = {
+export type BankStatementSelection = {
   importBatchId: string | null;
   currency: string;
 };
 
-export type WaveStatementValidation =
+export type BankStatementValidation =
   | { ok: true }
   | { ok: false; reason: "MIXED_BATCHES" | "MIXED_CURRENCIES" | "NO_TRANSACTIONS" };
 
@@ -21,7 +22,7 @@ export type WaveStatementValidation =
  * exactly one source/import-batch and one currency, so unrelated bank
  * accounts or mixed currencies are never silently merged into one file.
  */
-export function validateSingleSourceSelection(rows: WaveHandoffRow[]): WaveStatementValidation {
+export function validateSingleSourceSelection(rows: TransactionReviewRow[]): BankStatementValidation {
   if (rows.length === 0) return { ok: false, reason: "NO_TRANSACTIONS" };
   const batchIds = new Set(rows.map((r) => r.importBatchId ?? "__none__"));
   if (batchIds.size > 1) return { ok: false, reason: "MIXED_BATCHES" };
@@ -43,7 +44,7 @@ function csvEscape(value: string): string {
  * disposition, or evidence columns. Rows must already be validated as a
  * single source/import-batch and single currency by the caller.
  */
-export function buildWaveStatementCsv(rows: WaveHandoffRow[]): string {
+export function buildBankTransactionsCsv(rows: TransactionReviewRow[]): string {
   const lines = ["Date,Description,Amount"];
   for (const row of rows) {
     const date = row.date ?? "";

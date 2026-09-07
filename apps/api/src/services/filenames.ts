@@ -39,7 +39,7 @@ export function buildWorkbookFilename(input: {
   return `${sanitizeFilenameSegment(input.clientName)} - Folio - ${sanitizeFilenameSegment(period)}${draftSuffix}.xlsx`;
 }
 
-export function buildWaveCsvFilename(input: {
+export function buildBankCsvFilename(input: {
   clientName: string;
   startDate: string | null;
   endDate: string | null;
@@ -53,5 +53,5 @@ export function buildWaveCsvFilename(input: {
         : input.endDate
           ? `through ${input.endDate}`
           : "All Dates";
-  return `${sanitizeFilenameSegment(input.clientName)} - Wave Statement - ${sanitizeFilenameSegment(period)} - ${sanitizeFilenameSegment(input.currency)}.csv`;
+  return `${sanitizeFilenameSegment(input.clientName)} - Bank Transactions - ${sanitizeFilenameSegment(period)} - ${sanitizeFilenameSegment(input.currency)}.csv`;
 }

@@ -276,7 +276,7 @@ Workers AI currently includes a 10,000 Neuron daily free allocation on the Worke
 
 The bootstrap does not upgrade the Cloudflare account or enable paid inference.
 
-## Professional export and Wave handoff
+## Professional reporting and export
 
 Each client workspace has an Export tab (the Export Center). It uses the
 same reporting-period semantics as the P&L tab (this month, last month,
@@ -289,7 +289,7 @@ working draft.
 
 **Folio Professional Excel workbook** (Download Excel Workbook) is a real
 .xlsx file (built with exceljs, which has no filesystem or native-binary
-dependency and runs cleanly under Cloudflare Workers) with six worksheets:
+dependency and runs cleanly under Cloudflare Workers) with seven worksheets:
 
 - **SUMMARY** - client, legal name, reporting dates, tax year, accounting
   basis, currency, generated timestamp, report status, income/expenses/net,
@@ -310,6 +310,11 @@ dependency and runs cleanly under Cloudflare Workers) with six worksheets:
 - **EXCLUDED - NONBUSINESS** - deliberate personal/transfer/owner/loan/
   other-excluded activity, proof it was reviewed rather than accidentally
   omitted.
+- **TRANSACTION REVIEW** - date, description, amount, Folio disposition,
+  Folio category, business/nonbusiness status, matched receipt, receipt
+  filename, professional note, and source transaction id for every
+  transaction in the period - a professional reference for cross-checking
+  or completing work in any other system by hand.
 
 If the P&L is incomplete for the selected period, the SUMMARY sheet marks
 the report DRAFT - ITEMS REQUIRE PROFESSIONAL REVIEW and the filename
@@ -322,28 +327,15 @@ Filenames are deterministic and human-readable (for example, "Client Name -
 Folio - 2026-01-01 to 2026-12-31.xlsx"), sanitized against Windows-invalid
 characters - never an opaque UUID.
 
-**Wave statement CSV** (Download Wave Statement CSV) is a deliberately
-narrow file containing only Date, Description, and Amount columns - Wave's
-basic statement importer only supports that shape (or a deposit/withdrawal
-arrangement) and the statement currency must match the Wave payment
-account, so adding Folio's own columns risks Wave rejecting or misreading
-the file. **This file does not transfer Folio's category, disposition, or
-evidence decisions.** The professional must select a single source/import
-batch and a single currency; Folio never silently merges unrelated bank
-accounts or currencies into one Wave statement.
-
-Folio's categorization and review decisions for the same period are
-available separately in the workbook's **WAVE HANDOFF** worksheet - date,
-description, amount, Folio disposition, Folio category, business/nonbusiness
-status, matched receipt, receipt filename, professional note, and source
-transaction id - as a professional reference while completing or verifying
-the Wave side by hand.
-
-Wave Connect (Wave's own Google Sheets-based bulk importer) generates its
-upload columns from the connected Wave business. Folio does not guess or
-hardcode that format; direct Wave Connect integration remains deferred
-until a real prepared Wave Connect input sheet from Phyllis's own Wave
-business is available.
+**Bank Transactions CSV** (Download Bank Transactions CSV) is a generic
+data-portability escape hatch containing only Date, Description, and Amount
+columns. **This file does not transfer Folio's category, disposition, or
+evidence decisions** - those live in the workbook's TRANSACTION REVIEW
+worksheet above. The professional must select a single source/import batch
+and a single currency; Folio never silently merges unrelated bank accounts
+or currencies into one statement file. This CSV and the workbook are output
+formats, not the operating workflow - routine financial review happens
+inside Folio itself.
 
 ## Deliberately deferred
 
@@ -357,7 +349,9 @@ To protect the paid-alpha timeline, this milestone does not add:
 - full MFA rollout
 - queue consumer and bulk async processing
 - item-level machine learning beyond correction rules
-- direct Wave Connect integration (Wave Connect generates its upload columns from the connected Wave business; Folio will not hardcode a guessed format until a real prepared input sheet from Phyllis's own Wave business is available)
+- direct integration with any specific third-party accounting product's
+  import format; Folio will not hardcode a guessed format until a real
+  prepared input sheet from Phyllis's own accounting software is available
 
 Those follow only after the real receipt, bank, and exception workflow is tested against Phyllis's actual operating process.
 

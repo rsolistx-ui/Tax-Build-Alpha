@@ -42,7 +42,7 @@ export function LoginPage() {
         <Card>
           <CardHeader>
             <CardTitle>Sign in</CardTitle>
-            <CardDescription>Email and password — no Wave chaos.</CardDescription>
+            <CardDescription>Email and password — one place to work.</CardDescription>
           </CardHeader>
           <CardContent>
             <form className="space-y-4" onSubmit={onSubmit}>
