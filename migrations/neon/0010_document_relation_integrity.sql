@@ -39,7 +39,7 @@ END $$;
 
 -- Replace the single-column FKs (scoped to id only) with composite ones
 -- scoped by client_id, so a checklist match or duplicate target can never
--- silently point at another client's row.
+-- silently point at a different client row.
 DO $$ BEGIN
   ALTER TABLE client_documents DROP CONSTRAINT client_documents_checklist_item_id_fkey;
 EXCEPTION WHEN undefined_object THEN NULL;
