@@ -13,6 +13,12 @@ $BaseUrl = $BaseUrl.TrimEnd("/")
 # token can create real synthetic firms/clients/documents/receipts with no
 # way to remove them afterward via the internal cleanup endpoint. Refuse to
 # start rather than warn about this only after the fact.
+#
+# Resolution order: an existing process env var wins; otherwise attempt to
+# load a Windows DPAPI (CurrentUser)-protected local credential so repeated
+# runs on this machine don't require re-rotating the secret every time.
+. (Join-Path $PSScriptRoot "get-smoke-cleanup-token.ps1")
+Import-SmokeCleanupToken | Out-Null
 if (-not $env:SMOKE_CLEANUP_TOKEN) {
   Write-Error "SMOKE_CLEANUP_TOKEN is not set. Refusing to start: this script cannot run without a way to clean up the synthetic production data it creates."
   exit 1
