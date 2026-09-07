@@ -1204,7 +1204,7 @@ try {
   if (-not $clientBAction) {
     throw "The global action queue did not surface Client B's open bank transaction."
   }
-  $expectedDeepLink = "/clients/$clientBId?tab=bank&focus=$clientBTxnId"
+  $expectedDeepLink = "/clients/${clientBId}?tab=bank&focus=${clientBTxnId}"
   if ($clientBAction.deepLink -ne $expectedDeepLink) {
     throw "Client B's action deep link '$($clientBAction.deepLink)' did not match the expected exact destination '$expectedDeepLink'."
   }
@@ -1214,7 +1214,9 @@ try {
   }
 
   Write-Host "Resolving Client B so the dashboard action disappears once the work is done..."
-  $clientBFixCategoryId = $clientACategoryId
+  $clientBCategories = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientBId/categories")
+  $clientBFixCategoryId = [string](@($clientBCategories.categories) | Select-Object -First 1).id
+  if (-not $clientBFixCategoryId) { throw "Dashboard Client B has no default categories to classify against." }
   $clientBNoReceiptBody = @{ action = "no_receipt_required"; reason = "Smoke test: resolving dashboard attention client" } | ConvertTo-Json -Compress
   $clientBNoReceiptPayloadPath = New-JsonPayloadFile $clientBNoReceiptBody
   $null = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-H", "Content-Type: application/json", "--data-binary", "@$clientBNoReceiptPayloadPath", "$BaseUrl/api/clients/$clientBId/bank-transactions/$clientBTxnId/decision")
