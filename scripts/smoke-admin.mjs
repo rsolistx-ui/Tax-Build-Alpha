@@ -108,6 +108,18 @@ if (command === "seed-invite") {
     `SELECT COUNT(*)::int AS n FROM bank_transactions WHERE client_id IN (SELECT id FROM clients WHERE firm_id = $1)`,
     [firmId],
   )).rows[0][0];
+  checks.client_documents = (await query(
+    `SELECT COUNT(*)::int AS n FROM client_documents WHERE client_id IN (SELECT id FROM clients WHERE firm_id = $1)`,
+    [firmId],
+  )).rows[0][0];
+  checks.document_checklist_items = (await query(
+    `SELECT COUNT(*)::int AS n FROM document_checklist_items WHERE client_id IN (SELECT id FROM clients WHERE firm_id = $1)`,
+    [firmId],
+  )).rows[0][0];
+  checks.tax_year_readiness = (await query(
+    `SELECT COUNT(*)::int AS n FROM tax_year_readiness WHERE client_id IN (SELECT id FROM clients WHERE firm_id = $1)`,
+    [firmId],
+  )).rows[0][0];
   checks.beta_invitations_for_run = (await query(
     `SELECT COUNT(*)::int AS n FROM beta_invitations WHERE redeemed_by_user_id = $1`,
     [ownerUserId],

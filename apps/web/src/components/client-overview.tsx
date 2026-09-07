@@ -85,8 +85,11 @@ function Metric({ label, value, tone }: { label: string; value: string | number;
   );
 }
 
+type TimelineEvent = { id: string; action: string; summary: string; actorUserId: string | null; createdAt: string };
+
 export function ClientOverview({ clientId, onNavigate }: { clientId: string; onNavigate: (deepLink: string) => void }) {
   const [overview, setOverview] = useState<Overview | null>(null);
+  const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -94,6 +97,9 @@ export function ClientOverview({ clientId, onNavigate }: { clientId: string; onN
     api<Overview>(`/api/clients/${clientId}/overview`)
       .then(setOverview)
       .catch((e) => setError(e instanceof Error ? e.message : "Failed to load client overview"));
+    api<{ events: TimelineEvent[] }>(`/api/clients/${clientId}/timeline`)
+      .then((data) => setTimeline(data.events))
+      .catch(() => setTimeline([]));
   }, [clientId]);
 
   if (error) return <p className="text-sm text-[var(--color-destructive)]">{error}</p>;
@@ -148,6 +154,24 @@ export function ClientOverview({ clientId, onNavigate }: { clientId: string; onN
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardContent className="space-y-2 p-4">
+          <h3 className="text-sm font-semibold">Recent activity</h3>
+          {timeline.length === 0 ? (
+            <p className="text-sm text-[var(--color-muted-foreground)]">No activity recorded yet.</p>
+          ) : (
+            <div className="divide-y divide-[var(--color-border)]">
+              {timeline.slice(0, 10).map((event) => (
+                <div key={event.id} className="flex items-center justify-between gap-2 py-1.5 text-sm">
+                  <span>{event.summary}</span>
+                  <span className="text-xs text-[var(--color-muted-foreground)]">{new Date(event.createdAt).toLocaleString()}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardContent className="space-y-2 p-4">

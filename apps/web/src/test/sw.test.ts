@@ -65,6 +65,20 @@ describe("Folio PWA service worker", () => {
     expect(event.responded).toBeNull();
   });
 
+  it("never intercepts a general client document source request", () => {
+    const fetchHandler = sw.listeners.fetch[0];
+    const event = makeFetchEvent("https://folio-api.rsolistx.workers.dev/api/clients/cli_1/documents/doc_1/source");
+    fetchHandler(event);
+    expect(event.responded).toBeNull();
+  });
+
+  it("never intercepts the cross-client document review queue", () => {
+    const fetchHandler = sw.listeners.fetch[0];
+    const event = makeFetchEvent("https://folio-api.rsolistx.workers.dev/api/documents/review");
+    fetchHandler(event);
+    expect(event.responded).toBeNull();
+  });
+
   it("never intercepts a bank transactions request", () => {
     const fetchHandler = sw.listeners.fetch[0];
     const event = makeFetchEvent("https://folio-api.rsolistx.workers.dev/api/clients/cli_1/bank-transactions");

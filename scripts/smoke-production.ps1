@@ -1236,6 +1236,171 @@ try {
     throw "Client B should be Ready after its only open item was resolved, got '$($dashClientBAfterFix.readiness)'."
   }
 
+  Write-Host "Setting up Client A tax readiness: profile, checklist generation, document confirmation..."
+  $clientAProfileBody = @{ entity_type = "llc"; tax_year = 2026; profile = @{ taxPrepRequired = $true; priorYearReturnAvailable = $true } } | ConvertTo-Json -Compress
+  $clientAProfilePayloadPath = New-JsonPayloadFile $clientAProfileBody
+  $null = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-H", "Content-Type: application/json", "-X", "PATCH", "--data-binary", "@$clientAProfilePayloadPath", "$BaseUrl/api/clients/$clientAId/profile")
+  Remove-TempFile $clientAProfilePayloadPath
+
+  $clientAChecklistGen = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-X", "POST", "$BaseUrl/api/clients/$clientAId/tax-readiness/2026/checklist/generate")
+  if ([int]$clientAChecklistGen.added -lt 1) { throw "Client A checklist generation added no items." }
+
+  $clientAReadiness = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientAId/tax-readiness/2026")
+  if ($clientAReadiness.suggestedStatus -ne "collecting_documents") {
+    throw "Client A with resolved bookkeeping and an unfulfilled checklist should suggest collecting_documents, got '$($clientAReadiness.suggestedStatus)'."
+  }
+  $clientAChecklistItem = @($clientAReadiness.checklist) | Where-Object { $_.doc_type -eq "prior_year_return" } | Select-Object -First 1
+  if (-not $clientAChecklistItem) { throw "Client A checklist did not include a prior-year-return item." }
+
+  Write-Host "Uploading and confirming a document that matches Client A's checklist item..."
+  $clientADocPath = Join-Path $env:TEMP "folio-smoke-doc-a-$([guid]::NewGuid().ToString('N')).pdf"
+  [System.IO.File]::WriteAllText($clientADocPath, "Folio smoke test prior-year return fixture", $utf8)
+  $clientADocUpload = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-F", "file=@$clientADocPath;type=application/pdf", "-F", "taxYear=2026", "$BaseUrl/api/clients/$clientAId/documents")
+  Remove-TempFile $clientADocPath
+  $clientADocId = [string]$clientADocUpload.id
+  if (-not $clientADocId) { throw "Client A document upload did not return an id." }
+
+  $clientAMatchBody = @{ action = "match_checklist"; checklistItemId = $clientAChecklistItem.id } | ConvertTo-Json -Compress
+  $clientAMatchPayloadPath = New-JsonPayloadFile $clientAMatchBody
+  $null = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-H", "Content-Type: application/json", "-X", "PATCH", "--data-binary", "@$clientAMatchPayloadPath", "$BaseUrl/api/clients/$clientAId/documents/$clientADocId")
+  Remove-TempFile $clientAMatchPayloadPath
+
+  $clientAReadinessAfter = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientAId/tax-readiness/2026")
+  $clientAChecklistItemAfter = @($clientAReadinessAfter.checklist) | Where-Object { $_.id -eq $clientAChecklistItem.id } | Select-Object -First 1
+  if ($clientAChecklistItemAfter.status -ne "received") {
+    throw "Matching a document to Client A's checklist item should mark it received, got '$($clientAChecklistItemAfter.status)'."
+  }
+
+  Write-Host "Advancing Client A tax readiness to professional_review explicitly (professional-controlled, never automatic)..."
+  $clientAReadySetBody = @{ status = "professional_review" } | ConvertTo-Json -Compress
+  $clientAReadySetPayloadPath = New-JsonPayloadFile $clientAReadySetBody
+  $null = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-H", "Content-Type: application/json", "-X", "PUT", "--data-binary", "@$clientAReadySetPayloadPath", "$BaseUrl/api/clients/$clientAId/tax-readiness/2026")
+  Remove-TempFile $clientAReadySetPayloadPath
+  $clientAReadinessFinal = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientAId/tax-readiness/2026")
+  if ($clientAReadinessFinal.status -ne "professional_review") {
+    throw "Client A tax readiness status did not persist the professional's explicit choice."
+  }
+
+  Write-Host "Setting up Client B missing-document and document-review scenario..."
+  $clientBProfileBody = @{ entity_type = "llc"; tax_year = 2026; profile = @{ taxPrepRequired = $true } } | ConvertTo-Json -Compress
+  $clientBProfilePayloadPath = New-JsonPayloadFile $clientBProfileBody
+  $null = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-H", "Content-Type: application/json", "-X", "PATCH", "--data-binary", "@$clientBProfilePayloadPath", "$BaseUrl/api/clients/$clientBId/profile")
+  Remove-TempFile $clientBProfilePayloadPath
+
+  $clientBChecklistGen = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-X", "POST", "$BaseUrl/api/clients/$clientBId/tax-readiness/2026/checklist/generate")
+  if ([int]$clientBChecklistGen.added -lt 1) { throw "Client B checklist generation added no items." }
+
+  $clientBDocPath = Join-Path $env:TEMP "folio-smoke-doc-b-$([guid]::NewGuid().ToString('N')).pdf"
+  [System.IO.File]::WriteAllText($clientBDocPath, "Folio smoke test unreviewed document fixture", $utf8)
+  $clientBDocUpload = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-F", "file=@$clientBDocPath;type=application/pdf", "$BaseUrl/api/clients/$clientBId/documents")
+  Remove-TempFile $clientBDocPath
+  $clientBDocId = [string]$clientBDocUpload.id
+  if (-not $clientBDocId) { throw "Client B document upload did not return an id." }
+
+  Write-Host "Verifying missing-document and document-review actions surface identically in the global dashboard and the client overview..."
+  $dashboardWithDocs = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/dashboard")
+  $missingDocAction = @($dashboardWithDocs.actions) | Where-Object { $_.clientId -eq $clientBId -and $_.type -eq "missing_document" } | Select-Object -First 1
+  if (-not $missingDocAction) { throw "The global dashboard did not surface Client B's missing-document action." }
+  $reviewDocAction = @($dashboardWithDocs.actions) | Where-Object { $_.clientId -eq $clientBId -and $_.type -eq "document_review" -and $_.sourceEntityId -eq $clientBDocId } | Select-Object -First 1
+  if (-not $reviewDocAction) { throw "The global dashboard did not surface Client B's document-review action." }
+
+  $clientBOverview = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientBId/overview")
+  $overviewHasMissingDoc = @($clientBOverview.nextActions) | Where-Object { $_.type -eq "missing_document" }
+  $overviewHasReviewDoc = @($clientBOverview.nextActions) | Where-Object { $_.type -eq "document_review" -and $_.sourceEntityId -eq $clientBDocId }
+  if (@($overviewHasMissingDoc).Count -eq 0 -or @($overviewHasReviewDoc).Count -eq 0) {
+    throw "Client B's own overview must show the same missing-document and document-review actions as the global dashboard."
+  }
+
+  Write-Host "Confirming the document through the review inbox clears its document_review action everywhere..."
+  $clientBConfirmBody = @{ action = "confirm" } | ConvertTo-Json -Compress
+  $clientBConfirmPayloadPath = New-JsonPayloadFile $clientBConfirmBody
+  $null = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-H", "Content-Type: application/json", "-X", "PATCH", "--data-binary", "@$clientBConfirmPayloadPath", "$BaseUrl/api/documents/review/$clientBDocId")
+  Remove-TempFile $clientBConfirmPayloadPath
+  $dashboardAfterConfirm = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/dashboard")
+  $residualReviewAction = @($dashboardAfterConfirm.actions) | Where-Object { $_.sourceEntityId -eq $clientBDocId -and $_.type -eq "document_review" }
+  if (@($residualReviewAction).Count -gt 0) { throw "Confirming Client B's document should clear its document_review action, but it is still present." }
+
+  Write-Host "Seeding a second synthetic firm to prove live cross-tenant isolation..."
+  $emailC = "folio-smoke-tenant2-$runId@example.com"
+  $passwordC = "Smoke!$([guid]::NewGuid().ToString('N').Substring(0, 18))"
+  $cookieJarC = Join-Path $env:TEMP "folio-smoke-cookies-c-$([guid]::NewGuid().ToString('N')).txt"
+  $seedResultCRaw = & node (Join-Path $PSScriptRoot "smoke-admin.mjs") seed-invite $emailC 30
+  if ($LASTEXITCODE -ne 0) { throw "Failed to seed the second-tenant smoke invitation: $seedResultCRaw" }
+  $seedResultC = ($seedResultCRaw | Select-Object -Last 1) | ConvertFrom-Json
+  $inviteTokenC = $seedResultC.token
+  if (-not $inviteTokenC) { throw "Second-tenant invitation seeding did not return a token." }
+
+  $redeemBodyC = @{ token = $inviteTokenC; email = $emailC; password = $passwordC; name = "Folio Smoke Test" } | ConvertTo-Json -Compress
+  $redeemPayloadPathC = New-JsonPayloadFile $redeemBodyC
+  $null = Invoke-CurlJson @("-c", $cookieJarC, "-b", $cookieJarC, "-H", "Content-Type: application/json", "-H", "Origin: $BaseUrl", "--data-binary", "@$redeemPayloadPathC", "$BaseUrl/api/beta/redeem")
+  Remove-TempFile $redeemPayloadPathC
+
+  $meC = Invoke-CurlJson @("-c", $cookieJarC, "-b", $cookieJarC, "$BaseUrl/api/me")
+  $firmCId = [string]$meC.firm.id
+  $ownerUserCId = [string]$meC.user.id
+  if (-not $firmCId) { throw "Second-tenant session did not establish a firm." }
+
+  $clientCBody = @{ name = "Smoke Second Tenant Client $stamp" } | ConvertTo-Json -Compress
+  $clientCPayloadPath = New-JsonPayloadFile $clientCBody
+  $clientCResponse = Invoke-CurlJson @("-c", $cookieJarC, "-b", $cookieJarC, "-H", "Content-Type: application/json", "--data-binary", "@$clientCPayloadPath", "$BaseUrl/api/clients")
+  Remove-TempFile $clientCPayloadPath
+  $clientCId = [string]$clientCResponse.client.id
+  if (-not $clientCId) { throw "Second-tenant client creation did not return an id." }
+
+  $clientCDocPath = Join-Path $env:TEMP "folio-smoke-doc-c-$([guid]::NewGuid().ToString('N')).pdf"
+  [System.IO.File]::WriteAllText($clientCDocPath, "Folio smoke test second-tenant document fixture", $utf8)
+  $clientCDocUpload = Invoke-CurlJson @("-c", $cookieJarC, "-b", $cookieJarC, "-F", "file=@$clientCDocPath;type=application/pdf", "$BaseUrl/api/clients/$clientCId/documents")
+  Remove-TempFile $clientCDocPath
+  $clientCDocId = [string]$clientCDocUpload.id
+
+  Write-Host "Verifying Firm A cannot access Firm C's client, overview, documents, or review queue..."
+  function Get-HttpStatus([string]$Url, [string]$Jar) {
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+      return (& curl.exe --silent --output NUL --write-out "%{http_code}" -c $Jar -b $Jar $Url)
+    } finally {
+      $ErrorActionPreference = $prev
+    }
+  }
+  $crossStatus1 = Get-HttpStatus "$BaseUrl/api/clients/$clientCId/overview" $cookieJar
+  if ($crossStatus1 -ne "404") { throw "Firm A must not be able to read Firm C's client overview, got HTTP $crossStatus1." }
+  $crossStatus2 = Get-HttpStatus "$BaseUrl/api/clients/$clientCId/documents" $cookieJar
+  if ($crossStatus2 -ne "404") { throw "Firm A must not be able to list Firm C's documents, got HTTP $crossStatus2." }
+  $crossStatus3 = Get-HttpStatus "$BaseUrl/api/clients/$clientCId/documents/$clientCDocId/source" $cookieJar
+  if ($crossStatus3 -ne "404") { throw "Firm A must not be able to fetch Firm C's document source, got HTTP $crossStatus3." }
+
+  Write-Host "Verifying Firm C cannot access Firm A's client or overview..."
+  $crossStatus4 = Get-HttpStatus "$BaseUrl/api/clients/$clientAId/overview" $cookieJarC
+  if ($crossStatus4 -ne "404") { throw "Firm C must not be able to read Firm A's client overview, got HTTP $crossStatus4." }
+
+  Write-Host "Verifying the document review queue is firm-scoped in both directions..."
+  $reviewAsA = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/documents/review")
+  if (@($reviewAsA.documents) | Where-Object { $_.id -eq $clientCDocId }) {
+    throw "Firm A's document review queue must not include Firm C's document."
+  }
+  $reviewAsC = Invoke-CurlJson @("-c", $cookieJarC, "-b", $cookieJarC, "$BaseUrl/api/documents/review")
+  if (-not (@($reviewAsC.documents) | Where-Object { $_.id -eq $clientCDocId })) {
+    throw "Firm C's own document review queue should include its own document."
+  }
+  if (@($reviewAsC.documents) | Where-Object { $_.id -eq $clientBDocId }) {
+    throw "Firm C's document review queue must not include Firm A's document."
+  }
+
+  if ($env:SMOKE_CLEANUP_TOKEN) {
+    Write-Host "Cleaning up the second synthetic tenant $firmCId..."
+    $cleanupCBody = @{ firmId = $firmCId } | ConvertTo-Json -Compress
+    $cleanupCPayloadPath = New-JsonPayloadFile $cleanupCBody
+    $cleanupCResult = Invoke-CurlJson @("-H", "Content-Type: application/json", "-H", "X-Internal-Token: $($env:SMOKE_CLEANUP_TOKEN)", "--data-binary", "@$cleanupCPayloadPath", "$BaseUrl/api/internal/smoke-cleanup")
+    Remove-TempFile $cleanupCPayloadPath
+    if (-not $cleanupCResult.removed) { throw "Cleanup endpoint did not report removal for second-tenant firm $firmCId." }
+    $cleanupCProps = $cleanupCResult.PSObject.Properties.Name
+    if (($cleanupCProps -contains "r2Failures") -and @($cleanupCResult.r2Failures).Count -gt 0) { throw "Second-tenant cleanup could not remove R2 object(s): $($cleanupCResult.r2Failures -join ', ')" }
+    if (($cleanupCProps -contains "authFailures") -and @($cleanupCResult.authFailures).Count -gt 0) { throw "Second-tenant cleanup could not remove the synthetic auth account: $($cleanupCResult.authFailures -join ', ')" }
+    if (($cleanupCProps -contains "betaMetadataFailures") -and @($cleanupCResult.betaMetadataFailures).Count -gt 0) { throw "Second-tenant cleanup could not remove beta security metadata: $($cleanupCResult.betaMetadataFailures -join ', ')" }
+  }
+  Remove-TempFile $cookieJarC
+
 
   Write-Host "Verifying a revoked beta entitlement blocks protected business APIs (403 BETA_REVOKED)..."
   $revokeResultRaw = & node (Join-Path $PSScriptRoot "smoke-admin.mjs") revoke-by-email $email
