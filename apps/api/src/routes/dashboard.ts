@@ -7,12 +7,15 @@ import { requireActiveBeta } from "../middleware/beta";
 import { ensureFirm } from "../services/firm";
 import {
   buildClientDashboardRow,
+  buildDocumentWorkflowActions,
   sortActions,
   summarize,
   describeAuditEvent,
   type DashboardBankTxn,
   type DashboardReceipt,
   type DashboardClientMeta,
+  type DashboardChecklistItem,
+  type DashboardDocument,
 } from "../services/dashboard";
 import type { AnyDisposition } from "../services/pnl";
 
@@ -111,6 +114,35 @@ dashboardRoutes.get("/", async (c) => {
     [firm.id],
   );
 
+  const checklistRows = await db.query<{
+    id: string;
+    client_id: string;
+    tax_year: number;
+    doc_type: string;
+    custom_label: string | null;
+    status: string;
+  }>(
+    `SELECT dci.id, dci.client_id, dci.tax_year, dci.doc_type, dci.custom_label, dci.status
+     FROM document_checklist_items dci
+     JOIN clients c ON c.id = dci.client_id
+     WHERE c.firm_id = $1`,
+    [firm.id],
+  );
+
+  const documentRows = await db.query<{
+    id: string;
+    client_id: string;
+    filename: string;
+    document_type: string;
+    status: string;
+  }>(
+    `SELECT cd.id, cd.client_id, cd.filename, cd.document_type, cd.status
+     FROM client_documents cd
+     JOIN clients c ON c.id = cd.client_id
+     WHERE c.firm_id = $1`,
+    [firm.id],
+  );
+
   const bankByClient = new Map<string, DashboardBankTxn[]>();
   for (const row of bankRows) {
     const list = bankByClient.get(row.client_id) ?? [];
@@ -145,6 +177,33 @@ dashboardRoutes.get("/", async (c) => {
     receiptsByClient.set(row.client_id, list);
   }
 
+  const checklistByClient = new Map<string, DashboardChecklistItem[]>();
+  for (const row of checklistRows) {
+    const list = checklistByClient.get(row.client_id) ?? [];
+    list.push({
+      id: row.id,
+      clientId: row.client_id,
+      taxYear: row.tax_year,
+      docType: row.doc_type,
+      customLabel: row.custom_label,
+      status: row.status,
+    });
+    checklistByClient.set(row.client_id, list);
+  }
+
+  const documentsByClient = new Map<string, DashboardDocument[]>();
+  for (const row of documentRows) {
+    const list = documentsByClient.get(row.client_id) ?? [];
+    list.push({
+      id: row.id,
+      clientId: row.client_id,
+      filename: row.filename,
+      documentType: row.document_type,
+      status: row.status,
+    });
+    documentsByClient.set(row.client_id, list);
+  }
+
   const rows = [];
   const allActions = [];
   for (const c2 of clientRows) {
@@ -158,8 +217,14 @@ dashboardRoutes.get("/", async (c) => {
       updatedAt: c2.updated_at,
     };
     const { row, actions } = buildClientDashboardRow(meta, bankByClient.get(c2.id) ?? [], receiptsByClient.get(c2.id) ?? []);
+    const documentActions = buildDocumentWorkflowActions(
+      c2.id,
+      c2.name,
+      checklistByClient.get(c2.id) ?? [],
+      documentsByClient.get(c2.id) ?? [],
+    );
     rows.push(row);
-    allActions.push(...actions);
+    allActions.push(...actions, ...documentActions);
   }
 
   const sortedActions = sortActions(allActions);

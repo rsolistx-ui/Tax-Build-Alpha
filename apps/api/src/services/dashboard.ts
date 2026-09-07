@@ -57,17 +57,21 @@ export type ActionType =
   | "bank_exception"
   | "unclassified_transaction"
   | "uncategorized_activity"
-  | "receipt_review";
+  | "receipt_review"
+  | "missing_document"
+  | "document_review";
 
 /** Lower number sorts first. Mirrors the milestone's required priority order. */
 export const ACTION_PRIORITY: Record<ActionType, number> = {
   receipt_disposition_conflict: 1,
   currency_conflict: 1,
   missing_evidence: 2,
+  missing_document: 2,
   bank_exception: 3,
   unclassified_transaction: 4,
   uncategorized_activity: 5,
   receipt_review: 6,
+  document_review: 6,
 };
 
 export type DashboardAction = {
@@ -103,6 +107,75 @@ function deepLinkForTxn(clientId: string, txnId: string): string {
 
 function deepLinkForReceipt(clientId: string, receiptId: string): string {
   return `/clients/${clientId}?tab=review&focus=${receiptId}`;
+}
+
+function deepLinkForChecklist(clientId: string, taxYear: number): string {
+  return `/clients/${clientId}?tab=tax-readiness&taxYear=${taxYear}`;
+}
+
+function deepLinkForDocument(clientId: string, documentId: string): string {
+  return `/clients/${clientId}?tab=documents&focus=${documentId}`;
+}
+
+export type DashboardChecklistItem = {
+  id: string;
+  clientId: string;
+  taxYear: number;
+  docType: string;
+  customLabel: string | null;
+  status: string;
+};
+
+export type DashboardDocument = {
+  id: string;
+  clientId: string;
+  filename: string;
+  documentType: string;
+  status: string;
+};
+
+/**
+ * Missing-document and document-review actions, built the same way as
+ * every other action here: a pure function over already-fetched rows, fed
+ * into the SAME canonical action queue/priority model as bank and receipt
+ * actions rather than a second dashboard.
+ */
+export function buildDocumentWorkflowActions(
+  clientId: string,
+  clientName: string,
+  checklistItems: DashboardChecklistItem[],
+  documentsNeedingReview: DashboardDocument[],
+): DashboardAction[] {
+  const actions: DashboardAction[] = [];
+  for (const item of checklistItems) {
+    if (item.status !== "expected" && item.status !== "requested") continue;
+    actions.push({
+      id: `missing_document:${item.id}`,
+      clientId,
+      clientName,
+      type: "missing_document",
+      priority: ACTION_PRIORITY.missing_document,
+      explanation: `Missing expected document: ${item.customLabel ?? item.docType.replace(/_/g, " ")} (tax year ${item.taxYear})`,
+      date: null,
+      sourceEntityId: item.id,
+      deepLink: deepLinkForChecklist(clientId, item.taxYear),
+    });
+  }
+  for (const doc of documentsNeedingReview) {
+    if (doc.status !== "needs_review") continue;
+    actions.push({
+      id: `document_review:${doc.id}`,
+      clientId,
+      clientName,
+      type: "document_review",
+      priority: ACTION_PRIORITY.document_review,
+      explanation: `Document awaiting review: ${doc.filename}`,
+      date: null,
+      sourceEntityId: doc.id,
+      deepLink: deepLinkForDocument(clientId, doc.id),
+    });
+  }
+  return actions;
 }
 
 /**

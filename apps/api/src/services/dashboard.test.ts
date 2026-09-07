@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildClientDashboardRow,
+  buildDocumentWorkflowActions,
   sortActions,
   summarize,
   matchesFilter,
@@ -241,5 +242,69 @@ describe("describeAuditEvent", () => {
       createdAt: "2026-01-01T00:00:00Z",
     });
     expect(result.summary).toBe("some future action");
+  });
+});
+
+describe("buildDocumentWorkflowActions", () => {
+  it("creates a missing_document action for an expected or requested checklist item", () => {
+    const actions = buildDocumentWorkflowActions(
+      "cli_1",
+      "Acme LLC",
+      [
+        { id: "chk_1", clientId: "cli_1", taxYear: 2026, docType: "prior_year_return", customLabel: null, status: "expected" },
+        { id: "chk_2", clientId: "cli_1", taxYear: 2026, docType: "1099", customLabel: null, status: "requested" },
+      ],
+      [],
+    );
+    expect(actions).toHaveLength(2);
+    expect(actions.every((a) => a.type === "missing_document")).toBe(true);
+    expect(actions[0].deepLink).toContain("tab=tax-readiness");
+  });
+
+  it("clears the missing_document action once the checklist item is received or reviewed", () => {
+    const actions = buildDocumentWorkflowActions(
+      "cli_1",
+      "Acme LLC",
+      [{ id: "chk_1", clientId: "cli_1", taxYear: 2026, docType: "prior_year_return", customLabel: null, status: "received" }],
+      [],
+    );
+    expect(actions).toHaveLength(0);
+  });
+
+  it("does not treat completed personal/not_applicable checklist items as missing", () => {
+    const actions = buildDocumentWorkflowActions(
+      "cli_1",
+      "Acme LLC",
+      [{ id: "chk_1", clientId: "cli_1", taxYear: 2026, docType: "other", customLabel: "N/A item", status: "not_applicable" }],
+      [],
+    );
+    expect(actions).toHaveLength(0);
+  });
+
+  it("creates a document_review action only for documents still needing review", () => {
+    const actions = buildDocumentWorkflowActions(
+      "cli_1",
+      "Acme LLC",
+      [],
+      [
+        { id: "doc_1", clientId: "cli_1", filename: "statement.pdf", documentType: "bank_statement", status: "needs_review" },
+        { id: "doc_2", clientId: "cli_1", filename: "confirmed.pdf", documentType: "tax_document", status: "confirmed" },
+      ],
+    );
+    expect(actions).toHaveLength(1);
+    expect(actions[0].type).toBe("document_review");
+    expect(actions[0].sourceEntityId).toBe("doc_1");
+  });
+
+  it("assigns missing_document and document_review the priority tiers required by the milestone", () => {
+    const actions = buildDocumentWorkflowActions(
+      "cli_1",
+      "Acme LLC",
+      [{ id: "chk_1", clientId: "cli_1", taxYear: 2026, docType: "1099", customLabel: null, status: "expected" }],
+      [{ id: "doc_1", clientId: "cli_1", filename: "receipt.jpg", documentType: "receipt", status: "needs_review" }],
+    );
+    const missing = actions.find((a) => a.type === "missing_document")!;
+    const review = actions.find((a) => a.type === "document_review")!;
+    expect(missing.priority).toBeLessThan(review.priority);
   });
 });

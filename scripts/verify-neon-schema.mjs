@@ -55,6 +55,18 @@ const checks = [
     label: "beta_entitlements table (server-authoritative beta access)",
     query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'beta_entitlements'`,
   },
+  {
+    label: "tax_year_readiness table (per-client-year tax preparation readiness, migration 0009)",
+    query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'tax_year_readiness'`,
+  },
+  {
+    label: "document_checklist_items table (per-client-year tax document checklist, migration 0009)",
+    query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'document_checklist_items'`,
+  },
+  {
+    label: "client_documents table (general document intake beyond receipts, migration 0009)",
+    query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'client_documents'`,
+  },
 ];
 
 // The pre-0007 per-state indexes are superseded by idx_bank_unique_receipt_claim
