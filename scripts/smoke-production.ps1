@@ -1406,6 +1406,92 @@ try {
   Write-Host "Confirmed: correcting the receipt's category resolves it consistently across P&L, dashboard, and client overview."
 
 
+  Write-Host "Verifying migration 0011's FK deletion semantics with a live cascade-delete scenario..."
+  $cascadeRaw = & node (Join-Path $PSScriptRoot "smoke-admin.mjs") cascade-delete-test $firmId
+  if ($LASTEXITCODE -ne 0) { throw "Live cascade-delete-test failed: $cascadeRaw" }
+  $cascadeResult = ($cascadeRaw | Select-Object -Last 1) | ConvertFrom-Json
+  if (-not $cascadeResult.passed) { throw "Live cascade-delete-test reported failure: $($cascadeRaw | Select-Object -Last 1)" }
+  Write-Host "Confirmed: deleting a referenced checklist item or duplicate-target document nulls only the relationship column and preserves client_id, and the dependent client tree deletes cleanly."
+
+  Write-Host "Creating a client to prove tax-year readiness is genuinely date-bound, not just metadata..."
+  $clientXBody = @{ name = "Smoke Cross Tax Year $stamp" } | ConvertTo-Json -Compress
+  $clientXPayloadPath = New-JsonPayloadFile $clientXBody
+  $clientXResponse = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-H", "Content-Type: application/json", "--data-binary", "@$clientXPayloadPath", "$BaseUrl/api/clients")
+  Remove-TempFile $clientXPayloadPath
+  $clientXId = [string]$clientXResponse.client.id
+  if (-not $clientXId) { throw "Cross tax year client creation did not return an id." }
+
+  $clientXCategories = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientXId/categories")
+  $clientXCategoryId = [string](@($clientXCategories.categories) | Select-Object -First 1).id
+  if (-not $clientXCategoryId) { throw "Cross tax year client has no default categories to classify against." }
+
+  $clientXMappingBody = @{ date = "Date"; description = "Description"; amount = "Amount" } | ConvertTo-Json -Compress
+  $clientXMappingPayloadPath = New-JsonPayloadFile $clientXMappingBody
+
+  $clientX2025CsvPath = Join-Path $env:TEMP "folio-smoke-crossyear-2025-$([guid]::NewGuid().ToString('N')).csv"
+  $clientX2025Csv = "Date,Description,Amount`r`n2025-06-01,FOLIO CROSS YEAR 2025 SMOKE,-50.00`r`n"
+  [System.IO.File]::WriteAllText($clientX2025CsvPath, $clientX2025Csv, $utf8)
+  $clientX2025Import = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-F", "file=@$clientX2025CsvPath", "-F", "mapping=<$clientXMappingPayloadPath", "$BaseUrl/api/clients/$clientXId/bank-transactions/import")
+  if ($clientX2025Import.insertedCount -ne 1) { throw "Cross tax year 2025 CSV did not insert exactly one transaction." }
+  Remove-TempFile $clientX2025CsvPath
+
+  $clientX2026CsvPath = Join-Path $env:TEMP "folio-smoke-crossyear-2026-$([guid]::NewGuid().ToString('N')).csv"
+  $clientX2026Csv = "Date,Description,Amount`r`n2026-06-01,FOLIO CROSS YEAR 2026 SMOKE,-60.00`r`n"
+  [System.IO.File]::WriteAllText($clientX2026CsvPath, $clientX2026Csv, $utf8)
+  $clientX2026Import = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-F", "file=@$clientX2026CsvPath", "-F", "mapping=<$clientXMappingPayloadPath", "$BaseUrl/api/clients/$clientXId/bank-transactions/import")
+  if ($clientX2026Import.insertedCount -ne 1) { throw "Cross tax year 2026 CSV did not insert exactly one transaction." }
+  Remove-TempFile $clientX2026CsvPath
+  Remove-TempFile $clientXMappingPayloadPath
+
+  $clientXTxns = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientXId/bank-transactions")
+  $clientX2025Txn = @($clientXTxns.transactions) | Where-Object { $_.description -eq "FOLIO CROSS YEAR 2025 SMOKE" } | Select-Object -First 1
+  $clientX2026Txn = @($clientXTxns.transactions) | Where-Object { $_.description -eq "FOLIO CROSS YEAR 2026 SMOKE" } | Select-Object -First 1
+  if (-not $clientX2025Txn -or -not $clientX2026Txn) { throw "Cross tax year transactions were not both persisted." }
+  $clientX2025TxnId = [string]$clientX2025Txn.id
+  $clientX2026TxnId = [string]$clientX2026Txn.id
+
+  Write-Host "Resolving only the 2025 transaction, deliberately leaving 2026 unclassified..."
+  $clientX2025NoReceiptBody = @{ action = "no_receipt_required"; reason = "Smoke test: cross tax year 2025 resolved" } | ConvertTo-Json -Compress
+  $clientX2025NoReceiptPayloadPath = New-JsonPayloadFile $clientX2025NoReceiptBody
+  $null = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-H", "Content-Type: application/json", "--data-binary", "@$clientX2025NoReceiptPayloadPath", "$BaseUrl/api/clients/$clientXId/bank-transactions/$clientX2025TxnId/decision")
+  Remove-TempFile $clientX2025NoReceiptPayloadPath
+  $clientX2025ExpenseBody = @{ disposition = "business_expense"; categoryId = $clientXCategoryId; note = "Smoke test: cross tax year 2025 resolved" } | ConvertTo-Json -Compress
+  $clientX2025ExpensePayloadPath = New-JsonPayloadFile $clientX2025ExpenseBody
+  $null = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-H", "Content-Type: application/json", "-X", "PATCH", "--data-binary", "@$clientX2025ExpensePayloadPath", "$BaseUrl/api/clients/$clientXId/bank-transactions/$clientX2025TxnId/disposition")
+  Remove-TempFile $clientX2025ExpensePayloadPath
+  # $clientX2026TxnId deliberately left unclassified and unmatched.
+
+  Write-Host "Verifying the real tax-readiness endpoint: 2025 complete, 2026 incomplete, from the same client's activity..."
+  $clientXReadiness2025 = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientXId/tax-readiness/2025")
+  if (-not $clientXReadiness2025.bookkeepingComplete) {
+    throw "2025 tax readiness must be complete using only 2025 activity, but bookkeepingComplete was false."
+  }
+  $clientXReadiness2026 = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientXId/tax-readiness/2026")
+  if ($clientXReadiness2026.bookkeepingComplete) {
+    throw "2026 tax readiness must be incomplete due to its own unresolved transaction, but bookkeepingComplete was true."
+  }
+
+  Write-Host "Resolving the 2026 transaction and confirming 2026 becomes complete independent of 2025..."
+  $clientX2026NoReceiptBody = @{ action = "no_receipt_required"; reason = "Smoke test: cross tax year 2026 resolved" } | ConvertTo-Json -Compress
+  $clientX2026NoReceiptPayloadPath = New-JsonPayloadFile $clientX2026NoReceiptBody
+  $null = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-H", "Content-Type: application/json", "--data-binary", "@$clientX2026NoReceiptPayloadPath", "$BaseUrl/api/clients/$clientXId/bank-transactions/$clientX2026TxnId/decision")
+  Remove-TempFile $clientX2026NoReceiptPayloadPath
+  $clientX2026ExpenseBody = @{ disposition = "business_expense"; categoryId = $clientXCategoryId; note = "Smoke test: cross tax year 2026 resolved" } | ConvertTo-Json -Compress
+  $clientX2026ExpensePayloadPath = New-JsonPayloadFile $clientX2026ExpenseBody
+  $null = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-H", "Content-Type: application/json", "-X", "PATCH", "--data-binary", "@$clientX2026ExpensePayloadPath", "$BaseUrl/api/clients/$clientXId/bank-transactions/$clientX2026TxnId/disposition")
+  Remove-TempFile $clientX2026ExpensePayloadPath
+
+  $clientXReadiness2026After = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientXId/tax-readiness/2026")
+  if (-not $clientXReadiness2026After.bookkeepingComplete) {
+    throw "2026 tax readiness must become complete once its own transaction is resolved."
+  }
+  $clientXReadiness2025After = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientXId/tax-readiness/2025")
+  if (-not $clientXReadiness2025After.bookkeepingComplete) {
+    throw "2025 tax readiness must remain unaffected and still complete throughout the 2026 changes."
+  }
+  Write-Host "Confirmed: tax-year readiness is a real date-bound filter, not just metadata forwarded into a helper."
+
+
   Write-Host "Seeding a second synthetic firm to prove live cross-tenant isolation..."
   $emailC = "folio-smoke-tenant2-$runId@example.com"
   $passwordC = "Smoke!$([guid]::NewGuid().ToString('N').Substring(0, 18))"

@@ -276,3 +276,68 @@ describe("taxYearRange feeds computeCanonicalReadiness's date bounds", () => {
     expect(taxYearRange(2025)).not.toEqual(taxYearRange(2026));
   });
 });
+
+/**
+ * A genuine, parameter-aware fake DB: unlike the substring-matching
+ * fakeDb() above, this one actually applies the $2/$3 date-range params to
+ * the bank_transactions rows it returns, so a test against it proves
+ * taxYear truly filters activity by date rather than merely computing the
+ * right bounds and passing them through unused.
+ */
+function dateAwareFakeDb(bankRows: Array<{
+  id: string; txn_date: string; disposition: string; triage: string; category_id: string | null; currency: string;
+}>): Db {
+  return {
+    async query<T>(sql: string, params: unknown[] = []) {
+      if (sql.includes("FROM bank_transactions") && sql.includes("txn_date >=")) {
+        const [, startDate, endDate] = params as [string, string | null, string | null];
+        return bankRows
+          .filter((r) => (!startDate || r.txn_date >= startDate) && (!endDate || r.txn_date <= endDate))
+          .map((r) => ({
+            id: r.id, txn_date: r.txn_date, description: null, amount: 100,
+            disposition: r.disposition, triage: r.triage, category_id: r.category_id, currency: r.currency,
+          })) as unknown as T[];
+      }
+      if (sql.includes("FROM client_profiles")) {
+        return [{ accounting_basis: null, default_currency: "USD" }] as unknown as T[];
+      }
+      if (sql.includes("FROM document_checklist_items WHERE client_id")) {
+        return [{ count: "0" }] as unknown as T[];
+      }
+      return [] as T[];
+    },
+    async transaction<T>(statements: DbStatement[]) {
+      return statements.map(() => []) as T[][];
+    },
+  };
+}
+
+describe("computeCanonicalReadiness cross-tax-year isolation (real date-bound filtering)", () => {
+  const client = { id: "cli_cross_year", name: "Cross Year Co", legal_name: null, updated_at: "2026-01-01" };
+
+  it("a 2026 unclassified transaction does not block 2025 readiness, and does block 2026", async () => {
+    const db = dateAwareFakeDb([
+      { id: "t2025", txn_date: "2025-06-01", disposition: "business_expense", triage: "resolved", category_id: "cat_1", currency: "USD" },
+      { id: "t2026", txn_date: "2026-06-01", disposition: "unclassified", triage: "resolved", category_id: null, currency: "USD" },
+    ]);
+
+    const result2025 = await checkReadinessTransitionAllowed(db, client, 2025, "ready_for_preparation");
+    expect(result2025.ok).toBe(true);
+
+    const result2026 = await checkReadinessTransitionAllowed(db, client, 2026, "ready_for_preparation");
+    expect(result2026.ok).toBe(false);
+    if (!result2026.ok) expect(result2026.reasons).toContain("bookkeeping_incomplete");
+  });
+
+  it("2026 becomes ready once its transaction is resolved, independent of 2025's own state", async () => {
+    const db = dateAwareFakeDb([
+      { id: "t2025", txn_date: "2025-06-01", disposition: "business_expense", triage: "resolved", category_id: "cat_1", currency: "USD" },
+      { id: "t2026", txn_date: "2026-06-01", disposition: "business_expense", triage: "resolved", category_id: "cat_1", currency: "USD" },
+    ]);
+
+    const result2026 = await checkReadinessTransitionAllowed(db, client, 2026, "ready_for_preparation");
+    expect(result2026.ok).toBe(true);
+    const result2025 = await checkReadinessTransitionAllowed(db, client, 2025, "ready_for_preparation");
+    expect(result2025.ok).toBe(true);
+  });
+});

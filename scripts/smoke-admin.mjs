@@ -89,6 +89,77 @@ if (command === "seed-invite") {
      ORDER BY c.created_at`,
   );
   console.log(JSON.stringify({ rows: result.rows ?? [] }));
+} else if (command === "cascade-delete-test") {
+  // Live proof (not just schema inspection) that migration 0011's
+  // column-specific ON DELETE SET NULL constraints behave correctly:
+  // removing a referenced checklist item or duplicate-target document
+  // nulls only the nullable relationship column and never touches the
+  // NOT NULL client_id, and the whole dependent tree can then be removed
+  // cleanly. Creates and tears down its own throwaway client so it never
+  // disturbs the main smoke client's state.
+  const [firmId] = args;
+  if (!firmId) { console.error("usage: cascade-delete-test <firmId>"); process.exit(1); }
+
+  const clientId = newId("cli");
+  const checklistId = newId("chk");
+  const doc1 = newId("doc");
+  const doc2 = newId("doc");
+
+  await query(`INSERT INTO clients (id, firm_id, name) VALUES ($1, $2, 'Cascade Delete Test Client')`, [clientId, firmId]);
+  await query(
+    `INSERT INTO document_checklist_items (id, client_id, tax_year, doc_type, status) VALUES ($1, $2, 2025, 'other', 'expected')`,
+    [checklistId, clientId],
+  );
+  await query(
+    `INSERT INTO client_documents (id, client_id, filename, r2_key, content_type, size_bytes, document_type, status, checklist_item_id, source_hash)
+     VALUES ($1, $2, 'cascade-test-1.pdf', 'smoke/cascade-test-1.pdf', 'application/pdf', 100, 'other', 'needs_review', $3, 'cascade-test-hash-1')`,
+    [doc1, clientId, checklistId],
+  );
+  await query(
+    `INSERT INTO client_documents (id, client_id, filename, r2_key, content_type, size_bytes, document_type, status, duplicate_of_document_id, source_hash)
+     VALUES ($1, $2, 'cascade-test-2.pdf', 'smoke/cascade-test-2.pdf', 'application/pdf', 100, 'other', 'needs_review', $3, 'cascade-test-hash-2')`,
+    [doc2, clientId, doc1],
+  );
+
+  const results = {};
+  let passed = true;
+
+  try {
+    await query(`DELETE FROM document_checklist_items WHERE id = $1`, [checklistId]);
+    const row = (await query(`SELECT client_id, checklist_item_id FROM client_documents WHERE id = $1`, [doc1])).rows[0];
+    results.checklistDelete = row
+      ? { clientIdPreserved: row[0] === clientId, checklistItemIdNulled: row[1] === null }
+      : { error: "document row disappeared unexpectedly" };
+    if (!row || row[0] !== clientId || row[1] !== null) passed = false;
+  } catch (err) {
+    results.checklistDelete = { error: String(err) };
+    passed = false;
+  }
+
+  try {
+    await query(`DELETE FROM client_documents WHERE id = $1`, [doc1]);
+    const row = (await query(`SELECT client_id, duplicate_of_document_id FROM client_documents WHERE id = $1`, [doc2])).rows[0];
+    results.duplicateTargetDelete = row
+      ? { clientIdPreserved: row[0] === clientId, duplicateIdNulled: row[1] === null }
+      : { error: "document row disappeared unexpectedly" };
+    if (!row || row[0] !== clientId || row[1] !== null) passed = false;
+  } catch (err) {
+    results.duplicateTargetDelete = { error: String(err) };
+    passed = false;
+  }
+
+  try {
+    await query(`DELETE FROM clients WHERE id = $1`, [clientId]);
+    const remaining = (await query(`SELECT COUNT(*)::int AS n FROM client_documents WHERE client_id = $1`, [clientId])).rows[0][0];
+    results.clientDelete = { ok: true, remainingDocuments: remaining };
+    if (Number(remaining) !== 0) passed = false;
+  } catch (err) {
+    results.clientDelete = { error: String(err) };
+    passed = false;
+  }
+
+  console.log(JSON.stringify({ passed, results }));
+  if (!passed) process.exit(1);
 } else if (command === "verify-clean") {
   // Directly re-queries Neon (independent of what the cleanup endpoint
   // claimed) to prove this exact smoke run left zero residue, and
@@ -145,6 +216,6 @@ if (command === "seed-invite") {
   console.log(JSON.stringify({ clean: allZero, checks }));
   if (!allZero) process.exit(1);
 } else {
-  console.error("Unknown command. Use: seed-invite | revoke-by-email | find-firm-id-by-email | inventory-smoke-clients | verify-clean");
+  console.error("Unknown command. Use: seed-invite | revoke-by-email | find-firm-id-by-email | inventory-smoke-clients | cascade-delete-test | verify-clean");
   process.exit(1);
 }
