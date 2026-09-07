@@ -7,11 +7,11 @@ import { requireActiveBeta } from "../middleware/beta";
 import { ensureFirm } from "../services/firm";
 import { getClient } from "../services/clients";
 import { newId } from "../lib/id";
-import { buildClientDashboardRow, buildDocumentWorkflowActions, sortActions, type DashboardBankTxn, type DashboardReceipt, type DashboardClientMeta } from "../services/dashboard";
+import { buildClientDashboardRow, buildDocumentWorkflowActions, buildUncategorizedReceiptActions, sortActions, type DashboardBankTxn, type DashboardReceipt, type DashboardClientMeta } from "../services/dashboard";
 import type { AnyDisposition } from "../services/pnl";
 import { isValidReadinessState, isProfessionalApprovalState, suggestReadinessState, type TaxReadinessState } from "../services/tax-readiness";
-import { generateChecklist, isValidChecklistStatus, suggestDocumentType, sha256Hex, isValidDocumentType, isSupportedUpload, MAX_UPLOAD_BYTES } from "../services/documents";
-import { getUncategorizedReceiptLineCounts, assemblePnlReport, isAccrualUnsupported } from "../services/reporting";
+import { generateChecklist, isValidChecklistStatus, suggestDocumentType, sha256Hex, isValidDocumentType, isSupportedUpload, MAX_UPLOAD_BYTES, isValidTaxYear } from "../services/documents";
+import { getUncategorizedReceiptLines, summarizeUncategorizedReceiptLines, assemblePnlReport, isAccrualUnsupported } from "../services/reporting";
 
 export const workspaceRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 workspaceRoutes.use("*", requireSession);
@@ -37,16 +37,32 @@ async function insertAudit(db: Db, clientId: string, actorUserId: string, action
  * approximation (e.g. bank-only triage) of the same P&L completeness
  * signals used everywhere else.
  */
-async function computeCanonicalReadiness(db: Db, client: { id: string; name: string; legal_name: string | null; updated_at: string }, currency: string, taxYear: number | null, accountingBasis: string | null) {
+async function computeCanonicalReadiness(
+  db: Db,
+  client: { id: string; name: string; legal_name: string | null; updated_at: string },
+  currency: string,
+  taxYear: number | null,
+  accountingBasis: string | null,
+  startDate: string | null,
+  endDate: string | null,
+) {
   const bankRows = await db.query<{
     id: string; txn_date: string | null; description: string | null; amount: number;
     disposition: string; triage: string; category_id: string | null; currency: string;
-  }>(`SELECT id, txn_date, description, amount, disposition, triage, category_id, currency FROM bank_transactions WHERE client_id = $1`, [client.id]);
+  }>(
+    `SELECT id, txn_date, description, amount, disposition, triage, category_id, currency FROM bank_transactions
+     WHERE client_id = $1 AND ($2::date IS NULL OR txn_date >= $2::date) AND ($3::date IS NULL OR txn_date <= $3::date)`,
+    [client.id, startDate, endDate],
+  );
 
   const receiptRows = await db.query<{
     id: string; status: string; extracted_merchant: string | null; extracted_date: string | null;
     extracted_currency: string | null; category_id: string | null;
-  }>(`SELECT r.id, r.status, r.extracted_merchant, r.extracted_date, r.extracted_currency, r.category_id FROM receipts r WHERE r.client_id = $1`, [client.id]);
+  }>(
+    `SELECT r.id, r.status, r.extracted_merchant, r.extracted_date, r.extracted_currency, r.category_id FROM receipts r
+     WHERE r.client_id = $1 AND ($2::date IS NULL OR r.extracted_date >= $2::date) AND ($3::date IS NULL OR r.extracted_date <= $3::date)`,
+    [client.id, startDate, endDate],
+  );
 
   const matchedDispositionRows = await db.query<{ matched_receipt_id: string; disposition: string }>(
     `SELECT matched_receipt_id, disposition FROM bank_transactions WHERE client_id = $1 AND matched_receipt_id IS NOT NULL`,
@@ -69,9 +85,17 @@ async function computeCanonicalReadiness(db: Db, client: { id: string; name: str
     categoryId: r.category_id, matchedBankDisposition: (dispositionByReceipt.get(r.id) as AnyDisposition | undefined) ?? null,
   }));
 
-  const uncategorizedReceiptLineCounts = await getUncategorizedReceiptLineCounts(db, [client.id]);
-  const { row, actions } = buildClientDashboardRow(meta, bankTxns, receipts, uncategorizedReceiptLineCounts.get(client.id) ?? 0);
-  return { row, actions, bankTxns, receipts };
+  const lineRows = await getUncategorizedReceiptLines(db, [{ clientId: client.id, startDate, endDate }]);
+  const { countByClient, receiptsByClient } = summarizeUncategorizedReceiptLines(lineRows);
+  const { row, actions } = buildClientDashboardRow(meta, bankTxns, receipts, countByClient.get(client.id) ?? 0);
+  const uncategorizedReceiptActions = buildUncategorizedReceiptActions(client.id, client.name, receiptsByClient.get(client.id) ?? []);
+  return { row, actions: [...actions, ...uncategorizedReceiptActions], bankTxns, receipts };
+}
+
+/** Tax year -> [Jan 1, Dec 31] date bounds, the one place this conversion happens. */
+export function taxYearRange(taxYear: number | null): { startDate: string | null; endDate: string | null } {
+  if (taxYear === null) return { startDate: null, endDate: null };
+  return { startDate: `${taxYear}-01-01`, endDate: `${taxYear}-12-31` };
 }
 
 /** Latest meaningful client activity - never the raw clients.updated_at column. Null when nothing meaningful has happened yet. */
@@ -97,17 +121,34 @@ workspaceRoutes.get("/:clientId/overview", async (c) => {
   const taxYear = profileRow?.tax_year ?? null;
   const accountingBasis = profileRow?.accounting_basis ?? null;
 
-  const { row, actions, bankTxns, receipts } = await computeCanonicalReadiness(db, client, currency, taxYear, accountingBasis);
+  // Canonical period: the client's configured tax year when one exists,
+  // all-time otherwise. This is the SAME rule the Operations Command
+  // Center uses (buildFirmDashboard), so bookkeeping readiness, the action
+  // queue, and document status here always reconcile with the firm-wide
+  // dashboard for this client - never a second, narrower approximation.
+  const canonicalPeriod = taxYearRange(taxYear);
+  const canonical = await computeCanonicalReadiness(db, client, currency, taxYear, accountingBasis, canonicalPeriod.startDate, canonicalPeriod.endDate);
 
   const [readinessRow] = taxYear
     ? await db.query<{ status: string }>(`SELECT status FROM tax_year_readiness WHERE client_id = $1 AND tax_year = $2`, [client.id, taxYear])
     : [];
 
-  const startDate = c.req.query("startDate") || null;
-  const endDate = c.req.query("endDate") || null;
-  const pnlReport = await assemblePnlReport(db, client.id, startDate, endDate);
+  // Selected period: whatever the professional's period selector requested
+  // (defaulting to the same canonical period when nothing was specified).
+  // Every figure in financialStatus/financialPeriod refers to this SAME
+  // range - never a mix of period-scoped income with all-time counts.
+  const queryStart = c.req.query("startDate") || null;
+  const queryEnd = c.req.query("endDate") || null;
+  const selectedStart = queryStart ?? canonicalPeriod.startDate;
+  const selectedEnd = queryEnd ?? canonicalPeriod.endDate;
+  const selectedIsCanonical = selectedStart === canonicalPeriod.startDate && selectedEnd === canonicalPeriod.endDate;
+  const selected = selectedIsCanonical
+    ? canonical
+    : await computeCanonicalReadiness(db, client, currency, taxYear, accountingBasis, selectedStart, selectedEnd);
+
+  const pnlReport = await assemblePnlReport(db, client.id, selectedStart, selectedEnd);
   const financialPeriod = isAccrualUnsupported(pnlReport)
-    ? { unsupported: true as const, warning: pnlReport.warning, periodStart: startDate, periodEnd: endDate }
+    ? { unsupported: true as const, warning: pnlReport.warning, periodStart: selectedStart, periodEnd: selectedEnd }
     : {
         unsupported: false as const,
         periodStart: pnlReport.periodStart,
@@ -116,7 +157,9 @@ workspaceRoutes.get("/:clientId/overview", async (c) => {
         expenses: pnlReport.expenses,
         net: pnlReport.net,
       };
+  const resolvedCount = selected.bankTxns.filter((t) => t.triage === "matched").length;
 
+  const { row, actions, bankTxns, receipts } = canonical;
   const lastActivityAt = await getLastMeaningfulActivity(db, client.id);
 
   const checklistRows = await db.query<{ id: string; tax_year: number; doc_type: string; custom_label: string | null; status: string }>(
@@ -149,10 +192,12 @@ workspaceRoutes.get("/:clientId/overview", async (c) => {
       openActionCount: nextActions.length, lastActivityAt,
     },
     financialStatus: {
-      pnlCompleteness: row.isComplete, bankTransactionCount: bankTxns.length,
-      missingEvidenceCount: row.missingEvidenceCount, unclassifiedCount: row.unclassifiedCount,
-      uncategorizedCount: row.uncategorizedCount, currencyConflictCount: row.currencyConflictCount,
+      periodStart: selectedStart, periodEnd: selectedEnd,
+      pnlCompleteness: selected.row.isComplete, bankTransactionCount: selected.bankTxns.length, resolvedCount,
+      missingEvidenceCount: selected.row.missingEvidenceCount, unclassifiedCount: selected.row.unclassifiedCount,
+      uncategorizedCount: selected.row.uncategorizedCount, currencyConflictCount: selected.row.currencyConflictCount,
     },
+    financialPeriod,
     documentStatus: {
       receiptsReceived: receipts.length, receiptsAwaitingReview, filedReceipts,
       missingEvidence: row.missingEvidenceCount,
@@ -189,11 +234,17 @@ workspaceRoutes.get("/:clientId/tax-readiness/:taxYear", async (c) => {
   const receivedOrReviewed = checklist.filter((i) => i.status === "received" || i.status === "reviewed").length;
 
   const currency = (profileRow?.default_currency || "USD").toUpperCase();
-  const { row: readinessRow } = await computeCanonicalReadiness(db, client, currency, taxYear, profileRow?.accounting_basis ?? null);
+  const { startDate, endDate } = taxYearRange(taxYear);
+  const { row: readinessRow } = await computeCanonicalReadiness(db, client, currency, taxYear, profileRow?.accounting_basis ?? null, startDate, endDate);
+  // "Bookkeeping complete" for tax-readiness purposes is the SAME bar as
+  // Ready everywhere else - not just completeness.isComplete, which alone
+  // misses receipt/bank disposition conflicts and receipts still awaiting
+  // review, both of which item 1 requires this to account for.
+  const bookkeepingComplete = readinessRow.readiness === "ready";
 
   const suggestedStatus = suggestReadinessState({
     taxPrepRequired,
-    bookkeepingComplete: readinessRow.isComplete,
+    bookkeepingComplete,
     totalChecklistItems,
     receivedOrReviewedChecklistItems: receivedOrReviewed,
   });
@@ -202,7 +253,7 @@ workspaceRoutes.get("/:clientId/tax-readiness/:taxYear", async (c) => {
     taxYear,
     status: readiness?.status ?? "not_started",
     suggestedStatus,
-    bookkeepingComplete: readinessRow.isComplete,
+    bookkeepingComplete,
     notes: readiness?.notes ?? null,
     checklist,
     updatedAt: readiness?.updated_at ?? null,
@@ -224,10 +275,11 @@ export async function checkReadinessTransitionAllowed(db: Db, client: { id: stri
     [client.id],
   );
   const currency = (profileRow?.default_currency || "USD").toUpperCase();
-  const { row } = await computeCanonicalReadiness(db, client, currency, taxYear, profileRow?.accounting_basis ?? null);
+  const { startDate, endDate } = taxYearRange(taxYear);
+  const { row } = await computeCanonicalReadiness(db, client, currency, taxYear, profileRow?.accounting_basis ?? null, startDate, endDate);
 
   const reasons: string[] = [];
-  if (!row.isComplete) reasons.push("bookkeeping_incomplete");
+  if (row.readiness !== "ready") reasons.push("bookkeeping_incomplete");
 
   if (status === "ready_for_preparation") {
     const [outstanding] = await db.query<{ count: string }>(
@@ -380,7 +432,12 @@ workspaceRoutes.post("/:clientId/documents", async (c) => {
     return c.json({ error: "Unsupported file type. Supported: PDF, PNG, JPG, JPEG, HEIC, DOCX, XLSX, CSV.", code: "UNSUPPORTED_FILE_TYPE" }, 415);
   }
   const taxYearValue = form.get("taxYear");
-  const taxYear = typeof taxYearValue === "string" && taxYearValue.trim() ? Number(taxYearValue) : null;
+  let taxYear: number | null = null;
+  if (typeof taxYearValue === "string" && taxYearValue.trim()) {
+    const parsed = Number(taxYearValue);
+    if (!isValidTaxYear(parsed)) return c.json({ error: "taxYear must be an integer between 2000 and 2100" }, 400);
+    taxYear = parsed;
+  }
 
   const bytes = await file.arrayBuffer();
   const hash = await sha256Hex(bytes);
@@ -438,6 +495,15 @@ export type DocumentReviewAction = {
 };
 
 /**
+ * confirm/mark_duplicate/mark_not_needed resolve the review queue's reason
+ * for showing this document, so the item leaves the queue. Every other
+ * action is a correction the professional makes ON an item that remains
+ * under review - it must stay visible with refreshed data, never
+ * disappear as a side effect of, say, fixing its tax year.
+ */
+export const TERMINAL_REVIEW_ACTIONS = new Set<DocumentReviewAction["action"]>(["confirm", "mark_duplicate", "mark_not_needed"]);
+
+/**
  * Shared review-action handler used by both the client-scoped and
  * cross-client review endpoints. Every mutating branch verifies that any
  * checklist item, duplicate target, or destination client it touches
@@ -454,7 +520,7 @@ export async function applyDocumentReviewAction(
   documentId: string,
   actorUserId: string,
   body: DocumentReviewAction,
-): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+): Promise<{ ok: true; terminal: boolean } | { ok: false; status: number; error: string }> {
   const [document] = await db.query<{ id: string; client_id: string; status: string; document_type: string; tax_year: number | null; firm_id: string }>(
     `SELECT cd.id, cd.client_id, cd.status, cd.document_type, cd.tax_year, c.firm_id
      FROM client_documents cd JOIN clients c ON c.id = cd.client_id
@@ -477,6 +543,7 @@ export async function applyDocumentReviewAction(
 
   switch (body.action) {
     case "confirm": {
+      if (body.taxYear != null && !isValidTaxYear(body.taxYear)) return { ok: false, status: 400, error: "taxYear must be an integer between 2000 and 2100" };
       const documentType = body.documentType && isValidDocumentType(body.documentType) ? body.documentType : document.document_type;
       writes.push({
         query: `UPDATE client_documents SET status = 'confirmed', document_type = $1, tax_year = COALESCE($2, tax_year), reviewed_by = $3, reviewed_at = NOW() WHERE id = $4`,
@@ -486,6 +553,7 @@ export async function applyDocumentReviewAction(
     }
     case "correct": {
       if (body.documentType && !isValidDocumentType(body.documentType)) return { ok: false, status: 400, error: "Invalid documentType" };
+      if (body.taxYear != null && !isValidTaxYear(body.taxYear)) return { ok: false, status: 400, error: "taxYear must be an integer between 2000 and 2100" };
       if (body.checklistItemId && !(await checklistItemBelongsToClient(body.checklistItemId, document.client_id))) {
         return { ok: false, status: 404, error: "Checklist item not found for this client" };
       }
@@ -501,7 +569,9 @@ export async function applyDocumentReviewAction(
       break;
     }
     case "assign_tax_year": {
-      if (typeof body.taxYear !== "number") return { ok: false, status: 400, error: "taxYear is required" };
+      if (typeof body.taxYear !== "number" || !isValidTaxYear(body.taxYear)) {
+        return { ok: false, status: 400, error: "taxYear must be an integer between 2000 and 2100" };
+      }
       writes.push({ query: `UPDATE client_documents SET tax_year = $1 WHERE id = $2`, params: [body.taxYear, documentId] });
       break;
     }
@@ -560,16 +630,64 @@ export async function applyDocumentReviewAction(
   });
 
   await db.transaction(writes);
-  return { ok: true };
+  return { ok: true, terminal: TERMINAL_REVIEW_ACTIONS.has(body.action) };
+}
+
+/**
+ * Same shape the cross-client review list uses, so a nonterminal action's
+ * response can refresh a document's visible row without a full reload -
+ * one query, reused by both the list and the post-action refresh.
+ */
+export type ReviewDocumentRow = {
+  id: string; clientId: string; clientName: string; filename: string; contentType: string | null;
+  documentType: string; taxYear: number | null; status: string; duplicateWarning: boolean;
+  duplicateOfDocumentId: string | null;
+  checklistMatch: { id: string; docType: string | null; customLabel: string | null } | null;
+  uploadedAt: string;
+};
+
+export async function loadReviewDocument(db: Db, documentId: string, firmId: string): Promise<ReviewDocumentRow | null> {
+  const [d] = await db.query<{
+    id: string; client_id: string; client_name: string; filename: string; content_type: string | null;
+    document_type: string; tax_year: number | null; status: string; duplicate_of_document_id: string | null;
+    checklist_item_id: string | null; checklist_doc_type: string | null; checklist_custom_label: string | null;
+    uploaded_at: string;
+  }>(
+    `SELECT cd.id, cd.client_id, c.name AS client_name, cd.filename, cd.content_type, cd.document_type,
+            cd.tax_year, cd.status, cd.duplicate_of_document_id, cd.checklist_item_id,
+            dci.doc_type AS checklist_doc_type, dci.custom_label AS checklist_custom_label, cd.uploaded_at
+     FROM client_documents cd
+     JOIN clients c ON c.id = cd.client_id
+     LEFT JOIN document_checklist_items dci ON dci.id = cd.checklist_item_id
+     WHERE cd.id = $1 AND c.firm_id = $2`,
+    [documentId, firmId],
+  );
+  if (!d) return null;
+  return {
+    id: d.id,
+    clientId: d.client_id,
+    clientName: d.client_name,
+    filename: d.filename,
+    contentType: d.content_type,
+    documentType: d.document_type,
+    taxYear: d.tax_year,
+    status: d.status,
+    duplicateWarning: d.duplicate_of_document_id !== null,
+    duplicateOfDocumentId: d.duplicate_of_document_id,
+    checklistMatch: d.checklist_item_id ? { id: d.checklist_item_id, docType: d.checklist_doc_type, customLabel: d.checklist_custom_label } : null,
+    uploadedAt: d.uploaded_at,
+  };
 }
 
 workspaceRoutes.patch("/:clientId/documents/:documentId", async (c) => {
   const { db, client, firm } = await authorizedClient(c);
   if (!client) return c.json({ error: "Not found" }, 404);
   const body = (await c.req.json()) as DocumentReviewAction;
-  const result = await applyDocumentReviewAction(db, firm.id, c.req.param("documentId"), c.get("userId"), body);
+  const documentId = c.req.param("documentId");
+  const result = await applyDocumentReviewAction(db, firm.id, documentId, c.get("userId"), body);
   if (!result.ok) return c.json({ error: result.error }, result.status as 400 | 404);
-  return c.json({ ok: true });
+  const document = result.terminal ? null : await loadReviewDocument(db, documentId, firm.id);
+  return c.json({ ok: true, terminal: result.terminal, document });
 });
 
 /** Human-readable client activity timeline - never raw audit JSON. */

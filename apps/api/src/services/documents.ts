@@ -49,6 +49,16 @@ export function isValidChecklistStatus(value: string): value is ChecklistStatus 
 }
 
 /**
+ * Same supported tax-year range enforced on the client profile
+ * (clients.ts's tax_year: z.number().int().min(2000).max(2100)) - a
+ * document's tax year must never be able to fall outside what a client can
+ * even be configured with.
+ */
+export function isValidTaxYear(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 2000 && value <= 2100;
+}
+
+/**
  * Server-side upload gate - the browser's accept attribute is not security.
  * A conservative combination of extension and (when present) content type:
  * neither is trusted alone, so a renamed executable or script cannot pass

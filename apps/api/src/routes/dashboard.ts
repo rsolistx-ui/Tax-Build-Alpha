@@ -8,6 +8,7 @@ import { ensureFirm } from "../services/firm";
 import {
   buildClientDashboardRow,
   buildDocumentWorkflowActions,
+  buildUncategorizedReceiptActions,
   sortActions,
   summarize,
   describeAuditEvent,
@@ -18,7 +19,24 @@ import {
   type DashboardDocument,
 } from "../services/dashboard";
 import type { AnyDisposition } from "../services/pnl";
-import { getUncategorizedReceiptLineCounts } from "../services/reporting";
+import { getUncategorizedReceiptLines, summarizeUncategorizedReceiptLines } from "../services/reporting";
+import { taxYearRange } from "./workspace";
+
+/**
+ * Same SQL null-handling as every date-range query in this codebase: a
+ * period bound of null means unbounded, but a null-dated row is excluded
+ * the moment either bound IS specified (matching Postgres's
+ * `$2::date IS NULL OR col >= $2::date` behavior exactly, so a client with
+ * a configured tax year filters its bulk-fetched rows in JS identically to
+ * how the single-client SQL path would filter them).
+ */
+function inPeriod(date: string | null, start: string | null, end: string | null): boolean {
+  if (start === null && end === null) return true;
+  if (date === null) return false;
+  if (start !== null && date < start) return false;
+  if (end !== null && date > end) return false;
+  return true;
+}
 
 export const dashboardRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 dashboardRoutes.use("*", requireSession);
@@ -144,13 +162,24 @@ dashboardRoutes.get("/", async (c) => {
     [firm.id],
   );
 
+  // Operations-readiness period: the client's configured tax year when one
+  // exists, all-time otherwise - the same rule the client overview uses,
+  // so this dashboard's Ready/Needs-attention state always reconciles with
+  // what that client's own workspace shows. Bulk-fetched above (one query
+  // per table for the whole firm); filtered per client here in JS rather
+  // than with N separate per-client SQL queries.
+  const periodByClient = new Map(clientRows.map((r) => [r.id, taxYearRange(r.tax_year)]));
+
   const bankByClient = new Map<string, DashboardBankTxn[]>();
   for (const row of bankRows) {
+    const period = periodByClient.get(row.client_id);
+    const date = row.txn_date ? String(row.txn_date) : null;
+    if (period && !inPeriod(date, period.startDate, period.endDate)) continue;
     const list = bankByClient.get(row.client_id) ?? [];
     list.push({
       id: row.id,
       clientId: row.client_id,
-      date: row.txn_date ? String(row.txn_date) : null,
+      date,
       description: row.description,
       amount: Number(row.amount ?? 0),
       disposition: row.disposition as AnyDisposition,
@@ -163,6 +192,9 @@ dashboardRoutes.get("/", async (c) => {
 
   const receiptsByClient = new Map<string, DashboardReceipt[]>();
   for (const row of receiptRows) {
+    const period = periodByClient.get(row.client_id);
+    const date = row.extracted_date ? String(row.extracted_date) : null;
+    if (period && !inPeriod(date, period.startDate, period.endDate)) continue;
     const list = receiptsByClient.get(row.client_id) ?? [];
     const clientCurrency = currencyByClient.get(row.client_id) || "USD";
     list.push({
@@ -170,7 +202,7 @@ dashboardRoutes.get("/", async (c) => {
       clientId: row.client_id,
       status: row.status,
       merchant: row.extracted_merchant,
-      date: row.extracted_date ? String(row.extracted_date) : null,
+      date,
       currency: (row.extracted_currency || clientCurrency).toUpperCase(),
       categoryId: row.category_id,
       matchedBankDisposition: (row.matched_bank_disposition as AnyDisposition | null) ?? null,
@@ -205,7 +237,12 @@ dashboardRoutes.get("/", async (c) => {
     documentsByClient.set(row.client_id, list);
   }
 
-  const uncategorizedReceiptLineCounts = await getUncategorizedReceiptLineCounts(db, clientRows.map((r) => r.id));
+  const uncategorizedLineRows = await getUncategorizedReceiptLines(
+    db,
+    clientRows.map((r) => ({ clientId: r.id, ...periodByClient.get(r.id)! })),
+  );
+  const { countByClient: uncategorizedReceiptLineCounts, receiptsByClient: uncategorizedReceiptsByClient } =
+    summarizeUncategorizedReceiptLines(uncategorizedLineRows);
 
   const rows = [];
   const allActions = [];
@@ -231,8 +268,9 @@ dashboardRoutes.get("/", async (c) => {
       checklistByClient.get(c2.id) ?? [],
       documentsByClient.get(c2.id) ?? [],
     );
+    const uncategorizedReceiptActions = buildUncategorizedReceiptActions(c2.id, c2.name, uncategorizedReceiptsByClient.get(c2.id) ?? []);
     rows.push(row);
-    allActions.push(...actions, ...documentActions);
+    allActions.push(...actions, ...documentActions, ...uncategorizedReceiptActions);
   }
 
   const sortedActions = sortActions(allActions);

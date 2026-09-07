@@ -4,14 +4,18 @@ import { ArrowRight, CheckCircle2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/empty-state";
 import { presetRange, REPORTING_PERIOD_OPTIONS, type ReportingPeriodPreset } from "@/lib/reporting-period";
+
+type CategoryOption = { id: string; name: string };
 
 type OverviewAction = {
   id: string;
   type: string;
   explanation: string;
   deepLink: string;
+  sourceEntityId: string;
 };
 
 type FinancialPeriod =
@@ -100,6 +104,9 @@ export function ClientOverview({ clientId, onNavigate }: { clientId: string; onN
   const [preset, setPreset] = useState<ReportingPeriodPreset>("current_month");
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
+  const [categories, setCategories] = useState<CategoryOption[]>([]);
+  const [categorizeDrafts, setCategorizeDrafts] = useState<Record<string, string>>({});
+  const [categorizingId, setCategorizingId] = useState<string | null>(null);
 
   const { startDate, endDate } = useMemo(() => {
     if (preset === "custom") return { startDate: customStart, endDate: customEnd };
@@ -116,6 +123,36 @@ export function ClientOverview({ clientId, onNavigate }: { clientId: string; onN
       .then((data) => setTimeline(data.events))
       .catch(() => setTimeline([]));
   }, [clientId, startDate, endDate]);
+
+  useEffect(() => {
+    api<{ categories: CategoryOption[] }>(`/api/clients/${clientId}/categories`)
+      .then((data) => setCategories(data.categories))
+      .catch(() => setCategories([]));
+  }, [clientId]);
+
+  /**
+   * The narrow, auditable correction path for uncategorized_receipt_evidence
+   * actions: resolved inline, right where the action surfaces, rather than
+   * sending the professional off to a dead-end warning with no way back.
+   */
+  async function categorizeReceipt(action: OverviewAction) {
+    const categoryId = categorizeDrafts[action.id];
+    if (!categoryId) return;
+    setCategorizingId(action.id);
+    try {
+      await api(`/api/clients/${clientId}/receipts/${action.sourceEntityId}/category`, {
+        method: "PATCH",
+        body: JSON.stringify({ categoryId }),
+      });
+      const query = startDate && endDate ? `?startDate=${startDate}&endDate=${endDate}` : "";
+      const refreshed = await api<Overview>(`/api/clients/${clientId}/overview${query}`);
+      setOverview(refreshed);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to categorize this receipt");
+    } finally {
+      setCategorizingId(null);
+    }
+  }
 
   if (error) return <p className="text-sm text-[var(--color-destructive)]">{error}</p>;
   if (!overview) return <p className="text-sm text-[var(--color-muted-foreground)]">Loading overview...</p>;
@@ -221,20 +258,49 @@ export function ClientOverview({ clientId, onNavigate }: { clientId: string; onN
             <EmptyState icon={CheckCircle2} title="Nothing outstanding" description="No open actions for this client right now." />
           ) : (
             <div className="divide-y divide-[var(--color-border)]">
-              {nextActions.map((action) => (
-                <button
-                  key={action.id}
-                  type="button"
-                  onClick={() => onNavigate(action.deepLink)}
-                  className="flex w-full items-center justify-between gap-2 py-2 text-left text-sm hover:text-[var(--color-foreground)]"
-                >
-                  <span className="flex items-center gap-2">
-                    <Badge>{action.type.replace(/_/g, " ")}</Badge>
-                    {action.explanation}
-                  </span>
-                  <ArrowRight className="h-3.5 w-3.5 shrink-0 text-[var(--color-muted-foreground)]" />
-                </button>
-              ))}
+              {nextActions.map((action) =>
+                action.type === "uncategorized_receipt_evidence" ? (
+                  <div key={action.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
+                    <span className="flex items-center gap-2">
+                      <Badge>{action.type.replace(/_/g, " ")}</Badge>
+                      {action.explanation}
+                    </span>
+                    <span className="flex items-center gap-2">
+                      <select
+                        className="h-8 rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-2 text-xs"
+                        value={categorizeDrafts[action.id] ?? ""}
+                        onChange={(e) => setCategorizeDrafts((prev) => ({ ...prev, [action.id]: e.target.value }))}
+                      >
+                        <option value="">Set category...</option>
+                        {categories.map((cat) => (
+                          <option key={cat.id} value={cat.id}>{cat.name}</option>
+                        ))}
+                      </select>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        disabled={categorizingId === action.id || !categorizeDrafts[action.id]}
+                        onClick={() => void categorizeReceipt(action)}
+                      >
+                        Save
+                      </Button>
+                    </span>
+                  </div>
+                ) : (
+                  <button
+                    key={action.id}
+                    type="button"
+                    onClick={() => onNavigate(action.deepLink)}
+                    className="flex w-full items-center justify-between gap-2 py-2 text-left text-sm hover:text-[var(--color-foreground)]"
+                  >
+                    <span className="flex items-center gap-2">
+                      <Badge>{action.type.replace(/_/g, " ")}</Badge>
+                      {action.explanation}
+                    </span>
+                    <ArrowRight className="h-3.5 w-3.5 shrink-0 text-[var(--color-muted-foreground)]" />
+                  </button>
+                ),
+              )}
             </div>
           )}
         </CardContent>

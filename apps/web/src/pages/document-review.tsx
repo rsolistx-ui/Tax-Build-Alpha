@@ -70,8 +70,20 @@ export function DocumentReviewPage() {
     setBusyId(id);
     setError(null);
     try {
-      await api(`/api/documents/review/${id}`, { method: "PATCH", body: JSON.stringify(body) });
-      setDocuments((prev) => prev.filter((d) => d.id !== id));
+      const result = await api<{ ok: true; terminal: boolean; document: ReviewDocument | null }>(
+        `/api/documents/review/${id}`,
+        { method: "PATCH", body: JSON.stringify(body) },
+      );
+      if (result.terminal) {
+        // confirm / mark_duplicate / mark_not_needed resolve the reason
+        // this document was in the queue - it leaves the list.
+        setDocuments((prev) => prev.filter((d) => d.id !== id));
+      } else if (result.document) {
+        // Every other action is a correction on an item that stays under
+        // review - keep it visible with its refreshed data instead of
+        // treating a routine correction as if it were resolved.
+        setDocuments((prev) => prev.map((d) => (d.id === id ? result.document! : d)));
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to update this document");
     } finally {

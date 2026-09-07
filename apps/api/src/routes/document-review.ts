@@ -5,7 +5,7 @@ import type { AuthedVars } from "../middleware/session";
 import { requireSession } from "../middleware/session";
 import { requireActiveBeta } from "../middleware/beta";
 import { ensureFirm } from "../services/firm";
-import { applyDocumentReviewAction, type DocumentReviewAction } from "./workspace";
+import { applyDocumentReviewAction, loadReviewDocument, type DocumentReviewAction } from "./workspace";
 
 /**
  * Cross-client evidence-processing queue: Phyllis processes uncertain
@@ -61,7 +61,13 @@ documentReviewRoutes.patch("/review/:documentId", async (c) => {
   const db = createDb(c.env);
   const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
   const body = (await c.req.json()) as DocumentReviewAction;
-  const result = await applyDocumentReviewAction(db, firm.id, c.req.param("documentId"), c.get("userId"), body);
+  const documentId = c.req.param("documentId");
+  const result = await applyDocumentReviewAction(db, firm.id, documentId, c.get("userId"), body);
   if (!result.ok) return c.json({ error: result.error }, result.status as 400 | 404);
-  return c.json({ ok: true });
+  // Terminal actions (confirm/mark_duplicate/mark_not_needed) resolve the
+  // review queue's reason for showing this document - the caller removes
+  // it. Every other action is a correction that keeps the item under
+  // review, so the caller needs its refreshed row, not a removal signal.
+  const document = result.terminal ? null : await loadReviewDocument(db, documentId, firm.id);
+  return c.json({ ok: true, terminal: result.terminal, document });
 });

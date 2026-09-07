@@ -421,6 +421,50 @@ receiptRoutes.post("/:clientId/receipts/:receiptId/approve", async (c) => {
   });
 });
 
+const categorySchema = z.object({ categoryId: z.string().min(1) });
+
+/**
+ * The smallest auditable correction path for a filed receipt's category.
+ * The existing review editor only edits status = 'review' receipts, so a
+ * filed receipt whose evidence is blocking bookkeeping completeness (the
+ * uncategorized_receipt_evidence action) needs a narrow, audited way to
+ * resolve that without reopening the whole review flow. Setting the
+ * receipt's own category satisfies every uncategorized line on it, per the
+ * same predicate getUncategorizedReceiptLines uses.
+ */
+receiptRoutes.patch("/:clientId/receipts/:receiptId/category", async (c) => {
+  const body = categorySchema.parse(await c.req.json());
+  const { db, client } = await authorizedClient(c);
+  if (!client) return c.json({ error: "Not found" }, 404);
+  const receiptId = c.req.param("receiptId");
+
+  const [receipt] = await db.query<{ id: string; status: string; category_id: string | null }>(
+    `SELECT id, status, category_id FROM receipts WHERE id = $1 AND client_id = $2`,
+    [receiptId, client.id],
+  );
+  if (!receipt) return c.json({ error: "Not found" }, 404);
+  if (receipt.status !== "filed") return c.json({ error: "Only filed receipts can be corrected here" }, 409);
+
+  const [category] = await db.query<{ id: string }>(
+    `SELECT id FROM categories WHERE id = $1 AND client_id = $2`,
+    [body.categoryId, client.id],
+  );
+  if (!category) return c.json({ error: "Category not found for this client" }, 404);
+
+  await db.transaction([
+    {
+      query: `UPDATE receipts SET category_id = $1, updated_at = NOW() WHERE id = $2 AND client_id = $3`,
+      params: [body.categoryId, receiptId, client.id],
+    },
+    {
+      query: `INSERT INTO audit_events (id, client_id, receipt_id, actor_user_id, action, before_json, after_json) VALUES ($1, $2, $3, $4, 'receipt_category_corrected', $5::jsonb, $6::jsonb)`,
+      params: [newId("aud"), client.id, receiptId, c.get("userId"), { categoryId: receipt.category_id }, { categoryId: body.categoryId }],
+    },
+  ]);
+
+  return c.json({ receipt: await getReceiptDetails(db, receiptId, client.id) });
+});
+
 async function authorizedClient(c: {
   env: Env;
   get(key: "userId" | "userName"): string;

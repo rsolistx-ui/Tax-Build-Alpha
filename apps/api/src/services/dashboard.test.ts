@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildClientDashboardRow,
   buildDocumentWorkflowActions,
+  buildUncategorizedReceiptActions,
   sortActions,
   summarize,
   matchesFilter,
@@ -306,5 +307,51 @@ describe("buildDocumentWorkflowActions", () => {
     const missing = actions.find((a) => a.type === "missing_document")!;
     const review = actions.find((a) => a.type === "document_review")!;
     expect(missing.priority).toBeLessThan(review.priority);
+  });
+});
+
+describe("buildClientDashboardRow - uncategorizedCount includes receipt-line contributions", () => {
+  it("does not read 0 when the only blocker is an uncategorized receipt line", () => {
+    // All bank activity is already categorized business expense - nothing
+    // uncategorized on the bank side - but 2 filed-receipt lines are.
+    const { row } = buildClientDashboardRow(
+      meta(),
+      [bankTxn({ id: "txn_1", disposition: "business_expense", categoryId: "cat_1", triage: "matched" })],
+      [],
+      2,
+    );
+    expect(row.readiness).toBe("books_incomplete");
+    expect(row.uncategorizedCount).toBe(2);
+  });
+
+  it("sums bank-side and receipt-line uncategorized counts, not just one or the other", () => {
+    const { row } = buildClientDashboardRow(
+      meta(),
+      [bankTxn({ id: "txn_1", disposition: "business_expense", categoryId: null })],
+      [],
+      3,
+    );
+    expect(row.uncategorizedCount).toBe(4);
+  });
+});
+
+describe("buildUncategorizedReceiptActions", () => {
+  it("builds one action per affected receipt, not one per line", () => {
+    const actions = buildUncategorizedReceiptActions("cli_1", "Acme LLC", [
+      { receiptId: "rcpt_1", clientId: "cli_1", merchant: "Office Depot", date: "2026-01-05" },
+      { receiptId: "rcpt_2", clientId: "cli_1", merchant: null, date: null },
+    ]);
+    expect(actions).toHaveLength(2);
+    expect(actions[0]).toMatchObject({
+      type: "uncategorized_receipt_evidence",
+      clientId: "cli_1",
+      sourceEntityId: "rcpt_1",
+      deepLink: "/clients/cli_1?tab=folders&focus=rcpt_1",
+    });
+    expect(actions[0].explanation).toContain("Office Depot");
+  });
+
+  it("returns no actions when nothing is affected", () => {
+    expect(buildUncategorizedReceiptActions("cli_1", "Acme LLC", [])).toEqual([]);
   });
 });

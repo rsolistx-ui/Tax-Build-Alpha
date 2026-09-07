@@ -428,6 +428,74 @@ export async function getUncategorizedReceiptLineCounts(db: Db, clientIds: strin
   return new Map(rows.map((r) => [r.client_id, parseInt(r.count, 10)]));
 }
 
+/**
+ * Same canonical uncategorized-filed-receipt-line predicate as
+ * getUncategorizedReceiptLineCounts, but period-aware and per-client-period
+ * rather than all-time - one bulk query for any number of clients (each
+ * with its own start/end, or null/null for all-time), never one query per
+ * client. Returns one row per qualifying line, so a caller can both count
+ * lines (P&L/readiness completeness) and list the distinct affected
+ * receipts (one action per receipt) from the same result set.
+ */
+export type UncategorizedReceiptLineRow = { clientId: string; receiptId: string; merchant: string | null; date: string | null };
+
+export async function getUncategorizedReceiptLines(
+  db: Db,
+  periods: Array<{ clientId: string; startDate: string | null; endDate: string | null }>,
+): Promise<UncategorizedReceiptLineRow[]> {
+  if (periods.length === 0) return [];
+  const rows = await db.query<{ client_id: string; receipt_id: string; merchant: string | null; date: string | null }>(
+    `WITH periods AS (
+       SELECT * FROM jsonb_to_recordset($1::jsonb) AS t(client_id text, start_date date, end_date date)
+     ),
+     receipt_conflict AS (
+       SELECT r.id AS receipt_id
+       FROM receipts r
+       JOIN bank_transactions bt ON bt.matched_receipt_id = r.id AND bt.client_id = r.client_id
+       WHERE bt.disposition IN (${CONFLICTING_DISPOSITIONS_SQL_LIST})
+     )
+     SELECT r.client_id, r.id AS receipt_id, r.extracted_merchant AS merchant, r.extracted_date AS date
+     FROM receipts r
+     JOIN receipt_line_items li ON li.receipt_id = r.id
+     JOIN client_profiles cp ON cp.client_id = r.client_id
+     JOIN periods p ON p.client_id = r.client_id
+     LEFT JOIN categories cat_li ON cat_li.client_id = r.client_id
+       AND (LOWER(cat_li.slug) = LOWER(NULLIF(li.category, '')) OR LOWER(cat_li.name) = LOWER(NULLIF(li.category, '')))
+     LEFT JOIN categories cat_receipt ON cat_receipt.id = r.category_id
+     WHERE r.status = 'filed'
+       AND UPPER(r.extracted_currency) = UPPER(cp.default_currency)
+       AND COALESCE(cat_li.id, cat_receipt.id, r.category_id) IS NULL
+       AND NOT EXISTS (SELECT 1 FROM receipt_conflict rc WHERE rc.receipt_id = r.id)
+       AND (p.start_date IS NULL OR r.extracted_date >= p.start_date)
+       AND (p.end_date IS NULL OR r.extracted_date <= p.end_date)
+     ORDER BY r.client_id, r.extracted_date DESC NULLS LAST`,
+    [periods.map((p) => ({ client_id: p.clientId, start_date: p.startDate, end_date: p.endDate }))],
+  );
+  return rows.map((r) => ({ clientId: r.client_id, receiptId: r.receipt_id, merchant: r.merchant, date: r.date ? String(r.date) : null }));
+}
+
+export type UncategorizedReceiptForAction = { receiptId: string; clientId: string; merchant: string | null; date: string | null };
+
+/** Pure summarizer over getUncategorizedReceiptLines rows: per-client line count (for completeness) and per-client distinct receipt list (for one action per receipt, not per line). */
+export function summarizeUncategorizedReceiptLines(rows: UncategorizedReceiptLineRow[]): {
+  countByClient: Map<string, number>;
+  receiptsByClient: Map<string, UncategorizedReceiptForAction[]>;
+} {
+  const countByClient = new Map<string, number>();
+  const receiptsByClient = new Map<string, Map<string, UncategorizedReceiptForAction>>();
+  for (const row of rows) {
+    countByClient.set(row.clientId, (countByClient.get(row.clientId) ?? 0) + 1);
+    const clientReceipts = receiptsByClient.get(row.clientId) ?? new Map<string, UncategorizedReceiptForAction>();
+    if (!clientReceipts.has(row.receiptId)) {
+      clientReceipts.set(row.receiptId, { receiptId: row.receiptId, clientId: row.clientId, merchant: row.merchant, date: row.date });
+    }
+    receiptsByClient.set(row.clientId, clientReceipts);
+  }
+  const receiptsOut = new Map<string, UncategorizedReceiptForAction[]>();
+  for (const [clientId, m] of receiptsByClient) receiptsOut.set(clientId, Array.from(m.values()));
+  return { countByClient, receiptsByClient: receiptsOut };
+}
+
 export function isAccrualUnsupported(report: PnlReport | AccrualUnsupported): report is AccrualUnsupported {
   return report.accrualSupported === false;
 }

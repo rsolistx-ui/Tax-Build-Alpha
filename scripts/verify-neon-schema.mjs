@@ -75,6 +75,20 @@ const checks = [
     label: "fk_documents_duplicate_same_client (a document's duplicate target must belong to the same client, migration 0010)",
     query: `SELECT 1 FROM pg_constraint WHERE conname = 'fk_documents_duplicate_same_client'`,
   },
+  {
+    // Existence alone is not enough - migration 0010 shipped both FKs with
+    // a blanket ON DELETE SET NULL that would try to null the NOT NULL
+    // client_id column too. Migration 0011 must have replaced the
+    // definition with column-specific SET NULL, so verify the actual
+    // constraint definition, not just that a constraint with this name
+    // exists.
+    label: "fk_documents_checklist_same_client has column-specific ON DELETE SET NULL (migration 0011 - never nulls client_id)",
+    query: `SELECT 1 FROM pg_constraint WHERE conname = 'fk_documents_checklist_same_client' AND pg_get_constraintdef(oid) LIKE '%SET NULL (checklist_item_id)%'`,
+  },
+  {
+    label: "fk_documents_duplicate_same_client has column-specific ON DELETE SET NULL (migration 0011 - never nulls client_id)",
+    query: `SELECT 1 FROM pg_constraint WHERE conname = 'fk_documents_duplicate_same_client' AND pg_get_constraintdef(oid) LIKE '%SET NULL (duplicate_of_document_id)%'`,
+  },
 ];
 
 // The pre-0007 per-state indexes are superseded by idx_bank_unique_receipt_claim

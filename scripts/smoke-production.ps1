@@ -1367,6 +1367,45 @@ try {
   }
   Write-Host "Confirmed: P&L, Operations dashboard, client overview, and tax readiness all agree the books are incomplete."
 
+  Write-Host "Verifying the client overview API contract actually returns financialPeriod (not just a frontend mock)..."
+  if ($null -eq $overviewBBefore.financialPeriod) {
+    throw "GET /api/clients/:clientId/overview must return a financialPeriod object."
+  }
+  if (-not ($overviewBBefore.financialPeriod.PSObject.Properties.Name -contains "income") -or
+      -not ($overviewBBefore.financialPeriod.PSObject.Properties.Name -contains "expenses") -or
+      -not ($overviewBBefore.financialPeriod.PSObject.Properties.Name -contains "net") -or
+      -not ($overviewBBefore.financialPeriod.PSObject.Properties.Name -contains "periodStart") -or
+      -not ($overviewBBefore.financialPeriod.PSObject.Properties.Name -contains "periodEnd")) {
+    throw "financialPeriod is missing one of income/expenses/net/periodStart/periodEnd."
+  }
+  if (-not ($overviewBBefore.financialStatus.PSObject.Properties.Name -contains "resolvedCount")) {
+    throw "financialStatus must include a resolvedCount (reconciled/matched bank transaction count)."
+  }
+  if ($overviewBBefore.financialStatus.periodStart -ne $overviewBBefore.financialPeriod.periodStart) {
+    throw "financialStatus and financialPeriod must refer to the same selected period, got '$($overviewBBefore.financialStatus.periodStart)' vs '$($overviewBBefore.financialPeriod.periodStart)'."
+  }
+
+  Write-Host "Verifying the uncategorized receipt evidence produces a real, resolvable action..."
+  $dashboardActionsBBefore = @($dashboardBBefore.actions) | Where-Object { $_.type -eq "uncategorized_receipt_evidence" -and $_.sourceEntityId -eq $clientBReceiptId }
+  if (@($dashboardActionsBBefore).Count -eq 0) { throw "The Operations dashboard must surface an uncategorized_receipt_evidence action for the affected receipt." }
+  $overviewActionsBBefore = @($overviewBBefore.nextActions) | Where-Object { $_.type -eq "uncategorized_receipt_evidence" -and $_.sourceEntityId -eq $clientBReceiptId }
+  if (@($overviewActionsBBefore).Count -eq 0) { throw "Client B's own overview must surface the same uncategorized_receipt_evidence action." }
+
+  Write-Host "Resolving the uncategorized receipt evidence via the real correction endpoint..."
+  $categorizeBody = @{ categoryId = $clientBFixCategoryId } | ConvertTo-Json -Compress
+  $categorizePayloadPath = New-JsonPayloadFile $categorizeBody
+  $categorizeResult = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-H", "Content-Type: application/json", "-X", "PATCH", "--data-binary", "@$categorizePayloadPath", "$BaseUrl/api/clients/$clientBId/receipts/$clientBReceiptId/category")
+  Remove-TempFile $categorizePayloadPath
+  if (-not $categorizeResult.receipt -or -not $categorizeResult.receipt.category_id) { throw "Categorizing the filed receipt did not return the updated receipt." }
+
+  $pnlBAfter = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientBId/pnl")
+  if (-not $pnlBAfter.completeness.isComplete) { throw "P&L must become complete once the receipt's category is corrected." }
+  $overviewBAfter = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientBId/overview")
+  $overviewActionsBAfter = @($overviewBAfter.nextActions) | Where-Object { $_.type -eq "uncategorized_receipt_evidence" -and $_.sourceEntityId -eq $clientBReceiptId }
+  if (@($overviewActionsBAfter).Count -ne 0) { throw "The uncategorized_receipt_evidence action must clear once the receipt is categorized." }
+  Write-Host "Confirmed: correcting the receipt's category resolves it consistently across P&L, dashboard, and client overview."
+
+
   Write-Host "Seeding a second synthetic firm to prove live cross-tenant isolation..."
   $emailC = "folio-smoke-tenant2-$runId@example.com"
   $passwordC = "Smoke!$([guid]::NewGuid().ToString('N').Substring(0, 18))"

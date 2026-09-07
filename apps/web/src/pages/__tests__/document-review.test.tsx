@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { DocumentReviewPage } from "@/pages/document-review";
 
@@ -70,5 +70,54 @@ describe("DocumentReviewPage", () => {
     renderAtFocus(null);
     expect(await screen.findByPlaceholderText("Tax year")).toBeInTheDocument();
     expect(await screen.findByText("Reassign client...")).toBeInTheDocument();
+  });
+});
+
+describe("DocumentReviewPage nonterminal vs terminal actions", () => {
+  it("keeps a document visible with refreshed data after a nonterminal correction", async () => {
+    const { api } = await import("@/lib/api");
+    const patchCalls: Array<[string, unknown]> = [];
+    (api as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (path: string, init?: { method?: string; body?: string }) => {
+      if (path === "/api/documents/review") return { documents: [DOC_A] };
+      if (path === "/api/clients") return { clients: [{ id: "cli_1", name: "Acme LLC" }] };
+      if (path === "/api/documents/review/doc_a" && init?.method === "PATCH") {
+        patchCalls.push([path, init.body]);
+        return {
+          ok: true,
+          terminal: false,
+          document: { ...DOC_A, documentType: "receipt" },
+        };
+      }
+      return {};
+    });
+    renderAtFocus(null);
+    await screen.findByRole("link", { name: /statement-jan\.pdf/i });
+
+    const [select] = await screen.findAllByDisplayValue("bank statement");
+    fireEvent.change(select, { target: { value: "receipt" } });
+
+    // The document must still be in the queue - assign_document_type is a
+    // correction, not a resolution.
+    expect(await screen.findByRole("link", { name: /statement-jan\.pdf/i })).toBeInTheDocument();
+    expect(patchCalls).toHaveLength(1);
+  });
+
+  it("removes a document from the queue after a terminal Confirm", async () => {
+    const { api } = await import("@/lib/api");
+    (api as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (path: string, init?: { method?: string }) => {
+      if (path === "/api/documents/review") return { documents: [DOC_A] };
+      if (path === "/api/clients") return { clients: [{ id: "cli_1", name: "Acme LLC" }] };
+      if (path === "/api/documents/review/doc_a" && init?.method === "PATCH") {
+        return { ok: true, terminal: true, document: null };
+      }
+      return {};
+    });
+    renderAtFocus(null);
+    const confirmButton = await screen.findByRole("button", { name: "Confirm" });
+    fireEvent.click(confirmButton);
+
+    await waitFor(() => {
+      expect(screen.queryByRole("link", { name: /statement-jan\.pdf/i })).not.toBeInTheDocument();
+    });
   });
 });

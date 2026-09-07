@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Db } from "../db";
-import { getBankLedger, getReceiptEvidence, getOpenItems, getExcludedNonbusiness, getUncategorizedReceiptLineCounts } from "./reporting";
+import { getBankLedger, getReceiptEvidence, getOpenItems, getExcludedNonbusiness, getUncategorizedReceiptLineCounts, summarizeUncategorizedReceiptLines, type UncategorizedReceiptLineRow } from "./reporting";
 
 function fakeDb(overrides: Record<string, unknown[]>): Db {
   return {
@@ -227,5 +227,29 @@ describe("getUncategorizedReceiptLineCounts", () => {
     expect(result.get("cli_a")).toBe(3);
     expect(result.get("cli_b")).toBe(0);
     expect(result.get("cli_c")).toBeUndefined();
+  });
+});
+
+describe("summarizeUncategorizedReceiptLines", () => {
+  it("counts every line but lists each receipt only once", () => {
+    const rows: UncategorizedReceiptLineRow[] = [
+      { clientId: "cli_a", receiptId: "rcpt_1", merchant: "Office Depot", date: "2026-01-05" },
+      { clientId: "cli_a", receiptId: "rcpt_1", merchant: "Office Depot", date: "2026-01-05" }, // second uncategorized line, same receipt
+      { clientId: "cli_a", receiptId: "rcpt_2", merchant: "Staples", date: "2026-01-06" },
+      { clientId: "cli_b", receiptId: "rcpt_3", merchant: "Other Client Vendor", date: "2026-01-07" },
+    ];
+    const { countByClient, receiptsByClient } = summarizeUncategorizedReceiptLines(rows);
+
+    expect(countByClient.get("cli_a")).toBe(3);
+    expect(countByClient.get("cli_b")).toBe(1);
+    expect(receiptsByClient.get("cli_a")).toHaveLength(2);
+    expect(receiptsByClient.get("cli_a")?.map((r) => r.receiptId).sort()).toEqual(["rcpt_1", "rcpt_2"]);
+    expect(receiptsByClient.get("cli_b")).toEqual([{ receiptId: "rcpt_3", clientId: "cli_b", merchant: "Other Client Vendor", date: "2026-01-07" }]);
+  });
+
+  it("returns empty maps for no rows", () => {
+    const { countByClient, receiptsByClient } = summarizeUncategorizedReceiptLines([]);
+    expect(countByClient.size).toBe(0);
+    expect(receiptsByClient.size).toBe(0);
   });
 });

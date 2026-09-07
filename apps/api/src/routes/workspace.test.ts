@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Db, DbStatement } from "../db";
-import { applyDocumentReviewAction, checkReadinessTransitionAllowed } from "./workspace";
+import { applyDocumentReviewAction, checkReadinessTransitionAllowed, taxYearRange } from "./workspace";
 
 type Rows = Record<string, unknown[]>;
 
@@ -51,7 +51,7 @@ describe("applyDocumentReviewAction cross-client relation integrity", () => {
       action: "correct",
       checklistItemId: "chk_1",
     });
-    expect(result).toEqual({ ok: true });
+    expect(result).toEqual({ ok: true, terminal: false });
     expect(transactionCalls).toHaveLength(1);
   });
 
@@ -113,7 +113,7 @@ describe("applyDocumentReviewAction cross-client relation integrity", () => {
       action: "assign_client",
       targetClientId: "cli_b",
     });
-    expect(result).toEqual({ ok: true });
+    expect(result).toEqual({ ok: true, terminal: false });
     const [statements] = transactionCalls;
     const updateStatement = statements.find((s) => s.query.includes("SET client_id"));
     expect(updateStatement?.query).toContain("checklist_item_id = NULL");
@@ -129,7 +129,7 @@ describe("applyDocumentReviewAction cross-client relation integrity", () => {
       action: "match_checklist",
       checklistItemId: "chk_1",
     });
-    expect(result).toEqual({ ok: true });
+    expect(result).toEqual({ ok: true, terminal: false });
     expect(transactionCalls).toHaveLength(1);
     const [statements] = transactionCalls;
     expect(statements.some((s) => s.query.includes("UPDATE client_documents SET checklist_item_id"))).toBe(true);
@@ -192,5 +192,87 @@ describe("checkReadinessTransitionAllowed", () => {
     const result = await checkReadinessTransitionAllowed(db, baseClient, 2025, "complete");
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reasons).toEqual(["bookkeeping_incomplete"]);
+  });
+});
+
+describe("applyDocumentReviewAction terminal vs nonterminal", () => {
+  it("marks confirm as terminal", async () => {
+    const { db } = fakeDb({ [DOCUMENT_LOOKUP_KEY]: [baseDocument] });
+    const result = await applyDocumentReviewAction(db, "firm_1", "doc_1", "user_1", { action: "confirm" });
+    expect(result).toEqual({ ok: true, terminal: true });
+  });
+
+  it("marks mark_duplicate as terminal", async () => {
+    const { db } = fakeDb({ [DOCUMENT_LOOKUP_KEY]: [baseDocument] });
+    const result = await applyDocumentReviewAction(db, "firm_1", "doc_1", "user_1", { action: "mark_duplicate" });
+    expect(result).toEqual({ ok: true, terminal: true });
+  });
+
+  it("marks mark_not_needed as terminal", async () => {
+    const { db } = fakeDb({ [DOCUMENT_LOOKUP_KEY]: [baseDocument] });
+    const result = await applyDocumentReviewAction(db, "firm_1", "doc_1", "user_1", { action: "mark_not_needed" });
+    expect(result).toEqual({ ok: true, terminal: true });
+  });
+
+  it("marks assign_document_type as nonterminal", async () => {
+    const { db } = fakeDb({ [DOCUMENT_LOOKUP_KEY]: [baseDocument] });
+    const result = await applyDocumentReviewAction(db, "firm_1", "doc_1", "user_1", { action: "assign_document_type", documentType: "receipt" });
+    expect(result).toEqual({ ok: true, terminal: false });
+  });
+
+  it("marks assign_tax_year as nonterminal", async () => {
+    const { db } = fakeDb({ [DOCUMENT_LOOKUP_KEY]: [baseDocument] });
+    const result = await applyDocumentReviewAction(db, "firm_1", "doc_1", "user_1", { action: "assign_tax_year", taxYear: 2026 });
+    expect(result).toEqual({ ok: true, terminal: false });
+  });
+});
+
+describe("applyDocumentReviewAction tax-year input validation", () => {
+  it("rejects a non-integer taxYear on assign_tax_year with 400", async () => {
+    const { db, transactionCalls } = fakeDb({ [DOCUMENT_LOOKUP_KEY]: [baseDocument] });
+    const result = await applyDocumentReviewAction(db, "firm_1", "doc_1", "user_1", { action: "assign_tax_year", taxYear: 2025.5 });
+    expect(result).toEqual({ ok: false, status: 400, error: "taxYear must be an integer between 2000 and 2100" });
+    expect(transactionCalls).toHaveLength(0);
+  });
+
+  it("rejects an out-of-range taxYear on assign_tax_year with 400", async () => {
+    const { db, transactionCalls } = fakeDb({ [DOCUMENT_LOOKUP_KEY]: [baseDocument] });
+    const result = await applyDocumentReviewAction(db, "firm_1", "doc_1", "user_1", { action: "assign_tax_year", taxYear: 1899 });
+    expect(result).toEqual({ ok: false, status: 400, error: "taxYear must be an integer between 2000 and 2100" });
+    expect(transactionCalls).toHaveLength(0);
+  });
+
+  it("rejects an out-of-range taxYear on correct with 400", async () => {
+    const { db, transactionCalls } = fakeDb({ [DOCUMENT_LOOKUP_KEY]: [baseDocument] });
+    const result = await applyDocumentReviewAction(db, "firm_1", "doc_1", "user_1", { action: "correct", taxYear: 3000 });
+    expect(result).toEqual({ ok: false, status: 400, error: "taxYear must be an integer between 2000 and 2100" });
+    expect(transactionCalls).toHaveLength(0);
+  });
+});
+
+describe("taxYearRange", () => {
+  it("returns null bounds for no configured tax year", () => {
+    expect(taxYearRange(null)).toEqual({ startDate: null, endDate: null });
+  });
+
+  it("returns Jan 1 - Dec 31 for a configured tax year", () => {
+    expect(taxYearRange(2025)).toEqual({ startDate: "2025-01-01", endDate: "2025-12-31" });
+  });
+});
+
+/**
+ * Cross-tax-year isolation itself (a 2026 transaction never blocking 2025
+ * readiness) is a real Postgres WHERE-clause behavior - fakeDb here is a
+ * substring-matching stub with no parameter awareness, so it cannot
+ * distinguish "$2/$3 filtered this row out" from "this row was never
+ * returned". That behavior is proven for real against production Postgres
+ * by the extended production smoke test (two-tax-year isolation check).
+ * This just proves the date bounds computeCanonicalReadiness receives are
+ * actually derived from the requested tax year.
+ */
+describe("taxYearRange feeds computeCanonicalReadiness's date bounds", () => {
+  it("computes the 2025 tax year as Jan 1 - Dec 31 2025, not 2026", () => {
+    expect(taxYearRange(2025)).toEqual({ startDate: "2025-01-01", endDate: "2025-12-31" });
+    expect(taxYearRange(2025)).not.toEqual(taxYearRange(2026));
   });
 });

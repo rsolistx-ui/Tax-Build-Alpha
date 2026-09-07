@@ -57,6 +57,7 @@ export type ActionType =
   | "bank_exception"
   | "unclassified_transaction"
   | "uncategorized_activity"
+  | "uncategorized_receipt_evidence"
   | "receipt_review"
   | "missing_document"
   | "document_review";
@@ -70,6 +71,7 @@ export const ACTION_PRIORITY: Record<ActionType, number> = {
   bank_exception: 3,
   unclassified_transaction: 4,
   uncategorized_activity: 5,
+  uncategorized_receipt_evidence: 5,
   receipt_review: 6,
   document_review: 6,
 };
@@ -111,6 +113,10 @@ function deepLinkForReceipt(clientId: string, receiptId: string): string {
 
 function deepLinkForChecklist(clientId: string, taxYear: number): string {
   return `/clients/${clientId}?tab=tax-readiness&taxYear=${taxYear}`;
+}
+
+function deepLinkForReceiptCategory(clientId: string, receiptId: string): string {
+  return `/clients/${clientId}?tab=folders&focus=${receiptId}`;
 }
 
 function deepLinkForDocument(documentId: string): string {
@@ -357,13 +363,45 @@ export function buildClientDashboardRow(
       missingEvidenceCount,
       unresolvedBankExceptionCount,
       unclassifiedCount: completeness.unclassifiedCount,
-      uncategorizedCount,
+      // Bank-side uncategorized business activity plus every canonical
+      // uncategorized filed-receipt line - completeness.uncategorizedCount
+      // is exactly that sum, so the displayed count can never read 0 while
+      // uncategorized receipt evidence is the actual reason books are
+      // incomplete.
+      uncategorizedCount: completeness.uncategorizedCount,
       currencyConflictCount,
       filedReceiptCount,
       isComplete: completeness.isComplete,
     },
     actions,
   };
+}
+
+export type UncategorizedReceiptForAction = {
+  receiptId: string;
+  clientId: string;
+  merchant: string | null;
+  date: string | null;
+};
+
+/**
+ * One action per affected receipt, not per uncategorized line - a
+ * professional resolves the receipt's category once, which the canonical
+ * predicate in getUncategorizedReceiptLineCount(s) treats as satisfying
+ * every line on that receipt.
+ */
+export function buildUncategorizedReceiptActions(clientId: string, clientName: string, receipts: UncategorizedReceiptForAction[]): DashboardAction[] {
+  return receipts.map((r) => ({
+    id: `uncategorized_receipt:${r.receiptId}`,
+    clientId,
+    clientName,
+    type: "uncategorized_receipt_evidence",
+    priority: ACTION_PRIORITY.uncategorized_receipt_evidence,
+    explanation: `Filed receipt evidence has no category${r.merchant ? `: ${r.merchant}` : ""}`,
+    date: r.date,
+    sourceEntityId: r.receiptId,
+    deepLink: deepLinkForReceiptCategory(clientId, r.receiptId),
+  }));
 }
 
 /** Deterministic order: highest-priority (lowest number) work first, oldest date first within a priority tier. */
