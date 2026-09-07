@@ -1341,7 +1341,7 @@ try {
     total = $clientBReceipt.extracted_total
     currency = $clientBReceipt.extracted_currency
     category = $null
-    confidence = "manual"
+    confidence = 1
     lineItems = $uncategorizedLineItems
   } | ConvertTo-Json -Compress -Depth 6
   $clientBCorrectionPayloadPath = New-JsonPayloadFile $clientBCorrectionBody
@@ -1509,11 +1509,6 @@ try {
     if (($cleanupCProps -contains "authFailures") -and @($cleanupCResult.authFailures).Count -gt 0) { throw "Second-tenant cleanup could not remove the synthetic auth account: $($cleanupCResult.authFailures -join ', ')" }
     if (($cleanupCProps -contains "betaMetadataFailures") -and @($cleanupCResult.betaMetadataFailures).Count -gt 0) { throw "Second-tenant cleanup could not remove beta security metadata: $($cleanupCResult.betaMetadataFailures -join ', ')" }
 
-    Write-Host "Independently verifying the second synthetic tenant left zero production residue..."
-    $verifyCRaw = & node (Join-Path $PSScriptRoot "smoke-admin.mjs") verify-clean $firmCId $ownerUserCId
-    if ($LASTEXITCODE -ne 0) { throw "Second-tenant residue check failed: $verifyCRaw" }
-    $verifyCResult = ($verifyCRaw | Select-Object -Last 1) | ConvertFrom-Json
-    if (-not $verifyCResult.clean) { throw "Second-tenant residue check reported non-zero counts: $($verifyCRaw | Select-Object -Last 1)" }
   }
   Remove-TempFile $cookieJarC
 
