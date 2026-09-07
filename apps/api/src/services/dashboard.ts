@@ -113,8 +113,8 @@ function deepLinkForChecklist(clientId: string, taxYear: number): string {
   return `/clients/${clientId}?tab=tax-readiness&taxYear=${taxYear}`;
 }
 
-function deepLinkForDocument(clientId: string, documentId: string): string {
-  return `/clients/${clientId}?tab=documents&focus=${documentId}`;
+function deepLinkForDocument(documentId: string): string {
+  return `/documents/review?focus=${documentId}`;
 }
 
 export type DashboardChecklistItem = {
@@ -172,7 +172,7 @@ export function buildDocumentWorkflowActions(
       explanation: `Document awaiting review: ${doc.filename}`,
       date: null,
       sourceEntityId: doc.id,
-      deepLink: deepLinkForDocument(clientId, doc.id),
+      deepLink: deepLinkForDocument(doc.id),
     });
   }
   return actions;
@@ -189,6 +189,7 @@ export function buildClientDashboardRow(
   meta: DashboardClientMeta,
   bankTxns: DashboardBankTxn[],
   receipts: DashboardReceipt[],
+  uncategorizedReceiptLineCount: number = 0,
 ): { row: ClientDashboardRow; actions: DashboardAction[] } {
   const actions: DashboardAction[] = [];
   const currency = meta.currency;
@@ -332,7 +333,7 @@ export function buildClientDashboardRow(
   const completeness = computeCompleteness({
     transactions: bankTxns.map((t) => ({ disposition: t.disposition, triage: t.triage, categoryId: t.categoryId, currency: t.currency })),
     clientCurrency: currency,
-    uncategorizedReceiptLineCount: 0,
+    uncategorizedReceiptLineCount,
     receiptCurrencyConflictCount,
   });
 

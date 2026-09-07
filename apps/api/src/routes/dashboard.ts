@@ -18,6 +18,7 @@ import {
   type DashboardDocument,
 } from "../services/dashboard";
 import type { AnyDisposition } from "../services/pnl";
+import { getUncategorizedReceiptLineCounts } from "../services/reporting";
 
 export const dashboardRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 dashboardRoutes.use("*", requireSession);
@@ -204,6 +205,8 @@ dashboardRoutes.get("/", async (c) => {
     documentsByClient.set(row.client_id, list);
   }
 
+  const uncategorizedReceiptLineCounts = await getUncategorizedReceiptLineCounts(db, clientRows.map((r) => r.id));
+
   const rows = [];
   const allActions = [];
   for (const c2 of clientRows) {
@@ -216,7 +219,12 @@ dashboardRoutes.get("/", async (c) => {
       currency: (c2.default_currency || "USD").toUpperCase(),
       updatedAt: c2.updated_at,
     };
-    const { row, actions } = buildClientDashboardRow(meta, bankByClient.get(c2.id) ?? [], receiptsByClient.get(c2.id) ?? []);
+    const { row, actions } = buildClientDashboardRow(
+      meta,
+      bankByClient.get(c2.id) ?? [],
+      receiptsByClient.get(c2.id) ?? [],
+      uncategorizedReceiptLineCounts.get(c2.id) ?? 0,
+    );
     const documentActions = buildDocumentWorkflowActions(
       c2.id,
       c2.name,

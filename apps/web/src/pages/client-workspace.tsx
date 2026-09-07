@@ -44,7 +44,7 @@ type Category = {
   is_default: boolean;
 };
 
-type Client = { id: string; name: string };
+type Client = { id: string; name: string; legal_name?: string | null };
 
 type ProfessionalProfile = {
   dba?: string;
@@ -105,6 +105,10 @@ export function ClientWorkspacePage() {
   const initialTab = (VALID_TABS as string[]).includes(searchParams.get("tab") ?? "")
     ? (searchParams.get("tab") as Tab)
     : "overview";
+  const [pinnedTaxYear, setPinnedTaxYear] = useState<number | null>(() => {
+    const value = searchParams.get("taxYear");
+    return value ? Number(value) : null;
+  });
   const [client, setClient] = useState<Client | null>(null);
   const [profile, setProfile] = useState<ClientProfile | null>(null);
   const [editingProfile, setEditingProfile] = useState(false);
@@ -155,13 +159,22 @@ export function ClientWorkspacePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientId]);
 
-  async function saveProfile(next: Partial<ClientProfile>) {
+  async function saveProfile(next: Record<string, unknown>) {
     try {
-      const data = await api<{ profile: ClientProfile }>(`/api/clients/${clientId}/profile`, {
-        method: "PATCH",
-        body: JSON.stringify(next),
-      });
-      setProfile(data.profile);
+      const { legal_name, ...profileFields } = next as { legal_name?: string | null } & Record<string, unknown>;
+      const [profileResult] = await Promise.all([
+        api<{ profile: ClientProfile }>(`/api/clients/${clientId}/profile`, {
+          method: "PATCH",
+          body: JSON.stringify(profileFields),
+        }),
+        legal_name !== undefined
+          ? api<{ client: Client }>(`/api/clients/${clientId}`, {
+              method: "PATCH",
+              body: JSON.stringify({ legal_name: legal_name || null }),
+            }).then((data) => setClient(data.client))
+          : Promise.resolve(),
+      ]);
+      setProfile(profileResult.profile);
       setEditingProfile(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save the client profile");
@@ -300,8 +313,12 @@ export function ClientWorkspacePage() {
     const params = new URLSearchParams(query);
     const nextTab = params.get("tab");
     const focus = params.get("focus");
+    const taxYear = params.get("taxYear");
     if (nextTab && (VALID_TABS as string[]).includes(nextTab)) setTab(nextTab as Tab);
     if (focus) setSearchParams({ focus }, { replace: true });
+    // Kept in component state rather than the URL so a subsequent same-page
+    // navigation cannot be silently overwritten by the mount-only URL clear.
+    if (taxYear) setPinnedTaxYear(Number(taxYear));
   }
 
   return (
@@ -321,11 +338,12 @@ export function ClientWorkspacePage() {
       <Card>
         <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
           {editingProfile ? (
-            <ProfileEditForm profile={profile} onCancel={() => setEditingProfile(false)} onSave={saveProfile} />
+            <ProfileEditForm profile={profile} legalName={client?.legal_name ?? null} onCancel={() => setEditingProfile(false)} onSave={saveProfile} />
           ) : (
             <>
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
                 <span className="flex items-center gap-1.5 font-medium"><Settings className="h-3.5 w-3.5" /> Client profile</span>
+                <span>Legal name: <strong>{client?.legal_name || "Not set"}</strong></span>
                 <span>Entity: <strong>{profile?.entity_type || "Not set"}</strong></span>
                 <span>Industry: <strong>{profile?.industry || "Not set"}</strong></span>
                 <span>State: <strong>{profile?.state || "Not set"}</strong></span>
@@ -360,7 +378,9 @@ export function ClientWorkspacePage() {
 
       {tab === "overview" ? <ClientOverview clientId={clientId} onNavigate={navigateToDeepLink} /> : null}
 
-      {tab === "tax-readiness" ? <TaxReadinessPanel clientId={clientId} taxYear={profile?.tax_year ?? null} /> : null}
+      {tab === "tax-readiness" ? (
+        <TaxReadinessPanel clientId={clientId} taxYear={pinnedTaxYear ?? profile?.tax_year ?? null} />
+      ) : null}
 
       {tab === "documents" ? <DocumentsPanel clientId={clientId} /> : null}
 
@@ -659,13 +679,16 @@ function BatchStatusBadge({ status, error }: { status: BatchStatus; error?: stri
 
 function ProfileEditForm({
   profile,
+  legalName,
   onCancel,
   onSave,
 }: {
   profile: ClientProfile | null;
+  legalName: string | null;
   onCancel: () => void;
   onSave: (next: Record<string, unknown>) => void;
 }) {
+  const [legalNameValue, setLegalNameValue] = useState(legalName ?? "");
   const [entityType, setEntityType] = useState(profile?.entity_type ?? "");
   const [industry, setIndustry] = useState(profile?.industry ?? "");
   const [state, setState] = useState(profile?.state ?? "");
@@ -689,6 +712,7 @@ function ProfileEditForm({
   return (
     <div className="w-full space-y-3">
       <div className="flex w-full flex-wrap items-end gap-2">
+        <Field label="Legal name" value={legalNameValue} onChange={setLegalNameValue} />
         <Field label="Entity type" value={entityType} onChange={setEntityType} />
         <Field label="Industry" value={industry} onChange={setIndustry} />
         <Field label="State" value={state} onChange={setState} />
@@ -724,6 +748,7 @@ function ProfileEditForm({
         <Button
           size="sm"
           onClick={() => onSave({
+            legal_name: legalNameValue || null,
             entity_type: entityType || null,
             industry: industry || null,
             state: state || null,

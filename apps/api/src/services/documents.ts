@@ -49,6 +49,34 @@ export function isValidChecklistStatus(value: string): value is ChecklistStatus 
 }
 
 /**
+ * Server-side upload gate - the browser's accept attribute is not security.
+ * A conservative combination of extension and (when present) content type:
+ * neither is trusted alone, so a renamed executable or script cannot pass
+ * merely by spoofing one signal. Files stay evidence blobs, never executed.
+ */
+export const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
+
+const EXTENSION_CONTENT_TYPES: Record<string, string[]> = {
+  pdf: ["application/pdf"],
+  png: ["image/png"],
+  jpg: ["image/jpeg"],
+  jpeg: ["image/jpeg"],
+  heic: ["image/heic", "image/heif", "application/octet-stream"],
+  docx: ["application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+  xlsx: ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
+  csv: ["text/csv", "application/csv", "application/vnd.ms-excel", "text/plain", "application/octet-stream"],
+};
+
+export function isSupportedUpload(filename: string, contentType: string | null): boolean {
+  const ext = filename.toLowerCase().split(".").pop() ?? "";
+  const allowed = EXTENSION_CONTENT_TYPES[ext];
+  if (!allowed) return false;
+  const ct = (contentType || "").toLowerCase().split(";")[0].trim();
+  if (!ct) return true;
+  return allowed.includes(ct);
+}
+
+/**
  * Deterministic filename/content-type based suggestion. Never a final
  * classification - the review queue is where a professional confirms it.
  */

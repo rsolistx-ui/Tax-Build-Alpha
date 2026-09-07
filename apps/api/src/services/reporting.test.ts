@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Db } from "../db";
-import { getBankLedger, getReceiptEvidence, getOpenItems, getExcludedNonbusiness } from "./reporting";
+import { getBankLedger, getReceiptEvidence, getOpenItems, getExcludedNonbusiness, getUncategorizedReceiptLineCounts } from "./reporting";
 
 function fakeDb(overrides: Record<string, unknown[]>): Db {
   return {
@@ -196,5 +196,36 @@ describe("getExcludedNonbusiness", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].transactionId).toBe("txn_personal");
     expect(rows[0].professionalNote).toBe("Confirmed personal by Phyllis");
+  });
+});
+
+describe("getUncategorizedReceiptLineCounts", () => {
+  it("returns an empty map without querying when given no clients", async () => {
+    let queried = false;
+    const db: Db = {
+      async query() {
+        queried = true;
+        return [];
+      },
+      async transaction() {
+        return [];
+      },
+    };
+    const result = await getUncategorizedReceiptLineCounts(db, []);
+    expect(result.size).toBe(0);
+    expect(queried).toBe(false);
+  });
+
+  it("maps each client's real uncategorized filed-receipt-line count, never a hardcoded zero", async () => {
+    const db = fakeDb({
+      "GROUP BY r.client_id": [
+        { client_id: "cli_a", count: "3" },
+        { client_id: "cli_b", count: "0" },
+      ],
+    });
+    const result = await getUncategorizedReceiptLineCounts(db, ["cli_a", "cli_b", "cli_c"]);
+    expect(result.get("cli_a")).toBe(3);
+    expect(result.get("cli_b")).toBe(0);
+    expect(result.get("cli_c")).toBeUndefined();
   });
 });

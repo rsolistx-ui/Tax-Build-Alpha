@@ -1320,6 +1320,53 @@ try {
   $residualReviewAction = @($dashboardAfterConfirm.actions) | Where-Object { $_.sourceEntityId -eq $clientBDocId -and $_.type -eq "document_review" }
   if (@($residualReviewAction).Count -gt 0) { throw "Confirming Client B's document should clear its document_review action, but it is still present." }
 
+  Write-Host "Verifying canonical readiness reconciliation using an uncategorized filed-receipt line (not bank triage)..."
+  $clientBReceiptUpload = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-F", "file=@$ReceiptPath", "$BaseUrl/api/clients/$clientBId/receipts")
+  $clientBReceiptId = [string]$clientBReceiptUpload.receipt.id
+  if (-not $clientBReceiptId) { throw "Client B receipt upload did not return an extracted receipt." }
+  $clientBReview = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientBId/review")
+  $clientBReceipt = @($clientBReview.receipts) | Where-Object { $_.id -eq $clientBReceiptId } | Select-Object -First 1
+  if (-not $clientBReceipt) { throw "Client B's extracted receipt did not appear in the review queue." }
+
+  Write-Host "Forcing an uncategorized line so this receipt cannot silently reconcile as complete..."
+  $uncategorizedLineItems = @(@($clientBReceipt.lineItems) | ForEach-Object {
+    @{ description = $_.description; quantity = $_.quantity; unitPrice = $_.unitPrice; amount = $_.amount; category = $null }
+  })
+  $clientBCorrectionBody = @{
+    date = $clientBReceipt.extracted_date
+    merchant = $clientBReceipt.extracted_merchant
+    subtotal = $clientBReceipt.extracted_subtotal
+    tax = $clientBReceipt.extracted_tax
+    tip = $clientBReceipt.extracted_tip
+    total = $clientBReceipt.extracted_total
+    currency = $clientBReceipt.extracted_currency
+    category = $null
+    confidence = "manual"
+    lineItems = $uncategorizedLineItems
+  } | ConvertTo-Json -Compress -Depth 6
+  $clientBCorrectionPayloadPath = New-JsonPayloadFile $clientBCorrectionBody
+  $null = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-H", "Content-Type: application/json", "-X", "PATCH", "--data-binary", "@$clientBCorrectionPayloadPath", "$BaseUrl/api/clients/$clientBId/receipts/$clientBReceiptId")
+  Remove-TempFile $clientBCorrectionPayloadPath
+
+  $clientBApproveBody = @{ confirmOverride = $true } | ConvertTo-Json -Compress
+  $clientBApprovePayloadPath = New-JsonPayloadFile $clientBApproveBody
+  $clientBFiled = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-H", "Content-Type: application/json", "--data-binary", "@$clientBApprovePayloadPath", "$BaseUrl/api/clients/$clientBId/receipts/$clientBReceiptId/approve")
+  Remove-TempFile $clientBApprovePayloadPath
+  if ($clientBFiled.receipt.status -ne "filed") { throw "Client B's deliberately uncategorized receipt did not file." }
+
+  $pnlBBefore = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientBId/pnl")
+  if ($pnlBBefore.completeness.isComplete) { throw "P&L must be incomplete while a filed receipt has an uncategorized line." }
+  $dashboardBBefore = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/dashboard")
+  $dashRowBBefore = @($dashboardBBefore.clients) | Where-Object { $_.id -eq $clientBId } | Select-Object -First 1
+  if ($dashRowBBefore.readiness -eq "ready") { throw "The Operations dashboard must not mark Client B Ready while a receipt line is uncategorized." }
+  $overviewBBefore = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientBId/overview")
+  if ($overviewBBefore.financialStatus.pnlCompleteness) { throw "Client B's own overview must not report books complete while a receipt line is uncategorized." }
+  $readinessBBefore = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientBId/tax-readiness/2026")
+  if ($readinessBBefore.suggestedStatus -ne "bookkeeping_incomplete") {
+    throw "Tax readiness must suggest bookkeeping_incomplete while a receipt line is uncategorized, got '$($readinessBBefore.suggestedStatus)'."
+  }
+  Write-Host "Confirmed: P&L, Operations dashboard, client overview, and tax readiness all agree the books are incomplete."
+
   Write-Host "Seeding a second synthetic firm to prove live cross-tenant isolation..."
   $emailC = "folio-smoke-tenant2-$runId@example.com"
   $passwordC = "Smoke!$([guid]::NewGuid().ToString('N').Substring(0, 18))"
@@ -1387,6 +1434,69 @@ try {
     throw "Firm C's document review queue must not include Firm A's document."
   }
 
+
+  function Get-HttpStatusForPatch([string]$Url, [string]$Jar, [string]$JsonBody) {
+    $payloadPath = New-JsonPayloadFile $JsonBody
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+      return (& curl.exe --silent --output NUL --write-out "%{http_code}" -c $Jar -b $Jar -H "Content-Type: application/json" -X PATCH --data-binary "@$payloadPath" $Url)
+    } finally {
+      $ErrorActionPreference = $prev
+      Remove-TempFile $payloadPath
+    }
+  }
+
+  Write-Host "Verifying malicious cross-tenant and cross-client relationship mutations fail safely..."
+  $crossFirmAssignBody = @{ action = "assign_client"; targetClientId = $clientCId } | ConvertTo-Json -Compress
+  $crossFirmAssignStatus = Get-HttpStatusForPatch "$BaseUrl/api/documents/review/$clientBDocId" $cookieJar $crossFirmAssignBody
+  if ($crossFirmAssignStatus -ne "404") { throw "Firm A must not be able to reassign its document to Firm C's client, got HTTP $crossFirmAssignStatus." }
+
+  $clientCChecklistBody = @{ taxYear = 2026; docType = "other"; customLabel = "Firm C isolation probe" } | ConvertTo-Json -Compress
+  $clientCChecklistPayloadPath = New-JsonPayloadFile $clientCChecklistBody
+  $clientCChecklistItem = Invoke-CurlJson @("-c", $cookieJarC, "-b", $cookieJarC, "-H", "Content-Type: application/json", "--data-binary", "@$clientCChecklistPayloadPath", "$BaseUrl/api/clients/$clientCId/checklist")
+  Remove-TempFile $clientCChecklistPayloadPath
+  $clientCChecklistItemId = [string]$clientCChecklistItem.id
+  if (-not $clientCChecklistItemId) { throw "Firm C checklist item creation did not return an id." }
+
+  $crossFirmMatchBody = @{ action = "match_checklist"; checklistItemId = $clientCChecklistItemId } | ConvertTo-Json -Compress
+  $crossFirmMatchStatus = Get-HttpStatusForPatch "$BaseUrl/api/documents/review/$clientBDocId" $cookieJar $crossFirmMatchBody
+  if ($crossFirmMatchStatus -ne "404") { throw "Firm A must not be able to match its document to Firm C's checklist item, got HTTP $crossFirmMatchStatus." }
+
+  $crossFirmDuplicateBody = @{ action = "mark_duplicate"; duplicateOfDocumentId = $clientCDocId } | ConvertTo-Json -Compress
+  $crossFirmDuplicateStatus = Get-HttpStatusForPatch "$BaseUrl/api/documents/review/$clientBDocId" $cookieJar $crossFirmDuplicateBody
+  if ($crossFirmDuplicateStatus -ne "404") { throw "Firm A must not be able to mark its document a duplicate of Firm C's document, got HTTP $crossFirmDuplicateStatus." }
+
+  $clientBReadinessForChecklist = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientBId/tax-readiness/2026")
+  $clientBChecklistItemId = [string](@($clientBReadinessForChecklist.checklist) | Select-Object -First 1).id
+  if (-not $clientBChecklistItemId) { throw "Client B has no checklist item to use for the cross-client isolation check." }
+  $sameFirmCrossClientBody = @{ action = "match_checklist"; checklistItemId = $clientBChecklistItemId } | ConvertTo-Json -Compress
+  $sameFirmCrossClientStatus = Get-HttpStatusForPatch "$BaseUrl/api/documents/review/$clientADocId" $cookieJar $sameFirmCrossClientBody
+  if ($sameFirmCrossClientStatus -ne "404") { throw "Client A's document must not be matchable to Client B's checklist item within the same firm, got HTTP $sameFirmCrossClientStatus." }
+
+  Write-Host "Verifying a reassigned document does not carry a stale checklist relationship..."
+  $reassignBody = @{ action = "assign_client"; targetClientId = $clientBId } | ConvertTo-Json -Compress
+  $reassignPayloadPath = New-JsonPayloadFile $reassignBody
+  $null = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-H", "Content-Type: application/json", "-X", "PATCH", "--data-binary", "@$reassignPayloadPath", "$BaseUrl/api/documents/review/$clientADocId")
+  Remove-TempFile $reassignPayloadPath
+  $clientBDocsAfterReassign = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientBId/documents")
+  $reassignedDoc = @($clientBDocsAfterReassign.documents) | Where-Object { $_.id -eq $clientADocId } | Select-Object -First 1
+  if (-not $reassignedDoc) { throw "Reassigned document did not appear under its new client." }
+  if ($reassignedDoc.checklist_item_id) { throw "A reassigned document must not retain its old client's checklist relationship, found '$($reassignedDoc.checklist_item_id)'." }
+
+  Write-Host "Exercising the exact document-review deep link against the real resolution endpoint..."
+  $dashboardForDeepLink = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/dashboard")
+  $liveReviewAction = @($dashboardForDeepLink.actions) | Where-Object { $_.type -eq "document_review" } | Select-Object -First 1
+  if ($liveReviewAction) {
+    if ($liveReviewAction.deepLink -notmatch '^/documents/review\?focus=(?<id>.+)$') {
+      throw "document_review deep link '$($liveReviewAction.deepLink)' is not the expected cross-client review destination."
+    }
+    $focusedId = $Matches['id']
+    $liveReviewQueue = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/documents/review")
+    $focusedDoc = @($liveReviewQueue.documents) | Where-Object { $_.id -eq $focusedId } | Select-Object -First 1
+    if (-not $focusedDoc) { throw "The document_review deep link's focus id '$focusedId' does not resolve to a real, actionable document in the review queue." }
+  }
+
   if ($env:SMOKE_CLEANUP_TOKEN) {
     Write-Host "Cleaning up the second synthetic tenant $firmCId..."
     $cleanupCBody = @{ firmId = $firmCId } | ConvertTo-Json -Compress
@@ -1398,6 +1508,12 @@ try {
     if (($cleanupCProps -contains "r2Failures") -and @($cleanupCResult.r2Failures).Count -gt 0) { throw "Second-tenant cleanup could not remove R2 object(s): $($cleanupCResult.r2Failures -join ', ')" }
     if (($cleanupCProps -contains "authFailures") -and @($cleanupCResult.authFailures).Count -gt 0) { throw "Second-tenant cleanup could not remove the synthetic auth account: $($cleanupCResult.authFailures -join ', ')" }
     if (($cleanupCProps -contains "betaMetadataFailures") -and @($cleanupCResult.betaMetadataFailures).Count -gt 0) { throw "Second-tenant cleanup could not remove beta security metadata: $($cleanupCResult.betaMetadataFailures -join ', ')" }
+
+    Write-Host "Independently verifying the second synthetic tenant left zero production residue..."
+    $verifyCRaw = & node (Join-Path $PSScriptRoot "smoke-admin.mjs") verify-clean $firmCId $ownerUserCId
+    if ($LASTEXITCODE -ne 0) { throw "Second-tenant residue check failed: $verifyCRaw" }
+    $verifyCResult = ($verifyCRaw | Select-Object -Last 1) | ConvertFrom-Json
+    if (-not $verifyCResult.clean) { throw "Second-tenant residue check reported non-zero counts: $($verifyCRaw | Select-Object -Last 1)" }
   }
   Remove-TempFile $cookieJarC
 

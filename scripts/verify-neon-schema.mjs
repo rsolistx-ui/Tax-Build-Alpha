@@ -67,6 +67,14 @@ const checks = [
     label: "client_documents table (general document intake beyond receipts, migration 0009)",
     query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'client_documents'`,
   },
+  {
+    label: "fk_documents_checklist_same_client (a document's checklist match must belong to the same client, migration 0010)",
+    query: `SELECT 1 FROM pg_constraint WHERE conname = 'fk_documents_checklist_same_client'`,
+  },
+  {
+    label: "fk_documents_duplicate_same_client (a document's duplicate target must belong to the same client, migration 0010)",
+    query: `SELECT 1 FROM pg_constraint WHERE conname = 'fk_documents_duplicate_same_client'`,
+  },
 ];
 
 // The pre-0007 per-state indexes are superseded by idx_bank_unique_receipt_claim

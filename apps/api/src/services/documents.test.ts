@@ -5,6 +5,8 @@ import {
   isDuplicateCandidate,
   isValidDocumentType,
   isValidChecklistStatus,
+  isSupportedUpload,
+  MAX_UPLOAD_BYTES,
   sha256Hex,
 } from "./documents";
 
@@ -95,5 +97,37 @@ describe("sha256Hex", () => {
     const a = await sha256Hex(new TextEncoder().encode("a").buffer as ArrayBuffer);
     const b = await sha256Hex(new TextEncoder().encode("b").buffer as ArrayBuffer);
     expect(a).not.toBe(b);
+  });
+});
+
+describe("isSupportedUpload", () => {
+  it("accepts a supported extension with its expected content type", () => {
+    expect(isSupportedUpload("receipt.pdf", "application/pdf")).toBe(true);
+    expect(isSupportedUpload("bank.csv", "text/csv")).toBe(true);
+  });
+
+  it("accepts a supported extension when the browser omits a content type", () => {
+    expect(isSupportedUpload("statement.heic", null)).toBe(true);
+    expect(isSupportedUpload("statement.heic", "")).toBe(true);
+  });
+
+  it("rejects an unsupported extension regardless of content type", () => {
+    expect(isSupportedUpload("payload.exe", "application/pdf")).toBe(false);
+    expect(isSupportedUpload("script.js", null)).toBe(false);
+    expect(isSupportedUpload("archive.zip", "application/zip")).toBe(false);
+  });
+
+  it("rejects a mismatched content type even for a supported extension - neither signal is trusted alone", () => {
+    expect(isSupportedUpload("evil.pdf", "text/html")).toBe(false);
+    expect(isSupportedUpload("evil.pdf", "application/x-msdownload")).toBe(false);
+  });
+
+  it("is case-insensitive and tolerates a content-type charset suffix", () => {
+    expect(isSupportedUpload("RECEIPT.PDF", "application/pdf; charset=binary")).toBe(true);
+  });
+
+  it("defines a sane, non-zero maximum upload size", () => {
+    expect(MAX_UPLOAD_BYTES).toBeGreaterThan(0);
+    expect(MAX_UPLOAD_BYTES).toBeLessThanOrEqual(50 * 1024 * 1024);
   });
 });

@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { ArrowLeft, AlertTriangle, CheckCircle2 } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, apiUrl } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -22,19 +22,33 @@ type ReviewDocument = {
   uploadedAt: string;
 };
 
+type ClientOption = { id: string; name: string };
+type ChecklistOption = { id: string; doc_type: string; custom_label: string | null };
+
 const DOCUMENT_TYPES = ["receipt", "bank_statement", "tax_document", "prior_year_return", "payroll_document", "loan_document", "formation_document", "other"];
 
 export function DocumentReviewPage() {
+  const [searchParams] = useSearchParams();
+  const focusId = searchParams.get("focus");
   const [documents, setDocuments] = useState<ReviewDocument[]>([]);
+  const [clients, setClients] = useState<ClientOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [taxYearDrafts, setTaxYearDrafts] = useState<Record<string, string>>({});
+  const [checklistOptions, setChecklistOptions] = useState<Record<string, ChecklistOption[]>>({});
+  const [checklistDrafts, setChecklistDrafts] = useState<Record<string, string>>({});
+  const focusRef = useRef<HTMLDivElement | null>(null);
 
   async function load() {
     setLoading(true);
     try {
-      const data = await api<{ documents: ReviewDocument[] }>("/api/documents/review");
-      setDocuments(data.documents);
+      const [reviewData, clientsData] = await Promise.all([
+        api<{ documents: ReviewDocument[] }>("/api/documents/review"),
+        api<{ clients: ClientOption[] }>("/api/clients"),
+      ]);
+      setDocuments(reviewData.documents);
+      setClients(clientsData.clients);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load the document review queue");
     } finally {
@@ -46,8 +60,15 @@ export function DocumentReviewPage() {
     void load();
   }, []);
 
+  useEffect(() => {
+    if (focusId && focusRef.current && typeof focusRef.current.scrollIntoView === "function") {
+      focusRef.current.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+  }, [focusId, documents]);
+
   async function act(id: string, body: Record<string, unknown>) {
     setBusyId(id);
+    setError(null);
     try {
       await api(`/api/documents/review/${id}`, { method: "PATCH", body: JSON.stringify(body) });
       setDocuments((prev) => prev.filter((d) => d.id !== id));
@@ -57,6 +78,23 @@ export function DocumentReviewPage() {
       setBusyId(null);
     }
   }
+
+  async function loadChecklistOptions(doc: ReviewDocument) {
+    if (!doc.taxYear || checklistOptions[doc.id]) return;
+    try {
+      const data = await api<{ checklist: ChecklistOption[] }>(`/api/clients/${doc.clientId}/tax-readiness/${doc.taxYear}`);
+      setChecklistOptions((prev) => ({ ...prev, [doc.id]: data.checklist }));
+    } catch {
+      setChecklistOptions((prev) => ({ ...prev, [doc.id]: [] }));
+    }
+  }
+
+  const sortedDocuments = useMemo(() => {
+    if (!focusId) return documents;
+    const focused = documents.filter((d) => d.id === focusId);
+    const rest = documents.filter((d) => d.id !== focusId);
+    return [...focused, ...rest];
+  }, [documents, focusId]);
 
   return (
     <div className="mx-auto max-w-4xl space-y-6 p-6">
@@ -80,14 +118,23 @@ export function DocumentReviewPage() {
       ) : null}
 
       <div className="space-y-3">
-        {documents.map((doc) => (
-          <Card key={doc.id}>
+        {sortedDocuments.map((doc) => (
+          <div key={doc.id} ref={doc.id === focusId ? focusRef : undefined} className={doc.id === focusId ? "rounded-[var(--radius-lg)] ring-2 ring-[var(--color-ring)]" : undefined}>
+          <Card>
             <CardContent className="space-y-3 p-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
-                  <p className="font-medium">{doc.filename}</p>
+                  <a
+                    href={apiUrl(`/api/clients/${doc.clientId}/documents/${doc.id}/source`)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-medium hover:underline"
+                  >
+                    {doc.filename}
+                  </a>
                   <p className="text-xs text-[var(--color-muted-foreground)]">
                     {doc.clientName} - uploaded {new Date(doc.uploadedAt).toLocaleDateString()}
+                    {doc.taxYear ? ` - tax year ${doc.taxYear}` : ""}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -105,7 +152,6 @@ export function DocumentReviewPage() {
                   Matches checklist item: {doc.checklistMatch.customLabel ?? doc.checklistMatch.docType.replace(/_/g, " ")}
                 </p>
               ) : null}
-
               <div className="flex flex-wrap items-center gap-2">
                 <select
                   className="h-8 rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-2 text-xs"
@@ -119,6 +165,61 @@ export function DocumentReviewPage() {
                     </option>
                   ))}
                 </select>
+
+                <select
+                  className="h-8 rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-2 text-xs"
+                  value=""
+                  onChange={(e) => {
+                    if (e.target.value) act(doc.id, { action: "assign_client", targetClientId: e.target.value });
+                  }}
+                  disabled={busyId === doc.id}
+                >
+                  <option value="">Reassign client...</option>
+                  {clients.filter((c) => c.id !== doc.clientId).map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+
+                <input
+                  type="number"
+                  placeholder="Tax year"
+                  className="h-8 w-24 rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-2 text-xs"
+                  value={taxYearDrafts[doc.id] ?? (doc.taxYear ? String(doc.taxYear) : "")}
+                  onChange={(e) => setTaxYearDrafts((prev) => ({ ...prev, [doc.id]: e.target.value }))}
+                />
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={busyId === doc.id || !taxYearDrafts[doc.id]}
+                  onClick={() => act(doc.id, { action: "assign_tax_year", taxYear: Number(taxYearDrafts[doc.id]) })}
+                >
+                  Set year
+                </Button>
+
+                {doc.taxYear ? (
+                  <>
+                    <select
+                      className="h-8 rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-2 text-xs"
+                      value={checklistDrafts[doc.id] ?? ""}
+                      onFocus={() => loadChecklistOptions(doc)}
+                      onChange={(e) => setChecklistDrafts((prev) => ({ ...prev, [doc.id]: e.target.value }))}
+                    >
+                      <option value="">Match checklist item...</option>
+                      {(checklistOptions[doc.id] ?? []).map((item) => (
+                        <option key={item.id} value={item.id}>{item.custom_label ?? item.doc_type.replace(/_/g, " ")}</option>
+                      ))}
+                    </select>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={busyId === doc.id || !checklistDrafts[doc.id]}
+                      onClick={() => act(doc.id, { action: "match_checklist", checklistItemId: checklistDrafts[doc.id] })}
+                    >
+                      Match
+                    </Button>
+                  </>
+                ) : null}
+
                 <Button size="sm" disabled={busyId === doc.id} onClick={() => act(doc.id, { action: "confirm" })}>
                   Confirm
                 </Button>
@@ -133,6 +234,7 @@ export function DocumentReviewPage() {
               </div>
             </CardContent>
           </Card>
+          </div>
         ))}
       </div>
     </div>

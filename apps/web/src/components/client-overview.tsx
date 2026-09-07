@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { ArrowRight, CheckCircle2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/empty-state";
+import { presetRange, REPORTING_PERIOD_OPTIONS, type ReportingPeriodPreset } from "@/lib/reporting-period";
 
 type OverviewAction = {
   id: string;
@@ -12,6 +13,10 @@ type OverviewAction = {
   explanation: string;
   deepLink: string;
 };
+
+type FinancialPeriod =
+  | { unsupported: true; warning: string; periodStart: string | null; periodEnd: string | null }
+  | { unsupported: false; periodStart: string | null; periodEnd: string | null; income: number; expenses: number; net: number };
 
 type Overview = {
   header: {
@@ -26,7 +31,7 @@ type Overview = {
     bookkeepingReadiness: string;
     taxReadiness: string | null;
     openActionCount: number;
-    lastActivityAt: string;
+    lastActivityAt: string | null;
   };
   financialStatus: {
     pnlCompleteness: boolean;
@@ -36,6 +41,7 @@ type Overview = {
     uncategorizedCount: number;
     currencyConflictCount: number;
   };
+  financialPeriod: FinancialPeriod;
   documentStatus: {
     receiptsReceived: number;
     receiptsAwaitingReview: number;
@@ -91,21 +97,30 @@ export function ClientOverview({ clientId, onNavigate }: { clientId: string; onN
   const [overview, setOverview] = useState<Overview | null>(null);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [preset, setPreset] = useState<ReportingPeriodPreset>("current_month");
+  const [customStart, setCustomStart] = useState("");
+  const [customEnd, setCustomEnd] = useState("");
+
+  const { startDate, endDate } = useMemo(() => {
+    if (preset === "custom") return { startDate: customStart, endDate: customEnd };
+    return presetRange(preset, overview?.header.taxYear ?? null);
+  }, [preset, customStart, customEnd, overview?.header.taxYear]);
 
   useEffect(() => {
     setError(null);
-    api<Overview>(`/api/clients/${clientId}/overview`)
+    const query = startDate && endDate ? `?startDate=${startDate}&endDate=${endDate}` : "";
+    api<Overview>(`/api/clients/${clientId}/overview${query}`)
       .then(setOverview)
       .catch((e) => setError(e instanceof Error ? e.message : "Failed to load client overview"));
     api<{ events: TimelineEvent[] }>(`/api/clients/${clientId}/timeline`)
       .then((data) => setTimeline(data.events))
       .catch(() => setTimeline([]));
-  }, [clientId]);
+  }, [clientId, startDate, endDate]);
 
   if (error) return <p className="text-sm text-[var(--color-destructive)]">{error}</p>;
   if (!overview) return <p className="text-sm text-[var(--color-muted-foreground)]">Loading overview...</p>;
 
-  const { header, financialStatus, documentStatus, nextActions } = overview;
+  const { header, financialStatus, financialPeriod, documentStatus, nextActions } = overview;
 
   return (
     <div className="space-y-4">
@@ -121,22 +136,48 @@ export function ClientOverview({ clientId, onNavigate }: { clientId: string; onN
           <Field label="Bookkeeping readiness" value={READINESS_LABEL[header.bookkeepingReadiness] ?? header.bookkeepingReadiness} />
           <Field label="Tax readiness" value={header.taxReadiness ? TAX_READINESS_LABEL[header.taxReadiness] ?? header.taxReadiness : "Not started"} />
           <Field label="Open actions" value={String(header.openActionCount)} />
-          <Field label="Last activity" value={new Date(header.lastActivityAt).toLocaleDateString()} />
+          <Field label="Last activity" value={header.lastActivityAt ? new Date(header.lastActivityAt).toLocaleDateString() : "No activity yet"} />
         </CardContent>
       </Card>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
           <CardContent className="space-y-3 p-4">
-            <h3 className="text-sm font-semibold">Financial status</h3>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-              <Metric label="Bank transactions" value={financialStatus.bankTransactionCount} />
-              <Metric label="Missing evidence" value={financialStatus.missingEvidenceCount} tone={financialStatus.missingEvidenceCount > 0 ? "warn" : undefined} />
-              <Metric label="Unclassified" value={financialStatus.unclassifiedCount} tone={financialStatus.unclassifiedCount > 0 ? "warn" : undefined} />
-              <Metric label="Uncategorized" value={financialStatus.uncategorizedCount} />
-              <Metric label="Currency conflicts" value={financialStatus.currencyConflictCount} tone={financialStatus.currencyConflictCount > 0 ? "warn" : undefined} />
-              <Metric label="P&L complete" value={financialStatus.pnlCompleteness ? "Yes" : "No"} />
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold">Financial status</h3>
+              <div className="flex items-center gap-2">
+                <select
+                  className="h-8 rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-2 text-xs"
+                  value={preset}
+                  onChange={(e) => setPreset(e.target.value as ReportingPeriodPreset)}
+                >
+                  {REPORTING_PERIOD_OPTIONS.map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
+                {preset === "custom" ? (
+                  <>
+                    <input type="date" className="h-8 rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-2 text-xs" value={customStart} onChange={(e) => setCustomStart(e.target.value)} />
+                    <input type="date" className="h-8 rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-2 text-xs" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} />
+                  </>
+                ) : null}
+              </div>
             </div>
+            {financialPeriod.unsupported ? (
+              <p className="text-sm text-[var(--color-muted-foreground)]">{financialPeriod.warning}</p>
+            ) : (
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                <Metric label="Income" value={financialPeriod.income.toFixed(2)} />
+                <Metric label="Expenses" value={financialPeriod.expenses.toFixed(2)} />
+                <Metric label="Net" value={financialPeriod.net.toFixed(2)} />
+                <Metric label="Bank transactions" value={financialStatus.bankTransactionCount} />
+                <Metric label="Missing evidence" value={financialStatus.missingEvidenceCount} tone={financialStatus.missingEvidenceCount > 0 ? "warn" : undefined} />
+                <Metric label="Unclassified" value={financialStatus.unclassifiedCount} tone={financialStatus.unclassifiedCount > 0 ? "warn" : undefined} />
+                <Metric label="Uncategorized" value={financialStatus.uncategorizedCount} />
+                <Metric label="Currency conflicts" value={financialStatus.currencyConflictCount} tone={financialStatus.currencyConflictCount > 0 ? "warn" : undefined} />
+                <Metric label="P&L complete" value={financialStatus.pnlCompleteness ? "Yes" : "No"} />
+              </div>
+            )}
           </CardContent>
         </Card>
 

@@ -395,6 +395,39 @@ export async function assemblePnlReport(
   };
 }
 
+/**
+ * Canonical per-client count of uncategorized filed-receipt lines. Every
+ * surface that must reconcile with P&L completeness (dashboard, client
+ * overview, tax readiness) calls this instead of approximating with zero -
+ * one query for any number of clients, never one query per client.
+ */
+export async function getUncategorizedReceiptLineCounts(db: Db, clientIds: string[]): Promise<Map<string, number>> {
+  if (clientIds.length === 0) return new Map();
+  const rows = await db.query<{ client_id: string; count: string }>(
+    `WITH receipt_conflict AS (
+       SELECT r.id AS receipt_id
+       FROM receipts r
+       JOIN bank_transactions bt ON bt.matched_receipt_id = r.id AND bt.client_id = r.client_id
+       WHERE bt.disposition IN (${CONFLICTING_DISPOSITIONS_SQL_LIST})
+     )
+     SELECT r.client_id, COUNT(*)::text AS count
+     FROM receipts r
+     JOIN receipt_line_items li ON li.receipt_id = r.id
+     JOIN client_profiles cp ON cp.client_id = r.client_id
+     LEFT JOIN categories cat_li ON cat_li.client_id = r.client_id
+       AND (LOWER(cat_li.slug) = LOWER(NULLIF(li.category, '')) OR LOWER(cat_li.name) = LOWER(NULLIF(li.category, '')))
+     LEFT JOIN categories cat_receipt ON cat_receipt.id = r.category_id
+     WHERE r.client_id IN (SELECT jsonb_array_elements_text($1::jsonb))
+       AND r.status = 'filed'
+       AND UPPER(r.extracted_currency) = UPPER(cp.default_currency)
+       AND COALESCE(cat_li.id, cat_receipt.id, r.category_id) IS NULL
+       AND NOT EXISTS (SELECT 1 FROM receipt_conflict rc WHERE rc.receipt_id = r.id)
+     GROUP BY r.client_id`,
+    [clientIds],
+  );
+  return new Map(rows.map((r) => [r.client_id, parseInt(r.count, 10)]));
+}
+
 export function isAccrualUnsupported(report: PnlReport | AccrualUnsupported): report is AccrualUnsupported {
   return report.accrualSupported === false;
 }
