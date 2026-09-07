@@ -1120,6 +1120,121 @@ try {
     throw "Requesting a Wave statement across multiple USD import batches without selecting one must return HTTP 400, got $mixedBatchStatus."
   }
 
+  Write-Host "Creating a fully resolved dashboard client (Client A) with no open work..."
+  $clientABody = @{ name = "Smoke Dashboard Ready $stamp"; legal_name = "Smoke Dashboard Ready LLC" } | ConvertTo-Json -Compress
+  $clientAPayloadPath = New-JsonPayloadFile $clientABody
+  $clientAResponse = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-H", "Content-Type: application/json", "--data-binary", "@$clientAPayloadPath", "$BaseUrl/api/clients")
+  Remove-TempFile $clientAPayloadPath
+  $clientAId = [string]$clientAResponse.client.id
+  if (-not $clientAId) { throw "Dashboard Client A creation did not return an id." }
+
+  $clientACategories = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientAId/categories")
+  $clientACategoryId = [string](@($clientACategories.categories) | Select-Object -First 1).id
+  if (-not $clientACategoryId) { throw "Dashboard Client A has no default categories to classify against." }
+
+  $clientACsvPath = Join-Path $env:TEMP "folio-smoke-dashboard-a-$([guid]::NewGuid().ToString('N')).csv"
+  $clientACsv = "Date,Description,Amount`r`n2026-05-01,FOLIO DASHBOARD READY SMOKE,-40.00`r`n"
+  [System.IO.File]::WriteAllText($clientACsvPath, $clientACsv, $utf8)
+  $clientAMappingBody = @{ date = "Date"; description = "Description"; amount = "Amount" } | ConvertTo-Json -Compress
+  $clientAMappingPayloadPath = New-JsonPayloadFile $clientAMappingBody
+  $clientAImport = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-F", "file=@$clientACsvPath", "-F", "mapping=<$clientAMappingPayloadPath", "$BaseUrl/api/clients/$clientAId/bank-transactions/import")
+  if ($clientAImport.insertedCount -ne 1) { throw "Dashboard Client A bank CSV did not insert exactly one transaction." }
+  Remove-TempFile $clientACsvPath
+
+  $clientATxns = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientAId/bank-transactions")
+  $clientATxn = @($clientATxns.transactions) | Where-Object { $_.description -eq "FOLIO DASHBOARD READY SMOKE" } | Select-Object -First 1
+  if (-not $clientATxn) { throw "Dashboard Client A transaction was not persisted." }
+  $clientATxnId = [string]$clientATxn.id
+
+  $clientANoReceiptBody = @{ action = "no_receipt_required"; reason = "Smoke test: dashboard ready client" } | ConvertTo-Json -Compress
+  $clientANoReceiptPayloadPath = New-JsonPayloadFile $clientANoReceiptBody
+  $null = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-H", "Content-Type: application/json", "--data-binary", "@$clientANoReceiptPayloadPath", "$BaseUrl/api/clients/$clientAId/bank-transactions/$clientATxnId/decision")
+  Remove-TempFile $clientANoReceiptPayloadPath
+
+  $clientAExpenseBody = @{ disposition = "business_expense"; categoryId = $clientACategoryId; note = "Smoke test: dashboard ready" } | ConvertTo-Json -Compress
+  $clientAExpensePayloadPath = New-JsonPayloadFile $clientAExpenseBody
+  $null = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-H", "Content-Type: application/json", "-X", "PATCH", "--data-binary", "@$clientAExpensePayloadPath", "$BaseUrl/api/clients/$clientAId/bank-transactions/$clientATxnId/disposition")
+  Remove-TempFile $clientAExpensePayloadPath
+
+  Write-Host "Creating an unresolved dashboard client (Client B) with open work..."
+  $clientBBody = @{ name = "Smoke Dashboard Attention $stamp"; legal_name = "Smoke Dashboard Attention LLC" } | ConvertTo-Json -Compress
+  $clientBPayloadPath = New-JsonPayloadFile $clientBBody
+  $clientBResponse = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-H", "Content-Type: application/json", "--data-binary", "@$clientBPayloadPath", "$BaseUrl/api/clients")
+  Remove-TempFile $clientBPayloadPath
+  $clientBId = [string]$clientBResponse.client.id
+  if (-not $clientBId) { throw "Dashboard Client B creation did not return an id." }
+
+  $clientBCsvPath = Join-Path $env:TEMP "folio-smoke-dashboard-b-$([guid]::NewGuid().ToString('N')).csv"
+  $clientBCsv = "Date,Description,Amount`r`n2026-05-02,FOLIO DASHBOARD ATTENTION SMOKE,-75.00`r`n"
+  [System.IO.File]::WriteAllText($clientBCsvPath, $clientBCsv, $utf8)
+  $clientBImport = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-F", "file=@$clientBCsvPath", "-F", "mapping=<$clientAMappingPayloadPath", "$BaseUrl/api/clients/$clientBId/bank-transactions/import")
+  if ($clientBImport.insertedCount -ne 1) { throw "Dashboard Client B bank CSV did not insert exactly one transaction." }
+  Remove-TempFile $clientBCsvPath
+  Remove-TempFile $clientAMappingPayloadPath
+
+  $clientBTxns = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientBId/bank-transactions")
+  $clientBTxn = @($clientBTxns.transactions) | Where-Object { $_.description -eq "FOLIO DASHBOARD ATTENTION SMOKE" } | Select-Object -First 1
+  if (-not $clientBTxn) { throw "Dashboard Client B transaction was not persisted." }
+  $clientBTxnId = [string]$clientBTxn.id
+  # Deliberately left unclassified and unmatched (triage=unmatched, disposition=unclassified).
+
+  Write-Host "Verifying the firm-wide operations dashboard reflects both clients correctly..."
+  $dashboard = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/dashboard")
+  $allClients = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients")
+  if ([int]$dashboard.summary.clients -ne @($allClients.clients).Count) {
+    throw "Dashboard client count $($dashboard.summary.clients) does not reconcile to the firm's actual client count $(@($allClients.clients).Count)."
+  }
+
+  $dashClientA = @($dashboard.clients) | Where-Object { $_.id -eq $clientAId } | Select-Object -First 1
+  $dashClientB = @($dashboard.clients) | Where-Object { $_.id -eq $clientBId } | Select-Object -First 1
+  if (-not $dashClientA -or -not $dashClientB) {
+    throw "Dashboard did not return both newly created clients."
+  }
+  if ($dashClientA.readiness -ne "ready") {
+    throw "Fully resolved Client A should be Ready on the dashboard, got '$($dashClientA.readiness)'."
+  }
+  if ($dashClientB.readiness -eq "ready") {
+    throw "Client B has unresolved bank activity and must not be Ready on the dashboard."
+  }
+  if ($dashClientB.missingEvidenceCount -lt 1) {
+    throw "Client B's unmatched bank transaction should count as missing evidence, got $($dashClientB.missingEvidenceCount)."
+  }
+
+  $clientBAction = @($dashboard.actions) | Where-Object { $_.clientId -eq $clientBId -and $_.sourceEntityId -eq $clientBTxnId } | Select-Object -First 1
+  if (-not $clientBAction) {
+    throw "The global action queue did not surface Client B's open bank transaction."
+  }
+  $expectedDeepLink = "/clients/$clientBId?tab=bank&focus=$clientBTxnId"
+  if ($clientBAction.deepLink -ne $expectedDeepLink) {
+    throw "Client B's action deep link '$($clientBAction.deepLink)' did not match the expected exact destination '$expectedDeepLink'."
+  }
+  $clientAActions = @($dashboard.actions) | Where-Object { $_.clientId -eq $clientAId }
+  if (@($clientAActions).Count -ne 0) {
+    throw "Fully resolved Client A must have zero open actions on the dashboard."
+  }
+
+  Write-Host "Resolving Client B so the dashboard action disappears once the work is done..."
+  $clientBFixCategoryId = $clientACategoryId
+  $clientBNoReceiptBody = @{ action = "no_receipt_required"; reason = "Smoke test: resolving dashboard attention client" } | ConvertTo-Json -Compress
+  $clientBNoReceiptPayloadPath = New-JsonPayloadFile $clientBNoReceiptBody
+  $null = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-H", "Content-Type: application/json", "--data-binary", "@$clientBNoReceiptPayloadPath", "$BaseUrl/api/clients/$clientBId/bank-transactions/$clientBTxnId/decision")
+  Remove-TempFile $clientBNoReceiptPayloadPath
+  $clientBFixBody = @{ disposition = "business_expense"; categoryId = $clientBFixCategoryId; note = "Smoke test: resolved" } | ConvertTo-Json -Compress
+  $clientBFixPayloadPath = New-JsonPayloadFile $clientBFixBody
+  $null = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-H", "Content-Type: application/json", "-X", "PATCH", "--data-binary", "@$clientBFixPayloadPath", "$BaseUrl/api/clients/$clientBId/bank-transactions/$clientBTxnId/disposition")
+  Remove-TempFile $clientBFixPayloadPath
+
+  $dashboardAfterFix = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/dashboard")
+  $residualClientBAction = @($dashboardAfterFix.actions) | Where-Object { $_.sourceEntityId -eq $clientBTxnId } | Select-Object -First 1
+  if ($residualClientBAction) {
+    throw "Resolving Client B's transaction should remove its dashboard action, but it is still present."
+  }
+  $dashClientBAfterFix = @($dashboardAfterFix.clients) | Where-Object { $_.id -eq $clientBId } | Select-Object -First 1
+  if (-not $dashClientBAfterFix -or $dashClientBAfterFix.readiness -ne "ready") {
+    throw "Client B should be Ready after its only open item was resolved, got '$($dashClientBAfterFix.readiness)'."
+  }
+
+
   Write-Host "Verifying a revoked beta entitlement blocks protected business APIs (403 BETA_REVOKED)..."
   $revokeResultRaw = & node (Join-Path $PSScriptRoot "smoke-admin.mjs") revoke-by-email $email
   if ($LASTEXITCODE -ne 0) { throw "Failed to revoke the smoke entitlement for coverage: $revokeResultRaw" }
