@@ -276,6 +276,75 @@ Workers AI currently includes a 10,000 Neuron daily free allocation on the Worke
 
 The bootstrap does not upgrade the Cloudflare account or enable paid inference.
 
+## Professional export and Wave handoff
+
+Each client workspace has an Export tab (the Export Center). It uses the
+same reporting-period semantics as the P&L tab (this month, last month,
+year to date, tax year, custom range) rather than a second definition of
+reporting dates, and shows a preview - client, period, accounting basis,
+currency, income/expenses/net, P&L completeness, unresolved/uncategorized/
+currency-conflict counts, and excluded-activity count - before anything is
+downloaded, so a professional never has to open a file to discover it is a
+working draft.
+
+**Folio Professional Excel workbook** (Download Excel Workbook) is a real
+.xlsx file (built with exceljs, which has no filesystem or native-binary
+dependency and runs cleanly under Cloudflare Workers) with six worksheets:
+
+- **SUMMARY** - client, legal name, reporting dates, tax year, accounting
+  basis, currency, generated timestamp, report status, income/expenses/net,
+  and the same completeness counts as the preview.
+- **P&L** - income and expense categories and totals, reconciled exactly to
+  the existing P&L API. The workbook never recomputes accounting totals
+  itself; it reads the same assemblePnlReport service the P&L tab uses.
+- **BANK LEDGER** - every bank transaction in the period, including
+  personal, transfer, owner, loan, excluded, and unclassified activity that
+  the P&L correctly leaves out of operating totals. The professional ledger
+  stays complete even when the P&L is not.
+- **RECEIPT EVIDENCE** - every filed receipt in the period with its
+  authenticated Folio source URL (requires an active, logged-in account -
+  the link is never a public URL).
+- **OPEN ITEMS** - every item still blocking a complete report: unclassified
+  bank transactions, unresolved bank triage, uncategorized business
+  activity, currency conflicts, and receipt/bank disposition conflicts.
+- **EXCLUDED - NONBUSINESS** - deliberate personal/transfer/owner/loan/
+  other-excluded activity, proof it was reviewed rather than accidentally
+  omitted.
+
+If the P&L is incomplete for the selected period, the SUMMARY sheet marks
+the report DRAFT - ITEMS REQUIRE PROFESSIONAL REVIEW and the filename
+includes DRAFT; a complete period is never labeled that way. Every
+user/source-controlled text field (merchant, description, filename,
+professional note, imported category text) is written as inert text when it
+begins with an equals, plus, minus, or at sign, so the workbook can never
+carry a live spreadsheet formula it did not deliberately generate.
+Filenames are deterministic and human-readable (for example, "Client Name -
+Folio - 2026-01-01 to 2026-12-31.xlsx"), sanitized against Windows-invalid
+characters - never an opaque UUID.
+
+**Wave statement CSV** (Download Wave Statement CSV) is a deliberately
+narrow file containing only Date, Description, and Amount columns - Wave's
+basic statement importer only supports that shape (or a deposit/withdrawal
+arrangement) and the statement currency must match the Wave payment
+account, so adding Folio's own columns risks Wave rejecting or misreading
+the file. **This file does not transfer Folio's category, disposition, or
+evidence decisions.** The professional must select a single source/import
+batch and a single currency; Folio never silently merges unrelated bank
+accounts or currencies into one Wave statement.
+
+Folio's categorization and review decisions for the same period are
+available separately in the workbook's **WAVE HANDOFF** worksheet - date,
+description, amount, Folio disposition, Folio category, business/nonbusiness
+status, matched receipt, receipt filename, professional note, and source
+transaction id - as a professional reference while completing or verifying
+the Wave side by hand.
+
+Wave Connect (Wave's own Google Sheets-based bulk importer) generates its
+upload columns from the connected Wave business. Folio does not guess or
+hardcode that format; direct Wave Connect integration remains deferred
+until a real prepared Wave Connect input sheet from Phyllis's own Wave
+business is available.
+
 ## Deliberately deferred
 
 To protect the paid-alpha timeline, this milestone does not add:
@@ -287,8 +356,8 @@ To protect the paid-alpha timeline, this milestone does not add:
 - invoicing or accounts receivable
 - full MFA rollout
 - queue consumer and bulk async processing
-- PDF or Excel report export
 - item-level machine learning beyond correction rules
+- direct Wave Connect integration (Wave Connect generates its upload columns from the connected Wave business; Folio will not hardcode a guessed format until a real prepared input sheet from Phyllis's own Wave business is available)
 
 Those follow only after the real receipt, bank, and exception workflow is tested against Phyllis's actual operating process.
 

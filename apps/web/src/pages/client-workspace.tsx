@@ -9,6 +9,7 @@ import {
   LineChart,
   Settings,
   Upload,
+  FileDown,
   AlertTriangle,
   CheckCircle2,
   XCircle,
@@ -27,6 +28,8 @@ import { DrilldownPanel } from "@/components/drilldown-panel";
 import type { Pnl, DrilldownState, DrilldownEntry, DrilldownBankEntry, IncomeDrilldownEntry } from "@/types/pnl";
 import { buildDrilldownPath } from "@/types/pnl";
 import { cn } from "@/lib/utils";
+import { presetRange, REPORTING_PERIOD_OPTIONS, type ReportingPeriodPreset } from "@/lib/reporting-period";
+import { ExportCenter } from "@/components/export-center";
 
 type Category = {
   id: string;
@@ -68,31 +71,9 @@ type BatchFile = {
   error?: string;
 };
 
-type Tab = "folders" | "upload" | "review" | "bank" | "pnl";
+type Tab = "folders" | "upload" | "review" | "bank" | "pnl" | "export";
 
-type PnlPreset = "current_month" | "previous_month" | "ytd" | "tax_year" | "custom";
 
-function isoDate(date: Date): string {
-  return date.toISOString().slice(0, 10);
-}
-
-function presetRange(preset: PnlPreset, taxYear: number | null): { startDate: string; endDate: string } {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth();
-  if (preset === "current_month") {
-    return { startDate: isoDate(new Date(year, month, 1)), endDate: isoDate(new Date(year, month + 1, 0)) };
-  }
-  if (preset === "previous_month") {
-    return { startDate: isoDate(new Date(year, month - 1, 1)), endDate: isoDate(new Date(year, month, 0)) };
-  }
-  if (preset === "tax_year") {
-    const ty = taxYear || year;
-    return { startDate: `${ty}-01-01`, endDate: `${ty}-12-31` };
-  }
-  // year to date
-  return { startDate: `${year}-01-01`, endDate: isoDate(now) };
-}
 
 export function ClientWorkspacePage() {
   const { clientId = "" } = useParams();
@@ -107,7 +88,7 @@ export function ClientWorkspacePage() {
   const [folderSort, setFolderSort] = useState<"date" | "merchant">("date");
   const [message, setMessage] = useState<string | null>(null);
   const [pnl, setPnl] = useState<Pnl | null>(null);
-  const [pnlPreset, setPnlPreset] = useState<PnlPreset>("current_month");
+  const [pnlPreset, setReportingPeriodPreset] = useState<ReportingPeriodPreset>("current_month");
   const [pnlCustomStart, setPnlCustomStart] = useState("");
   const [pnlCustomEnd, setPnlCustomEnd] = useState("");
   const [drilldown, setDrilldown] = useState<DrilldownState>(null);
@@ -271,6 +252,7 @@ export function ClientWorkspacePage() {
       { id: "review" as const, label: "Review", icon: Inbox, count: review.length },
       { id: "bank" as const, label: "Bank", icon: Landmark },
       { id: "pnl" as const, label: "P&L", icon: LineChart },
+      { id: "export" as const, label: "Export", icon: FileDown },
     ],
     [review.length],
   );
@@ -530,17 +512,11 @@ export function ClientWorkspacePage() {
         <div className="space-y-4">
           <Card>
             <CardContent className="flex flex-wrap items-center gap-2 p-4">
-              {([
-                ["current_month", "This month"],
-                ["previous_month", "Last month"],
-                ["ytd", "Year to date"],
-                ["tax_year", "Tax year"],
-                ["custom", "Custom range"],
-              ] as Array<[PnlPreset, string]>).map(([value, label]) => (
+              {REPORTING_PERIOD_OPTIONS.map(([value, label]) => (
                 <button
                   key={value}
                   type="button"
-                  onClick={() => setPnlPreset(value)}
+                  onClick={() => setReportingPeriodPreset(value)}
                   className={cn(
                     "rounded-md border border-[var(--color-border)] px-3 py-1.5 text-sm",
                     pnlPreset === value && "bg-[var(--color-muted)] font-medium",
@@ -609,6 +585,8 @@ export function ClientWorkspacePage() {
           </div>
         </div>
       ) : null}
+
+      {tab === "export" ? <ExportCenter clientId={clientId} taxYear={profile?.tax_year ?? null} /> : null}
     </div>
   );
 

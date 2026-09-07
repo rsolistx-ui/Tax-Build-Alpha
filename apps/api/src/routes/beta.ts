@@ -5,7 +5,7 @@ import type { Env } from "../env";
 import { createAuth } from "../auth";
 import { requireSession, type AuthedVars } from "../middleware/session";
 import { requireOwner, isOwnerEmail } from "../middleware/beta";
-import { insertBetaAccessEvent } from "../services/beta-db";
+import { insertBetaAccessEvent, betaAccessEventStatement } from "../services/beta-db";
 import { newId } from "../lib/id";
 import {
   generateInviteToken,
@@ -163,6 +163,21 @@ betaRoutes.post("/redeem", async (c) => {
                 ON CONFLICT (user_id) DO UPDATE SET status = 'active', starts_at = $2, expires_at = $3, revoked_at = NULL, revoked_by_user_id = NULL, revocation_reason = NULL, updated_at = NOW()`,
         params: [newUserId, now.toISOString(), expiresAt.toISOString()],
       },
+      betaAccessEventStatement({
+        action: "beta_invite_redeemed",
+        actorUserId: newUserId,
+        affectedUserId: newUserId,
+        affectedEmail: body.email,
+        beforeJson: { invitationId: invitationRow!.id, status: "pending" },
+        afterJson: { invitationId: invitationRow!.id, status: "redeemed" },
+      }),
+      betaAccessEventStatement({
+        action: "beta_access_activated",
+        actorUserId: newUserId,
+        affectedUserId: newUserId,
+        affectedEmail: body.email,
+        afterJson: { status: "active", startsAt: now.toISOString(), expiresAt: expiresAt.toISOString() },
+      }),
     ]);
   } catch (error) {
     console.error(`[beta.redeem] entitlement activation failed for invitation ${invitationRow!.id}, user ${newUserId}; compensating:`, error);
@@ -176,22 +191,6 @@ betaRoutes.post("/redeem", async (c) => {
     }
     return c.json({ error: "Could not activate beta access. Please try again.", code: "REDEMPTION_FAILED" }, 500);
   }
-
-  await insertBetaAccessEvent(db, {
-    action: "beta_invite_redeemed",
-    actorUserId: newUserId,
-    affectedUserId: newUserId,
-    affectedEmail: body.email,
-    beforeJson: { invitationId: invitationRow!.id, status: "pending" },
-    afterJson: { invitationId: invitationRow!.id, status: "redeemed" },
-  });
-  await insertBetaAccessEvent(db, {
-    action: "beta_access_activated",
-    actorUserId: newUserId,
-    affectedUserId: newUserId,
-    affectedEmail: body.email,
-    afterJson: { status: "active", startsAt: now.toISOString(), expiresAt: expiresAt.toISOString() },
-  });
 
   return new Response(signUpResponse.body, {
     status: signUpResponse.status,

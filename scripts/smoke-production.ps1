@@ -1037,6 +1037,89 @@ try {
     throw "A case-insensitive duplicate category name must be rejected with HTTP 409, got $duplicateCategoryStatus."
   }
 
+    Write-Host "Verifying professional export center data reconciles to the canonical P&L..."
+  $exportPnl = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/pnl")
+  $exportPreview = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/export/preview")
+  if ([double]$exportPreview.income -ne [double]$exportPnl.income) {
+    throw "Export preview income $($exportPreview.income) does not reconcile to canonical P&L income $($exportPnl.income)."
+  }
+  if ([double]$exportPreview.expenses -ne [double]$exportPnl.expenses) {
+    throw "Export preview expenses $($exportPreview.expenses) does not reconcile to canonical P&L expenses $($exportPnl.expenses)."
+  }
+  if ([double]$exportPreview.net -ne [double]$exportPnl.net) {
+    throw "Export preview net $($exportPreview.net) does not reconcile to canonical P&L net $($exportPnl.net)."
+  }
+
+  Write-Host "Downloading the professional Excel workbook and verifying the reconciled totals arrive as a real .xlsx file..."
+  $workbookPath = Join-Path $env:TEMP "folio-smoke-workbook-$([guid]::NewGuid().ToString('N')).xlsx"
+  $workbookHeadersPath = Join-Path $env:TEMP "folio-smoke-workbook-headers-$([guid]::NewGuid().ToString('N')).txt"
+  $previousPreference = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    $workbookStatus = (& curl.exe --silent --output $workbookPath --dump-header $workbookHeadersPath --write-out "%{http_code}" -c $cookieJar -b $cookieJar "$BaseUrl/api/clients/$clientId/export/workbook")
+  } finally {
+    $ErrorActionPreference = $previousPreference
+  }
+  if ($workbookStatus -ne "200") { throw "Workbook download returned HTTP $workbookStatus." }
+  $workbookHeaders = Get-Content $workbookHeadersPath -Raw
+  if ($workbookHeaders -notmatch "spreadsheetml") { throw "Workbook download did not report an .xlsx content type." }
+  if ($workbookHeaders -notmatch "attachment") { throw "Workbook download did not set a Content-Disposition attachment filename." }
+  $workbookBytes = (Get-Item $workbookPath).Length
+  if ($workbookBytes -lt 1000) { throw "Workbook download was implausibly small ($workbookBytes bytes)." }
+  Remove-TempFile $workbookPath
+  Remove-TempFile $workbookHeadersPath
+
+  Write-Host "Verifying the excluded EUR/personal activity is present in export data but absent from operating P&L income/expenses composition..."
+  $exportPreviewExcludedCount = [int]$exportPreview.excludedTransactions
+  if ($exportPreviewExcludedCount -lt 1) { throw "Expected at least one excluded/nonbusiness transaction in the export preview, found $exportPreviewExcludedCount." }
+  if ([int]$exportPreview.completeness.currencyConflictCount -lt 1) {
+    throw "Expected the EUR smoke transaction to register as a currency conflict in export completeness."
+  }
+  if ([int]$exportPreview.openItemsCount -lt 1) { throw "Expected at least one open item in the export preview." }
+
+  Write-Host "Verifying Wave source/import-batch isolation: distinct CSV uploads remain distinct batches..."
+  $waveBatches = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/export/wave-batches")
+  $batchList = @($waveBatches.batches)
+  if ($batchList.Count -lt 2) { throw "Expected at least two distinct Wave import-batch groupings, found $($batchList.Count)." }
+
+  $usdBatches = @($batchList | Where-Object { $_.currency -eq "USD" })
+  if ($usdBatches.Count -lt 2) { throw "Expected at least two distinct USD import batches from the smoke run's separate CSV uploads." }
+
+  $singleBatch = $usdBatches[0]
+  $encodedBatchId = [Uri]::EscapeDataString([string]$singleBatch.importBatchId)
+  $waveCsvPath = Join-Path $env:TEMP "folio-smoke-wave-$([guid]::NewGuid().ToString('N')).csv"
+  $previousPreference = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    $waveCsvStatus = (& curl.exe --silent --output $waveCsvPath --write-out "%{http_code}" -c $cookieJar -b $cookieJar "$BaseUrl/api/clients/$clientId/export/wave-statement?importBatchId=$encodedBatchId&currency=USD")
+  } finally {
+    $ErrorActionPreference = $previousPreference
+  }
+  if ($waveCsvStatus -ne "200") { throw "Single-batch Wave statement CSV download returned HTTP $waveCsvStatus." }
+  $waveCsvLines = @(Get-Content $waveCsvPath)
+  if ($waveCsvLines[0] -ne "Date,Description,Amount") {
+    throw "Wave statement CSV header must be exactly 'Date,Description,Amount', got '$($waveCsvLines[0])'."
+  }
+  $expectedRowCount = [int]$singleBatch.transactionCount
+  $actualRowCount = $waveCsvLines.Count - 1
+  if ($actualRowCount -ne $expectedRowCount) {
+    throw "Wave statement CSV row count $actualRowCount does not reconcile to the selected batch's $expectedRowCount transactions."
+  }
+  Remove-TempFile $waveCsvPath
+
+  Write-Host "Verifying the Wave statement CSV refuses to silently merge two distinct USD import batches..."
+  $mixedBatchStatus = ""
+  $previousPreference = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    $mixedBatchStatus = (& curl.exe --silent --output NUL --write-out "%{http_code}" -c $cookieJar -b $cookieJar "$BaseUrl/api/clients/$clientId/export/wave-statement?currency=USD")
+  } finally {
+    $ErrorActionPreference = $previousPreference
+  }
+  if ($mixedBatchStatus -ne "400") {
+    throw "Requesting a Wave statement across multiple USD import batches without selecting one must return HTTP 400, got $mixedBatchStatus."
+  }
+
   Write-Host "Verifying a revoked beta entitlement blocks protected business APIs (403 BETA_REVOKED)..."
   $revokeResultRaw = & node (Join-Path $PSScriptRoot "smoke-admin.mjs") revoke-by-email $email
   if ($LASTEXITCODE -ne 0) { throw "Failed to revoke the smoke entitlement for coverage: $revokeResultRaw" }
