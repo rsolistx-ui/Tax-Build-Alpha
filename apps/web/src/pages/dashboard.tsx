@@ -197,6 +197,9 @@ function QuickActions({ onPickClient }: { onPickClient: (destinationTab: string)
       <Button size="sm" variant="secondary" onClick={() => onPickClient("bank")}>
         Resolve bank exceptions
       </Button>
+      <Button size="sm" variant="secondary" onClick={() => navigate("/documents/review")}>
+        Review documents
+      </Button>
     </div>
   );
 }

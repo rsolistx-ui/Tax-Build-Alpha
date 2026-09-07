@@ -9,6 +9,7 @@ import * as clients from "../services/clients";
 import { ensureFirm } from "../services/firm";
 import { normalizeCurrencyCode } from "../services/pnl";
 import { newId } from "../lib/id";
+import { validateProfileInput, mergeProfile } from "../services/client-profile";
 
 const createSchema = z.object({
   name: z.string().min(1).max(200),
@@ -94,6 +95,13 @@ clientRoutes.patch("/:id/profile", async (c) => {
     [client.id],
   );
 
+  let mergedProfileFields = (current?.profile as Record<string, unknown> | undefined) ?? {};
+  if (body.profile) {
+    const validation = validateProfileInput(body.profile);
+    if (!validation.ok) return c.json({ error: validation.error }, 400);
+    mergedProfileFields = mergeProfile(mergedProfileFields, validation.sanitized);
+  }
+
   const next = {
     entity_type: body.entity_type !== undefined ? body.entity_type : current?.entity_type ?? null,
     industry: body.industry !== undefined ? body.industry : current?.industry ?? null,
@@ -102,7 +110,7 @@ clientRoutes.patch("/:id/profile", async (c) => {
     accounting_basis:
       body.accounting_basis !== undefined ? body.accounting_basis : current?.accounting_basis ?? null,
     default_currency: (body.default_currency ?? String(current?.default_currency ?? "USD")).toUpperCase(),
-    profile: body.profile ?? (current?.profile as Record<string, unknown> | undefined) ?? {},
+    profile: mergedProfileFields,
   };
 
   const [profile] = await db.query(
@@ -129,6 +137,10 @@ clientRoutes.patch("/:id/profile", async (c) => {
       next.default_currency,
       next.profile,
     ],
+  );
+  await db.query(
+    "INSERT INTO audit_events (id, client_id, actor_user_id, action, before_json, after_json) VALUES ($1, $2, $3, 'client_profile_updated', $4, $5)",
+    [newId("aud"), client.id, c.get("userId"), current ?? null, next],
   );
   return c.json({ profile });
 });

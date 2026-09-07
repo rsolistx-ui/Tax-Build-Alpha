@@ -15,6 +15,9 @@ import {
   XCircle,
   Loader2,
   RotateCcw,
+  LayoutDashboard,
+  ClipboardList,
+  FileStack,
 } from "lucide-react";
 import { api, apiUrl } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
@@ -30,6 +33,9 @@ import { buildDrilldownPath } from "@/types/pnl";
 import { cn } from "@/lib/utils";
 import { presetRange, REPORTING_PERIOD_OPTIONS, type ReportingPeriodPreset } from "@/lib/reporting-period";
 import { ExportCenter } from "@/components/export-center";
+import { ClientOverview } from "@/components/client-overview";
+import { TaxReadinessPanel } from "@/components/tax-readiness-panel";
+import { DocumentsPanel } from "@/components/documents-panel";
 
 type Category = {
   id: string;
@@ -40,6 +46,20 @@ type Category = {
 
 type Client = { id: string; name: string };
 
+type ProfessionalProfile = {
+  dba?: string;
+  primaryContactName?: string;
+  contactEmail?: string;
+  contactPhone?: string;
+  einLast4?: string;
+  bookkeepingStartDate?: string;
+  bookkeepingFrequency?: string;
+  taxPrepRequired?: boolean;
+  priorYearReturnAvailable?: boolean;
+  notes?: string;
+  knownAccountSources?: string;
+};
+
 type ClientProfile = {
   entity_type: string | null;
   industry: string | null;
@@ -47,6 +67,7 @@ type ClientProfile = {
   tax_year: number | null;
   accounting_basis: "cash" | "accrual" | null;
   default_currency: string;
+  profile?: ProfessionalProfile;
 };
 
 type FolderReceipt = {
@@ -71,11 +92,11 @@ type BatchFile = {
   error?: string;
 };
 
-type Tab = "folders" | "upload" | "review" | "bank" | "pnl" | "export";
+type Tab = "overview" | "folders" | "upload" | "review" | "bank" | "pnl" | "tax-readiness" | "documents" | "export";
 
 
 
-const VALID_TABS: Tab[] = ["folders", "upload", "review", "bank", "pnl", "export"];
+const VALID_TABS: Tab[] = ["overview", "folders", "upload", "review", "bank", "pnl", "tax-readiness", "documents", "export"];
 
 export function ClientWorkspacePage() {
   const { clientId = "" } = useParams();
@@ -83,7 +104,7 @@ export function ClientWorkspacePage() {
   const focusId = searchParams.get("focus");
   const initialTab = (VALID_TABS as string[]).includes(searchParams.get("tab") ?? "")
     ? (searchParams.get("tab") as Tab)
-    : "folders";
+    : "overview";
   const [client, setClient] = useState<Client | null>(null);
   const [profile, setProfile] = useState<ClientProfile | null>(null);
   const [editingProfile, setEditingProfile] = useState(false);
@@ -261,15 +282,27 @@ export function ClientWorkspacePage() {
 
   const tabs = useMemo(
     () => [
+      { id: "overview" as const, label: "Overview", icon: LayoutDashboard },
       { id: "folders" as const, label: "Folders", icon: Folder },
       { id: "upload" as const, label: "Upload", icon: Upload },
       { id: "review" as const, label: "Review", icon: Inbox, count: review.length },
       { id: "bank" as const, label: "Bank", icon: Landmark },
       { id: "pnl" as const, label: "P&L", icon: LineChart },
+      { id: "tax-readiness" as const, label: "Tax readiness", icon: ClipboardList },
+      { id: "documents" as const, label: "Documents", icon: FileStack },
       { id: "export" as const, label: "Export", icon: FileDown },
     ],
     [review.length],
   );
+
+  function navigateToDeepLink(deepLink: string) {
+    const query = deepLink.split("?")[1] ?? "";
+    const params = new URLSearchParams(query);
+    const nextTab = params.get("tab");
+    const focus = params.get("focus");
+    if (nextTab && (VALID_TABS as string[]).includes(nextTab)) setTab(nextTab as Tab);
+    if (focus) setSearchParams({ focus }, { replace: true });
+  }
 
   return (
     <div className="space-y-6">
@@ -324,6 +357,12 @@ export function ClientWorkspacePage() {
           </button>
         ))}
       </div>
+
+      {tab === "overview" ? <ClientOverview clientId={clientId} onNavigate={navigateToDeepLink} /> : null}
+
+      {tab === "tax-readiness" ? <TaxReadinessPanel clientId={clientId} taxYear={profile?.tax_year ?? null} /> : null}
+
+      {tab === "documents" ? <DocumentsPanel clientId={clientId} /> : null}
 
       {tab === "folders" ? (
         <div className="grid gap-4 lg:grid-cols-[240px_1fr]">
@@ -623,7 +662,7 @@ function ProfileEditForm({
   onCancel,
   onSave,
 }: {
-  profile: { entity_type: string | null; industry: string | null; state: string | null; tax_year: number | null; accounting_basis: "cash" | "accrual" | null; default_currency: string } | null;
+  profile: ClientProfile | null;
   onCancel: () => void;
   onSave: (next: Record<string, unknown>) => void;
 }) {
@@ -634,21 +673,53 @@ function ProfileEditForm({
   const [basis, setBasis] = useState(profile?.accounting_basis ?? "");
   const [currency, setCurrency] = useState(profile?.default_currency ?? "USD");
 
+  const professional = profile?.profile ?? {};
+  const [dba, setDba] = useState(professional.dba ?? "");
+  const [primaryContactName, setPrimaryContactName] = useState(professional.primaryContactName ?? "");
+  const [contactEmail, setContactEmail] = useState(professional.contactEmail ?? "");
+  const [contactPhone, setContactPhone] = useState(professional.contactPhone ?? "");
+  const [einLast4, setEinLast4] = useState(professional.einLast4 ?? "");
+  const [bookkeepingStartDate, setBookkeepingStartDate] = useState(professional.bookkeepingStartDate ?? "");
+  const [bookkeepingFrequency, setBookkeepingFrequency] = useState(professional.bookkeepingFrequency ?? "");
+  const [taxPrepRequired, setTaxPrepRequired] = useState(Boolean(professional.taxPrepRequired));
+  const [priorYearReturnAvailable, setPriorYearReturnAvailable] = useState(Boolean(professional.priorYearReturnAvailable));
+  const [notes, setNotes] = useState(professional.notes ?? "");
+  const [knownAccountSources, setKnownAccountSources] = useState(professional.knownAccountSources ?? "");
+
   return (
-    <div className="flex w-full flex-wrap items-end gap-2">
-      <Field label="Entity type" value={entityType} onChange={setEntityType} />
-      <Field label="Industry" value={industry} onChange={setIndustry} />
-      <Field label="State" value={state} onChange={setState} />
-      <Field label="Tax year" value={taxYear} onChange={setTaxYear} type="number" />
-      <label className="space-y-1 text-xs font-medium">
-        <span>Accounting basis</span>
-        <select value={basis} onChange={(e) => setBasis(e.target.value)} className="h-9 rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-2 text-sm font-normal">
-          <option value="">Not set</option>
-          <option value="cash">Cash</option>
-          <option value="accrual">Accrual (not available for reporting in the paid alpha)</option>
-        </select>
-      </label>
-      <Field label="Currency" value={currency} onChange={setCurrency} />
+    <div className="w-full space-y-3">
+      <div className="flex w-full flex-wrap items-end gap-2">
+        <Field label="Entity type" value={entityType} onChange={setEntityType} />
+        <Field label="Industry" value={industry} onChange={setIndustry} />
+        <Field label="State" value={state} onChange={setState} />
+        <Field label="Tax year" value={taxYear} onChange={setTaxYear} type="number" />
+        <label className="space-y-1 text-xs font-medium">
+          <span>Accounting basis</span>
+          <select value={basis} onChange={(e) => setBasis(e.target.value)} className="h-9 rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-2 text-sm font-normal">
+            <option value="">Not set</option>
+            <option value="cash">Cash</option>
+            <option value="accrual">Accrual (not available for reporting in the paid alpha)</option>
+          </select>
+        </label>
+        <Field label="Currency" value={currency} onChange={setCurrency} />
+      </div>
+      <div className="flex w-full flex-wrap items-end gap-2 border-t border-[var(--color-border)] pt-3">
+        <Field label="DBA / operating name" value={dba} onChange={setDba} />
+        <Field label="Primary contact" value={primaryContactName} onChange={setPrimaryContactName} />
+        <Field label="Contact email" value={contactEmail} onChange={setContactEmail} />
+        <Field label="Contact phone" value={contactPhone} onChange={setContactPhone} />
+        <Field label="EIN last 4" value={einLast4} onChange={setEinLast4} />
+        <Field label="Bookkeeping start date" value={bookkeepingStartDate} onChange={setBookkeepingStartDate} type="date" />
+        <Field label="Bookkeeping frequency" value={bookkeepingFrequency} onChange={setBookkeepingFrequency} />
+        <Field label="Known account sources" value={knownAccountSources} onChange={setKnownAccountSources} />
+        <label className="flex items-center gap-1.5 text-xs font-medium">
+          <input type="checkbox" checked={taxPrepRequired} onChange={(e) => setTaxPrepRequired(e.target.checked)} /> Tax preparation required
+        </label>
+        <label className="flex items-center gap-1.5 text-xs font-medium">
+          <input type="checkbox" checked={priorYearReturnAvailable} onChange={(e) => setPriorYearReturnAvailable(e.target.checked)} /> Prior-year return available
+        </label>
+        <Field label="Notes" value={notes} onChange={setNotes} />
+      </div>
       <div className="flex gap-2">
         <Button
           size="sm"
@@ -659,6 +730,11 @@ function ProfileEditForm({
             tax_year: taxYear ? Number(taxYear) : null,
             accounting_basis: basis || null,
             default_currency: currency || "USD",
+            profile: {
+              dba, primaryContactName, contactEmail, contactPhone, einLast4,
+              bookkeepingStartDate, bookkeepingFrequency, taxPrepRequired, priorYearReturnAvailable,
+              notes, knownAccountSources,
+            },
           })}
         >
           Save

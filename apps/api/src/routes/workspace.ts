@@ -9,7 +9,6 @@ import { getClient } from "../services/clients";
 import { newId } from "../lib/id";
 import { buildClientDashboardRow, buildDocumentWorkflowActions, sortActions, type DashboardBankTxn, type DashboardReceipt, type DashboardClientMeta } from "../services/dashboard";
 import type { AnyDisposition } from "../services/pnl";
-import { validateProfileInput, mergeProfile } from "../services/client-profile";
 import { isValidReadinessState, suggestReadinessState, type TaxReadinessState } from "../services/tax-readiness";
 import { generateChecklist, isValidChecklistStatus, suggestDocumentType, sha256Hex, isValidDocumentType } from "../services/documents";
 
@@ -123,55 +122,6 @@ workspaceRoutes.get("/:clientId/overview", async (c) => {
   });
 });
 
-/** Professional client profile: shared context, entered once. */
-workspaceRoutes.get("/:clientId/profile", async (c) => {
-  const { db, client } = await authorizedClient(c);
-  if (!client) return c.json({ error: "Not found" }, 404);
-  const [profile] = await db.query<Record<string, unknown>>(
-    `SELECT entity_type, industry, state, tax_year, accounting_basis, default_currency, profile FROM client_profiles WHERE client_id = $1`,
-    [client.id],
-  );
-  return c.json({ profile: profile ?? { entity_type: null, industry: null, state: null, tax_year: null, accounting_basis: null, default_currency: "USD", profile: {} } });
-});
-
-workspaceRoutes.patch("/:clientId/profile", async (c) => {
-  const { db, client } = await authorizedClient(c);
-  if (!client) return c.json({ error: "Not found" }, 404);
-  const body = (await c.req.json()) as Record<string, unknown>;
-
-  const coreFields: Record<string, unknown> = {};
-  for (const key of ["entity_type", "industry", "state", "tax_year", "accounting_basis", "default_currency"]) {
-    if (key in body) coreFields[key] = body[key];
-  }
-  const professionalInput = (body.professional as Record<string, unknown>) ?? {};
-  const validation = validateProfileInput(professionalInput);
-  if (!validation.ok) return c.json({ error: validation.error }, 400);
-
-  const [existing] = await db.query<{ profile: Record<string, unknown> }>(`SELECT profile FROM client_profiles WHERE client_id = $1`, [client.id]);
-  const mergedProfile = mergeProfile(existing?.profile ?? {}, validation.sanitized);
-
-  await db.query(
-    `INSERT INTO client_profiles (client_id, entity_type, industry, state, tax_year, accounting_basis, default_currency, profile, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, NOW())
-     ON CONFLICT (client_id) DO UPDATE SET
-       entity_type = COALESCE($2, client_profiles.entity_type),
-       industry = COALESCE($3, client_profiles.industry),
-       state = COALESCE($4, client_profiles.state),
-       tax_year = COALESCE($5, client_profiles.tax_year),
-       accounting_basis = COALESCE($6, client_profiles.accounting_basis),
-       default_currency = COALESCE($7, client_profiles.default_currency),
-       profile = $8::jsonb,
-       updated_at = NOW()`,
-    [
-      client.id,
-      coreFields.entity_type ?? null, coreFields.industry ?? null, coreFields.state ?? null,
-      coreFields.tax_year ?? null, coreFields.accounting_basis ?? null, coreFields.default_currency ?? "USD",
-      mergedProfile,
-    ],
-  );
-  await insertAudit(db, client.id, c.get("userId"), "client_profile_updated", existing?.profile ?? {}, mergedProfile);
-  return c.json({ ok: true });
-});
 
 /** Tax-year readiness: distinct from bookkeeping readiness, professional-controlled. */
 workspaceRoutes.get("/:clientId/tax-readiness/:taxYear", async (c) => {

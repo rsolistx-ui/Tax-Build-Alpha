@@ -6,6 +6,7 @@ import { ClientsPage } from "@/pages/clients";
 import { DashboardPage } from "@/pages/dashboard";
 import { ClientWorkspacePage } from "@/pages/client-workspace";
 import { BetaAdminPage } from "@/pages/beta-admin";
+import { DocumentReviewPage } from "@/pages/document-review";
 
 export default function App() {
   return (
@@ -18,6 +19,7 @@ export default function App() {
           <Route path="/clients" element={<ClientsPage />} />
           <Route path="/clients/:clientId" element={<ClientWorkspacePage />} />
           <Route path="/beta-admin" element={<BetaAdminPage />} />
+          <Route path="/documents/review" element={<DocumentReviewPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
