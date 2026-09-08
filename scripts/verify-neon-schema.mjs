@@ -89,6 +89,34 @@ const checks = [
     label: "fk_documents_duplicate_same_client has column-specific ON DELETE SET NULL (migration 0011 - never nulls client_id)",
     query: `SELECT 1 FROM pg_constraint WHERE conname = 'fk_documents_duplicate_same_client' AND pg_get_constraintdef(oid) LIKE '%SET NULL (duplicate_of_document_id)%'`,
   },
+  {
+    label: "engagements table (practice OS, migration 0012)",
+    query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'engagements'`,
+  },
+  {
+    label: "work_items table (practice OS, migration 0012)",
+    query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'work_items'`,
+  },
+  {
+    label: "client_requests table (practice OS, migration 0012)",
+    query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'client_requests'`,
+  },
+  {
+    label: "request_messages table (practice OS, migration 0012)",
+    query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'request_messages'`,
+  },
+  {
+    label: "client_portal_links table (practice OS, migration 0012)",
+    query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'client_portal_links'`,
+  },
+  {
+    label: "service_templates table (practice OS, migration 0012)",
+    query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'service_templates'`,
+  },
+  {
+    label: "work_audit_events table (practice OS, migration 0012)",
+    query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'work_audit_events'`,
+  },
 ];
 
 // The pre-0007 per-state indexes are superseded by idx_bank_unique_receipt_claim

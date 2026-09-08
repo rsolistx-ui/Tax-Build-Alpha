@@ -18,6 +18,10 @@ import { reportRoutes } from "./routes/reports";
 import { dashboardRoutes } from "./routes/dashboard";
 import { workspaceRoutes } from "./routes/workspace";
 import { documentReviewRoutes } from "./routes/document-review";
+import { engagementRoutes } from "./routes/engagements";
+import { workQueueRoutes } from "./routes/work-queue";
+import { clientRequestRoutes } from "./routes/client-requests";
+import { portalRoutes } from "./routes/portal";
 
 const app = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 
@@ -116,6 +120,10 @@ app.route("/api/clients", reportRoutes);
 app.route("/api/dashboard", dashboardRoutes);
 app.route("/api/clients", workspaceRoutes);
 app.route("/api/documents", documentReviewRoutes);
+app.route("/api/clients", engagementRoutes);
+app.route("/api/clients", clientRequestRoutes);
+app.route("/api/work-queue", workQueueRoutes);
+app.route("/api/portal", portalRoutes);
 
 app.notFound((c) => c.json({ error: "Not found" }, 404));
 app.onError((err, c) => {

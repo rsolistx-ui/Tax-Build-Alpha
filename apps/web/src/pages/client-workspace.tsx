@@ -36,6 +36,8 @@ import { ExportCenter } from "@/components/export-center";
 import { ClientOverview } from "@/components/client-overview";
 import { TaxReadinessPanel } from "@/components/tax-readiness-panel";
 import { DocumentsPanel } from "@/components/documents-panel";
+import { EngagementsPanel } from "@/components/engagements-panel";
+import { RequestsPanel } from "@/components/requests-panel";
 
 type Category = {
   id: string;
@@ -92,11 +94,11 @@ type BatchFile = {
   error?: string;
 };
 
-type Tab = "overview" | "folders" | "upload" | "review" | "bank" | "pnl" | "tax-readiness" | "documents" | "export";
+type Tab = "overview" | "folders" | "upload" | "review" | "bank" | "pnl" | "tax-readiness" | "documents" | "engagements" | "requests" | "export";
 
 
 
-const VALID_TABS: Tab[] = ["overview", "folders", "upload", "review", "bank", "pnl", "tax-readiness", "documents", "export"];
+const VALID_TABS: Tab[] = ["overview", "folders", "upload", "review", "bank", "pnl", "tax-readiness", "documents", "engagements", "requests", "export"];
 
 export function ClientWorkspacePage() {
   const { clientId = "" } = useParams();
@@ -303,6 +305,8 @@ export function ClientWorkspacePage() {
       { id: "pnl" as const, label: "P&L", icon: LineChart },
       { id: "tax-readiness" as const, label: "Tax readiness", icon: ClipboardList },
       { id: "documents" as const, label: "Documents", icon: FileStack },
+      { id: "engagements" as const, label: "Engagements", icon: ClipboardList },
+      { id: "requests" as const, label: "Requests", icon: Inbox },
       { id: "export" as const, label: "Export", icon: FileDown },
     ],
     [review.length],
@@ -383,6 +387,10 @@ export function ClientWorkspacePage() {
       ) : null}
 
       {tab === "documents" ? <DocumentsPanel clientId={clientId} /> : null}
+
+      {tab === "engagements" ? <EngagementsPanel clientId={clientId} /> : null}
+
+      {tab === "requests" ? <RequestsPanel clientId={clientId} /> : null}
 
       {tab === "folders" ? (
         <div className="grid gap-4 lg:grid-cols-[240px_1fr]">

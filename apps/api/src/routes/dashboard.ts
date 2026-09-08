@@ -285,10 +285,38 @@ dashboardRoutes.get("/", async (c) => {
     }),
   );
 
+  const [engagementCounts] = await db.query<{ open_engagements: number }>(
+    `SELECT COUNT(*)::int AS open_engagements FROM engagements WHERE firm_id = $1 AND status NOT IN ('complete', 'archived')`,
+    [firm.id],
+  );
+  const [waitingOnClient] = await db.query<{ n: number }>(
+    `SELECT COUNT(*)::int AS n FROM work_items WHERE firm_id = $1 AND status = 'waiting_on_client'`,
+    [firm.id],
+  );
+  const [overdueWork] = await db.query<{ n: number }>(
+    `SELECT COUNT(*)::int AS n FROM work_items WHERE firm_id = $1 AND status NOT IN ('complete', 'cancelled') AND due_at IS NOT NULL AND due_at < NOW()`,
+    [firm.id],
+  );
+  const [dueWork] = await db.query<{ n: number }>(
+    `SELECT COUNT(*)::int AS n FROM work_items WHERE firm_id = $1 AND status NOT IN ('complete', 'cancelled') AND due_at IS NOT NULL AND due_at <= NOW() + INTERVAL '7 days'`,
+    [firm.id],
+  );
+  const [requestAging] = await db.query<{ oldest_pending_days: number | null }>(
+    `SELECT EXTRACT(DAY FROM NOW() - MIN(created_at))::int AS oldest_pending_days FROM client_requests WHERE firm_id = $1 AND status IN ('requested', 'viewed')`,
+    [firm.id],
+  );
+
   return c.json({
     summary: summarize(rows, sortedActions),
     clients: rows,
     actions: sortedActions,
     recentActivity,
+    operationsCommandCenter: {
+      openEngagements: engagementCounts?.open_engagements ?? 0,
+      waitingOnClientCount: waitingOnClient?.n ?? 0,
+      overdueWorkCount: overdueWork?.n ?? 0,
+      dueSoonWorkCount: dueWork?.n ?? 0,
+      oldestPendingRequestDays: requestAging?.oldest_pending_days ?? null,
+    },
   });
 });

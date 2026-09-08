@@ -1,5 +1,5 @@
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
-import { Building2, LayoutDashboard, LogOut, ShieldCheck, Users } from "lucide-react";
+import { Building2, ClipboardList, LayoutDashboard, LogOut, ShieldCheck, Users } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -59,6 +59,20 @@ export function AppShell({
                 <span className="inline-flex items-center gap-1.5">
                   <Users className="h-3.5 w-3.5" />
                   Clients
+                </span>
+              </NavLink>
+              <NavLink
+                to="/work-queue"
+                className={({ isActive }) =>
+                  cn(
+                    "rounded-md px-3 py-1.5 text-sm text-[var(--color-muted-foreground)] hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)]",
+                    isActive && "bg-[var(--color-muted)] text-[var(--color-foreground)]",
+                  )
+                }
+              >
+                <span className="inline-flex items-center gap-1.5">
+                  <ClipboardList className="h-3.5 w-3.5" />
+                  Work Queue
                 </span>
               </NavLink>
               {isOwner ? (
