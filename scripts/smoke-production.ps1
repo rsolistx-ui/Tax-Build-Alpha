@@ -1719,7 +1719,22 @@ try {
   if (-not $posRevokeStatus.revoked) { throw "Portal link revocation did not report success." }
   $revokedTokenStatus = (& curl.exe --silent --output NUL --write-out "%{http_code}" -H "Authorization: Bearer $posOtherClientToken" "$BaseUrl/api/portal/home")
   if ($revokedTokenStatus -ne "401") { throw "A revoked portal token must return 401, got HTTP $revokedTokenStatus." }
-  Write-Host "Note: expiry (as opposed to explicit revocation) is not live-tested here - the API's minimum issuable TTL is 1 day, so producing an already-expired link requires either waiting a full day or direct database access, neither of which this script does. resolvePortalToken's expiry check is covered instead by services/portal.test.ts."
+  Write-Host "Verifying a genuinely expired portal link is rejected (not just an explicitly revoked one)..."
+  $posExpiryLinkPayloadPath = New-JsonPayloadFile "{}"
+  $posExpiryLinkResult = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-H", "Content-Type: application/json", "--data-binary", "@$posExpiryLinkPayloadPath", "$BaseUrl/api/clients/$clientId/portal-links")
+  Remove-TempFile $posExpiryLinkPayloadPath
+  $posExpiryLinkId = [string]$posExpiryLinkResult.link.id
+  $posExpiryToken = [string]$posExpiryLinkResult.link.token
+  if (-not $posExpiryLinkId -or -not $posExpiryToken) { throw "Could not issue the portal link used for the expiry smoke check." }
+
+  $expireResultRaw = & node (Join-Path $PSScriptRoot "smoke-admin.mjs") expire-portal-link $posExpiryLinkId
+  if ($LASTEXITCODE -ne 0) { throw "smoke-admin.mjs expire-portal-link failed: $expireResultRaw" }
+  $expireResult = ($expireResultRaw | Select-Object -Last 1) | ConvertFrom-Json
+  if (-not $expireResult.expired) { throw "smoke-admin.mjs did not report the portal link as expired." }
+
+  $expiredTokenStatus = (& curl.exe --silent --output NUL --write-out "%{http_code}" -H "Authorization: Bearer $posExpiryToken" "$BaseUrl/api/portal/home")
+  if ($expiredTokenStatus -ne "401") { throw "A genuinely expired portal token must return 401, got HTTP $expiredTokenStatus." }
+  Write-Host "Confirmed: an expired portal link (backdated via the narrowly-scoped, synthetic-context-only smoke-admin operation, not a production API weakening) is rejected exactly like a revoked one. Its containing firm is removed by the existing end-of-run cleanup below, same as every other synthetic object."
 
   Write-Host "Uploading receipt evidence through the client portal for the still-valid request token..."
   $posReceiptPath = Join-Path $env:TEMP "folio-smoke-pos-receipt-$([guid]::NewGuid().ToString('N')).png"

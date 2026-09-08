@@ -215,7 +215,40 @@ if (command === "seed-invite") {
   const allZero = Object.values(checks).every((n) => Number(n) === 0);
   console.log(JSON.stringify({ clean: allZero, checks }));
   if (!allZero) process.exit(1);
+} else if (command === "expire-portal-link") {
+  // Narrowly scoped, synthetic-context-only operation: backdates a
+  // client_portal_links row's expires_at so the smoke script can prove
+  // GET /api/portal/home returns 401 for a genuinely expired token,
+  // without weakening the production API (there is no such endpoint or
+  // flag in the app itself) and without ever printing the plaintext
+  // token, which this script never had access to in the first place -
+  // only its hash is ever stored.
+  const [linkId] = args;
+  if (!linkId) { console.error("usage: expire-portal-link <linkId>"); process.exit(1); }
+
+  const ALLOWED_SMOKE_FIRM_NAMES = new Set(["Folio Smoke Test's Firm", "Repro's Firm", "Repro2's Firm"]);
+  const linkRows = (await query(
+    `SELECT cpl.id, f.name AS firm_name FROM client_portal_links cpl
+     JOIN clients c ON c.id = cpl.client_id
+     JOIN firms f ON f.id = c.firm_id
+     WHERE cpl.id = $1`,
+    [linkId],
+  )).rows;
+  const link = linkRows[0];
+  if (!link) { console.error(JSON.stringify({ expired: false, error: "link not found" })); process.exit(1); }
+  const firmName = link[1];
+  if (!ALLOWED_SMOKE_FIRM_NAMES.has(firmName)) {
+    console.error(JSON.stringify({ expired: false, error: "refusing to expire a portal link outside the synthetic smoke-test firm naming convention" }));
+    process.exit(1);
+  }
+
+  const updated = (await query(
+    `UPDATE client_portal_links SET expires_at = NOW() - INTERVAL '1 day' WHERE id = $1 RETURNING id`,
+    [linkId],
+  )).rows;
+  console.log(JSON.stringify({ expired: updated.length > 0, linkId }));
+  if (updated.length === 0) process.exit(1);
 } else {
-  console.error("Unknown command. Use: seed-invite | revoke-by-email | find-firm-id-by-email | inventory-smoke-clients | cascade-delete-test | verify-clean");
+  console.error("Unknown command. Use: seed-invite | revoke-by-email | find-firm-id-by-email | inventory-smoke-clients | cascade-delete-test | verify-clean | expire-portal-link");
   process.exit(1);
 }

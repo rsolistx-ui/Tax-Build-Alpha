@@ -4,7 +4,9 @@ import { respondToRequest } from "./client-requests";
 
 export type RequestMessageRow = {
   id: string;
+  firm_id: string;
   request_id: string;
+  client_id: string;
   author_type: "professional" | "client" | "system";
   author_user_id: string | null;
   body: string;
@@ -18,18 +20,26 @@ export async function listRequestMessages(db: Db, requestId: string): Promise<Re
   );
 }
 
+/**
+ * requestId alone is never trusted as the tenant boundary: both clientId
+ * and firmId are required parameters and are written into every row, so
+ * the runtime INSERT always satisfies request_messages' NOT NULL tenant
+ * columns and the migration's composite FKs
+ * (request_id, client_id) -> client_requests and (client_id, firm_id) -> clients.
+ */
 export async function addRequestMessage(
   db: Db,
   requestId: string,
   firmId: string,
+  clientId: string,
   authorType: "professional" | "client" | "system",
   authorUserId: string | null,
   body: string,
 ): Promise<RequestMessageRow> {
   const id = newId("rmsg");
   await db.query(
-    `INSERT INTO request_messages (id, request_id, author_type, author_user_id, body) VALUES ($1, $2, $3, $4, $5)`,
-    [id, requestId, authorType, authorUserId, body],
+    `INSERT INTO request_messages (id, firm_id, request_id, client_id, author_type, author_user_id, body) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [id, firmId, requestId, clientId, authorType, authorUserId, body],
   );
 
   if (authorType === "client") {

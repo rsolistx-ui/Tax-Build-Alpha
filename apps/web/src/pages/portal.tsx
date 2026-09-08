@@ -148,6 +148,31 @@ export function PortalPage() {
     }
   }
 
+  /**
+   * Portal auth is a bearer token, never put in a URL, so the document
+   * source is fetched with the Authorization header (like every other
+   * portal call) rather than linked to directly. The response bytes
+   * become a short-lived, same-origin blob: URL used only to open the
+   * file, then revoked shortly after - the object URL never contains or
+   * exposes the portal token itself.
+   */
+  async function openDocument(documentId: string) {
+    if (!tokenRef.current) return;
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/portal/documents/${documentId}/source`, {
+        headers: { Authorization: `Bearer ${tokenRef.current}` },
+      });
+      if (!res.ok) throw new Error("Could not open this document.");
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      window.open(objectUrl, "_blank", "noopener,noreferrer");
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not open this document.");
+    }
+  }
+
   async function uploadEvidence(files: FileList | null) {
     if (!selected || !files?.length || !tokenRef.current) return;
     setUploading(true);
@@ -294,9 +319,17 @@ export function PortalPage() {
             <p className="text-sm text-[var(--color-muted-foreground)]">No documents yet.</p>
           ) : (
             documents.map((d) => (
-              <div key={d.id} className="rounded-md border border-[var(--color-border)] p-3 text-sm">
-                <p className="font-medium">{d.filename}</p>
-                <p className="text-xs text-[var(--color-muted-foreground)]">{label(d.document_type)} \u00b7 {new Date(d.uploaded_at).toLocaleDateString()}</p>
+              <div key={d.id} className="flex items-center justify-between gap-2 rounded-md border border-[var(--color-border)] p-3 text-sm">
+                <div>
+                  <p className="font-medium">{d.filename}</p>
+                  <p className="text-xs text-[var(--color-muted-foreground)]">{label(d.document_type)} · {new Date(d.uploaded_at).toLocaleDateString()}</p>
+                </div>
+                <button
+                  className="rounded-md border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium"
+                  onClick={() => void openDocument(d.id)}
+                >
+                  Open
+                </button>
               </div>
             ))
           )}

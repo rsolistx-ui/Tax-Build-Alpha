@@ -67,3 +67,27 @@ Sources:
 - MyTAXPrepOffice Reviews 2026, Capterra: https://www.capterra.com/p/179883/my-TAXprep-office/reviews/
 - Financial Cents Vs Karbon: https://financial-cents.com/financial-cents-vs-karbon/
 - Financial Cents Vs Canopy: https://financial-cents.com/financial-cents-vs-canopy/
+
+## Sample-derived theme tallies (2026-09-08 update, real counts from review-sample-2026.csv)
+
+These counts are computed directly from the sourced rows in review-sample-2026.csv, not inferred from aggregator summaries. Denominators are the actual number of distinct sourced observations retrieved for that product in this pass, not 25 - see REVIEW_SAMPLING_METHODOLOGY_AND_GAPS.md for why a literal 25-per-product sample was not reachable with the tools available.
+
+QuickBooks Online (9 observations): 2 of 9 concerned account-management actions (forced conversion, account freezes), 1 of 9 billing/security (unauthorized ACH), 1 of 9 billing generally, 1 of 9 bank reconciliation, 1 of 9 bank integration (the API pending-transaction gap), 1 of 9 pricing, 1 of 9 billing/support combined, 1 unspecified (rating-only).
+
+Wave (10 observations): 4 of 10 concerned support responsiveness or availability, the single largest theme in this sample. 2 of 10 concerned receipt intake (image quality, then the pricing move behind the Pro plan). 1 of 10 categorization, 1 of 10 payments processing, 1 unspecified (rating-only).
+
+TaxDome (8 observations): 2 of 8 billing (partial-payment tracking, annual pricing terms), 2 of 8 general workflow rigidity, 1 of 8 onboarding burden, 1 of 8 workflow automation specifically (the linear-pipeline limitation), 1 of 8 product reliability (non-functional client boards), 1 unspecified (rating-only).
+
+MyTAXPrepOffice (7 observations): 3 of 7 tax-calculation accuracy (QBI/PTC errors, NJ EIC/CTC miscalculation, missing SCH-HCC form), 2 of 7 tax-preparation process (diagnostics/warnings gap, migration accuracy), 1 of 7 support, 1 unspecified (rating-only). This is the strongest concentration on a single theme category, tax-calculation accuracy, of any product sampled, consistent with treating it as a category-level design risk rather than a single-vendor indictment.
+
+Financial Cents (5 observations): one observation each for support, onboarding, geographic coverage, pricing, and integration - no single dominant theme in this small sample.
+
+Canopy (5 observations): one observation each for onboarding, support, pricing, billing, and product reliability - similarly no dominant theme, though the pricing-structure-instability complaint (tiers changed repeatedly) is a distinct, repeatedly-cited concern in the source material even though it appears once in this row-level count.
+
+Karbon (5 observations): 2 of 5 onboarding, 1 of 5 integration, 1 of 5 pricing, 1 of 5 general product-feedback (vendor responsiveness to feature requests).
+
+Xero (6 observations): 2 of 6 invoicing UI (the forced classic-to-new invoicing switch), 1 of 6 pricing, 1 of 6 support/billing combined, 1 of 6 support specifically, 1 of 6 international/multi-currency limitations.
+
+Intuit ProConnect Tax, Drake Tax, UltraTax CS (2 observations each): too small a sample to tally themes meaningfully; each pair of observations is reported individually in the CSV rather than aggregated into a theme count.
+
+**Discipline maintained:** every count above is a literal tally of sourced rows in review-sample-2026.csv, not an inference from aggregator prose. Where the CSV has only one or two rows for a product, no percentage or "dominant theme" claim is made - a sample of 2 does not support a prevalence claim, and none is made here.

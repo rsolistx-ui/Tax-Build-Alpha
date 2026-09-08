@@ -8,6 +8,7 @@ import { ensureFirm } from "../services/firm";
 import { getClient } from "../services/clients";
 import { getEngagement } from "../services/engagements";
 import { createWorkItem, queryWorkQueue, updateWorkItemStatus, type WorkQueueFilter } from "../services/work-items";
+import { isoTimestampSchema } from "../services/date-validation";
 import { z } from "zod";
 
 export const workQueueRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
@@ -69,7 +70,7 @@ const createSchema = z.object({
   description: z.string().trim().max(2000).nullable().optional(),
   workType: z.string().optional(),
   priority: z.enum(PRIORITIES).optional(),
-  dueAt: z.string().nullable().optional(),
+  dueAt: isoTimestampSchema.nullable().optional(),
   assignedUserId: z.string().nullable().optional(),
 });
 

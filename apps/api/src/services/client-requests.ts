@@ -1,7 +1,7 @@
 import type { Db, DbStatement } from "../db";
 import { newId } from "../lib/id";
 import { workAuditEventStatement } from "./work-audit";
-import { updateWorkItemStatus, workItemInsertStatement, type CreateWorkItemInput } from "./work-items";
+import { getWorkItem, workItemInsertStatement, workItemStatusUpdateStatements, type CreateWorkItemInput } from "./work-items";
 
 export type ClientRequestRow = {
   id: string;
@@ -76,10 +76,23 @@ export type CreateClientRequestInput = {
   dueAt?: string | null;
 };
 
-export function clientRequestInsertStatement(id: string, workItemId: string, input: CreateClientRequestInput): DbStatement {
+/**
+ * actorUserId is the real professional (or null for a genuine system-
+ * originated request) - created_by_user_id always records who actually
+ * created the row, and approved_by_user_id is only ever that same real
+ * actor when the request is already "requested" at creation time, never
+ * a literal "system" placeholder string.
+ */
+export function clientRequestInsertStatement(
+  id: string,
+  workItemId: string,
+  actorUserId: string | null,
+  input: CreateClientRequestInput,
+): DbStatement {
   const status = input.status ?? "requested";
   const now = new Date();
   const approvedAt = status === "requested" ? now.toISOString() : null;
+  const approvedByUserId = status === "requested" ? actorUserId : null;
   const nextReminderAt = status === "requested" ? nextReminderAfterSend(now).toISOString() : null;
 
   return {
@@ -91,7 +104,7 @@ export function clientRequestInsertStatement(id: string, workItemId: string, inp
     params: [
       id, input.firmId, input.clientId, workItemId, input.requestType, input.title, input.description ?? null,
       status, input.sourceType ?? "manual", input.sourceId ?? null, input.relatedBankTransactionId ?? null,
-      input.dueAt ?? null, null, status === "requested" ? "system" : null, approvedAt, nextReminderAt,
+      input.dueAt ?? null, actorUserId, approvedByUserId, approvedAt, nextReminderAt,
     ],
   };
 }
@@ -140,7 +153,7 @@ export async function createClientRequest(
       actorUserId,
       afterJson: { title: input.title, sourceType: "client_request" },
     }),
-    clientRequestInsertStatement(id, workItemId, input),
+    clientRequestInsertStatement(id, workItemId, actorUserId, input),
     workAuditEventStatement({
       firmId: input.firmId,
       entityType: "client_request",
@@ -211,12 +224,30 @@ export async function approveDraftRequest(
   return getClientRequest(db, requestId, firmId);
 }
 
-/** requested -> viewed. The linked work item stays waiting_on_client: a client opening a request is not yet a response. */
+/**
+ * requested -> viewed. The linked work item stays waiting_on_client: a
+ * client opening a request is not yet a response. The UPDATE only
+ * matches (and only then does the audit event fire) when status is
+ * actually 'requested' - opening an already-viewed request repeatedly
+ * produces no further transition and no duplicate audit event.
+ */
 export async function markRequestViewed(db: Db, requestId: string, firmId: string): Promise<void> {
-  await db.query(
-    `UPDATE client_requests SET status = CASE WHEN status = 'requested' THEN 'viewed' ELSE status END, viewed_at = COALESCE(viewed_at, NOW()), updated_at = NOW() WHERE id = $1 AND firm_id = $2`,
+  const [transitioned] = await db.query<{ id: string }>(
+    `UPDATE client_requests SET status = 'viewed', viewed_at = COALESCE(viewed_at, NOW()), updated_at = NOW() WHERE id = $1 AND firm_id = $2 AND status = 'requested' RETURNING id`,
     [requestId, firmId],
   );
+  if (!transitioned) return;
+
+  const auditStatement = workAuditEventStatement({
+    firmId,
+    entityType: "client_request",
+    entityId: requestId,
+    action: "request_viewed",
+    actorUserId: null,
+    beforeJson: { status: "requested" },
+    afterJson: { status: "viewed" },
+  });
+  await db.query(auditStatement.query, auditStatement.params);
 }
 
 /**
@@ -245,10 +276,10 @@ export async function respondToRequest(db: Db, requestId: string, firmId: string
     }),
   ];
   if (current.work_item_id) {
-    statements.push({
-      query: `UPDATE work_items SET status = 'in_progress', updated_at = NOW() WHERE id = $1 AND firm_id = $2 AND status != 'complete'`,
-      params: [current.work_item_id, firmId],
-    });
+    const workItem = await getWorkItem(db, current.work_item_id, firmId);
+    if (workItem && workItem.status !== "complete") {
+      statements.push(...workItemStatusUpdateStatements(workItem, current.work_item_id, firmId, null, "in_progress"));
+    }
   }
   await db.transaction(statements);
 }
@@ -269,7 +300,7 @@ export async function satisfyRequest(
   const current = await getClientRequest(db, requestId, firmId);
   if (!current) return undefined;
 
-  await db.transaction([
+  const statements: DbStatement[] = [
     {
       query: `UPDATE client_requests SET status = 'satisfied', satisfied_at = NOW(), next_reminder_at = NULL, updated_at = NOW() WHERE id = $1 AND firm_id = $2`,
       params: [requestId, firmId],
@@ -283,12 +314,16 @@ export async function satisfyRequest(
       beforeJson: { status: current.status },
       afterJson: { status: "satisfied" },
     }),
-  ]);
+  ];
 
   if (current.work_item_id) {
-    await updateWorkItemStatus(db, current.work_item_id, firmId, actorUserId, "complete");
+    const workItem = await getWorkItem(db, current.work_item_id, firmId);
+    if (workItem) {
+      statements.push(...workItemStatusUpdateStatements(workItem, current.work_item_id, firmId, actorUserId, "complete"));
+    }
   }
 
+  await db.transaction(statements);
   return getClientRequest(db, requestId, firmId);
 }
 
@@ -326,11 +361,14 @@ export async function cancelRequest(
       afterJson: { status: "cancelled" },
     }),
   ];
-  await db.transaction(statements);
 
   if (current.work_item_id) {
-    await updateWorkItemStatus(db, current.work_item_id, firmId, actorUserId, "cancelled");
+    const workItem = await getWorkItem(db, current.work_item_id, firmId);
+    if (workItem && workItem.status !== "complete") {
+      statements.push(...workItemStatusUpdateStatements(workItem, current.work_item_id, firmId, actorUserId, "cancelled"));
+    }
   }
 
+  await db.transaction(statements);
   return getClientRequest(db, requestId, firmId);
 }

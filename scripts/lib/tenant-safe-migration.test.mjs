@@ -26,6 +26,7 @@ const requiredCompositeForeignKeys = [
   ["fk_messages_request_same_client", "REFERENCES client_requests(id, client_id)"],
   ["fk_documents_request_same_client", "REFERENCES client_requests(id, client_id)"],
   ["fk_portal_links_client_same_firm", "REFERENCES clients(id, firm_id)"],
+  ["fk_messages_client_same_firm", "REFERENCES clients(id, firm_id)"],
 ];
 
 for (const [name, referencesClause] of requiredCompositeForeignKeys) {
@@ -75,4 +76,23 @@ test("migration 0012 nullable tenant-scoped FKs use column-specific ON DELETE SE
 test("migration 0012 defines the race-safe partial unique index for exception-request idempotency", () => {
   assert.ok(sql.includes("CREATE UNIQUE INDEX IF NOT EXISTS uq_requests_active_bank_txn"));
   assert.ok(sql.includes("WHERE related_bank_transaction_id IS NOT NULL AND status != 'cancelled'"));
+});
+
+test("migration 0012 contains no malformed single-dollar anonymous DO blocks", () => {
+  assert.doesNotMatch(sql, /DO $ BEGIN/, "found a malformed 'DO $ BEGIN' - anonymous blocks must use $$ dollar-quoting");
+  assert.doesNotMatch(sql, /END $;/, "found a malformed 'END $;' - anonymous blocks must close with $$;");
+});
+
+
+test("migration 0012's DO $$ ... END $$ blocks are correctly paired, not just substring-matched", () => {
+  const openCount = (sql.match(/DO \$\$ BEGIN/g) || []).length;
+  const closeCount = (sql.match(/END \$\$;/g) || []).length;
+  assert.ok(openCount > 0, "expected at least one DO $$ BEGIN block in migration 0012");
+  assert.equal(openCount, closeCount, `found ${openCount} 'DO $$ BEGIN' openings but ${closeCount} 'END $$;' closings - an anonymous block is unbalanced`);
+
+  const openIndices = [...sql.matchAll(/DO \$\$ BEGIN/g)].map((m) => m.index);
+  const closeIndices = [...sql.matchAll(/END \$\$;/g)].map((m) => m.index);
+  for (let i = 0; i < openIndices.length; i++) {
+    assert.ok(closeIndices[i] > openIndices[i], `DO $$ BEGIN at offset ${openIndices[i]} has no matching END $$; after it`);
+  }
 });

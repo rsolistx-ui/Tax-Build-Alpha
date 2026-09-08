@@ -92,7 +92,7 @@ receiptRoutes.post("/:clientId/receipts", async (c) => {
   try {
     result = await ingestReceiptForClient(db, c.env, client, file, c.get("userId"), bankTransactionId);
   } catch (error) {
-    if (error instanceof HttpError) return c.json({ error: error.message }, error.status as 404 | 409);
+    if (error instanceof HttpError) return c.json({ error: error.message }, error.status as 400 | 404 | 409);
     throw error;
   }
 

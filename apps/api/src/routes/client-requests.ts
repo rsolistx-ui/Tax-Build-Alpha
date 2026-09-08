@@ -18,6 +18,7 @@ import {
 import { addRequestMessage, listRequestMessages } from "../services/request-messages";
 import { prepareMissingReceiptRequest, prepareTransactionExplanationRequest } from "../services/exception-automation";
 import { createPortalLink, revokePortalLink } from "../services/portal";
+import { isoTimestampSchema } from "../services/date-validation";
 
 export const clientRequestRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 clientRequestRoutes.use("*", requireSession);
@@ -32,7 +33,7 @@ const createSchema = z.object({
   requestType: z.enum(REQUEST_TYPES),
   title: z.string().trim().min(1).max(200),
   description: z.string().trim().max(2000).nullable().optional(),
-  dueAt: z.string().nullable().optional(),
+  dueAt: isoTimestampSchema.nullable().optional(),
 });
 
 clientRequestRoutes.get("/:clientId/requests", async (c) => {
@@ -134,7 +135,7 @@ clientRequestRoutes.post("/:clientId/requests/:requestId/messages", async (c) =>
   if (!existing) return c.json({ error: "Not found" }, 404);
 
   const body = messageSchema.parse(await c.req.json());
-  const message = await addRequestMessage(db, existing.id, firm.id, "professional", c.get("userId"), body.body);
+  const message = await addRequestMessage(db, existing.id, firm.id, client.id, "professional", c.get("userId"), body.body);
   return c.json({ message }, 201);
 });
 

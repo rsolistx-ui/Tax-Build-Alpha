@@ -6,6 +6,7 @@ import {
   createClientRequest,
   getClientRequest,
   listRequestsDueForReminder,
+  markRequestViewed,
   respondToRequest,
   satisfyRequest,
 } from "./client-requests";
@@ -113,21 +114,42 @@ describe("approveDraftRequest state transition", () => {
 });
 
 describe("respondToRequest state transition", () => {
-  it("moves the request to responded AND the linked work item to in_progress", async () => {
+  it("moves the request to responded AND the linked work item to in_progress, both in the same transaction", async () => {
     const requestRow = { id: "creq_1", firm_id: "firm_1", client_id: "cli_1", work_item_id: "wi_1", status: "viewed" };
-    const { db, transactionCalls } = fakeDb({ [REQUEST_LOOKUP_KEY]: [requestRow] });
+    const workItemRow = { id: "wi_1", firm_id: "firm_1", client_id: "cli_1", status: "waiting_on_client" };
+    const { db, transactionCalls } = fakeDb({
+      [REQUEST_LOOKUP_KEY]: [requestRow],
+      "FROM work_items WHERE id = $1": [workItemRow],
+    });
 
     await respondToRequest(db, "creq_1", "firm_1");
 
+    expect(transactionCalls).toHaveLength(1);
     const statements = transactionCalls[0];
     expect(statements.some((s) => s.query.includes("UPDATE client_requests") && s.query.includes("responded"))).toBe(true);
     const workItemUpdate = statements.find((s) => s.query.includes("UPDATE work_items"));
-    expect(workItemUpdate?.query).toContain("in_progress");
+    expect(workItemUpdate?.params?.[0]).toBe("in_progress");
+    const auditEvents = statements.filter((s) => s.query.includes("INSERT INTO work_audit_events"));
+    expect(auditEvents).toHaveLength(2); // one for the request transition, one for the work-item transition
+  });
+
+  it("does not move an already-complete work item back to in_progress", async () => {
+    const requestRow = { id: "creq_1", firm_id: "firm_1", client_id: "cli_1", work_item_id: "wi_1", status: "viewed" };
+    const workItemRow = { id: "wi_1", firm_id: "firm_1", client_id: "cli_1", status: "complete" };
+    const { db, transactionCalls } = fakeDb({
+      [REQUEST_LOOKUP_KEY]: [requestRow],
+      "FROM work_items WHERE id = $1": [workItemRow],
+    });
+
+    await respondToRequest(db, "creq_1", "firm_1");
+
+    const workItemUpdate = transactionCalls[0].find((s) => s.query.includes("UPDATE work_items"));
+    expect(workItemUpdate).toBeUndefined();
   });
 });
 
 describe("satisfyRequest", () => {
-  it("marks the request satisfied and completes the linked work item", async () => {
+  it("marks the request satisfied and completes the linked work item in ONE atomic transaction", async () => {
     const requestRow = { id: "creq_1", firm_id: "firm_1", client_id: "cli_1", work_item_id: "wi_1", status: "responded" };
     const workItemRow = { id: "wi_1", firm_id: "firm_1", client_id: "cli_1", status: "in_progress" };
     const { db, transactionCalls } = fakeDb({
@@ -137,10 +159,14 @@ describe("satisfyRequest", () => {
 
     await satisfyRequest(db, "creq_1", "firm_1", "user_1");
 
-    const requestUpdate = transactionCalls[0].find((s) => s.query.includes("UPDATE client_requests"));
+    expect(transactionCalls).toHaveLength(1);
+    const statements = transactionCalls[0];
+    const requestUpdate = statements.find((s) => s.query.includes("UPDATE client_requests"));
     expect(requestUpdate).toBeDefined();
-    const workItemUpdate = transactionCalls[1]?.find((s) => s.query.includes("UPDATE work_items"));
+    const workItemUpdate = statements.find((s) => s.query.includes("UPDATE work_items"));
     expect(workItemUpdate?.query).toContain("completed_at = NOW()");
+    const auditEvents = statements.filter((s) => s.query.includes("INSERT INTO work_audit_events"));
+    expect(auditEvents).toHaveLength(2);
   });
 });
 
@@ -155,9 +181,11 @@ describe("cancelRequest", () => {
 
     await cancelRequest(db, "creq_1", "firm_1", "user_1");
 
-    const requestUpdate = transactionCalls[0].find((s) => s.query.includes("UPDATE client_requests"));
+    expect(transactionCalls).toHaveLength(1);
+    const statements = transactionCalls[0];
+    const requestUpdate = statements.find((s) => s.query.includes("UPDATE client_requests"));
     expect(requestUpdate?.query).toContain("cancelled");
-    const workItemUpdate = transactionCalls[1]?.find((s) => s.query.includes("UPDATE work_items"));
+    const workItemUpdate = statements.find((s) => s.query.includes("UPDATE work_items"));
     expect(workItemUpdate?.params?.[0]).toBe("cancelled");
   });
 
@@ -190,5 +218,71 @@ describe("listRequestsDueForReminder", () => {
     expect(call?.sql).toContain("status IN ('requested', 'viewed')");
     expect(call?.sql).toContain("next_reminder_at <= $2");
     expect(call?.params).toEqual(["firm_1", asOf.toISOString()]);
+  });
+});
+
+describe("actor attribution", () => {
+  it("records the real actor as created_by_user_id, never a literal 'system' placeholder", async () => {
+    const requestRow = { id: "creq_1", firm_id: "firm_1", client_id: "cli_1", work_item_id: "wi_1", status: "requested" };
+    const { db, transactionCalls } = fakeDb({ [REQUEST_LOOKUP_KEY]: [requestRow] });
+
+    await createClientRequest(db, "user_42", { firmId: "firm_1", clientId: "cli_1", requestType: "missing_receipt", title: "x", status: "requested" });
+
+    const requestInsert = transactionCalls[0].find((s) => s.query.includes("INSERT INTO client_requests"));
+    // params: id, firmId, clientId, workItemId, requestType, title, description, status, sourceType, sourceId, relatedBankTxnId, dueAt, createdBy, approvedBy, approvedAt, nextReminderAt
+    expect(requestInsert?.params?.[12]).toBe("user_42"); // created_by_user_id
+    expect(requestInsert?.params?.[13]).toBe("user_42"); // approved_by_user_id, since status is "requested" at creation
+    expect(requestInsert?.params).not.toContain("system");
+  });
+
+  it("leaves approved_by_user_id null for a draft, even though created_by_user_id records the real actor", async () => {
+    const requestRow = { id: "creq_1", firm_id: "firm_1", client_id: "cli_1", work_item_id: "wi_1", status: "draft" };
+    const { db, transactionCalls } = fakeDb({ [REQUEST_LOOKUP_KEY]: [requestRow] });
+
+    await createClientRequest(db, "user_42", { firmId: "firm_1", clientId: "cli_1", requestType: "missing_receipt", title: "x", status: "draft" });
+
+    const requestInsert = transactionCalls[0].find((s) => s.query.includes("INSERT INTO client_requests"));
+    expect(requestInsert?.params?.[12]).toBe("user_42");
+    expect(requestInsert?.params?.[13]).toBeNull();
+  });
+});
+
+describe("markRequestViewed", () => {
+  it("transitions requested -> viewed and writes exactly one audit event", async () => {
+    const updated: { sql: string; params: unknown[] }[] = [];
+    const db: Db = {
+      async query<T>(sql: string, params: unknown[] = []) {
+        updated.push({ sql, params });
+        if (sql.startsWith("UPDATE client_requests")) return [{ id: "creq_1" }] as T[]; // RETURNING id: a real transition happened
+        return [] as T[];
+      },
+      async transaction<T>(): Promise<T[][]> {
+        return [] as T[][];
+      },
+    };
+
+    await markRequestViewed(db, "creq_1", "firm_1");
+
+    const auditCalls = updated.filter((c) => c.sql.includes("INSERT INTO work_audit_events"));
+    expect(auditCalls).toHaveLength(1);
+  });
+
+  it("does not write a duplicate audit event when the request is already viewed (no real transition)", async () => {
+    const updated: { sql: string; params: unknown[] }[] = [];
+    const db: Db = {
+      async query<T>(sql: string, params: unknown[] = []) {
+        updated.push({ sql, params });
+        if (sql.startsWith("UPDATE client_requests")) return [] as T[]; // RETURNING nothing: status was not 'requested'
+        return [] as T[];
+      },
+      async transaction<T>(): Promise<T[][]> {
+        return [] as T[][];
+      },
+    };
+
+    await markRequestViewed(db, "creq_1", "firm_1");
+
+    const auditCalls = updated.filter((c) => c.sql.includes("INSERT INTO work_audit_events"));
+    expect(auditCalls).toHaveLength(0);
   });
 });

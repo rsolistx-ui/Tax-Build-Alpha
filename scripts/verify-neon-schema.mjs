@@ -230,6 +230,14 @@ const checks = [
     query: `SELECT 1 FROM information_schema.columns WHERE table_name = 'request_messages' AND column_name = 'client_id'`,
   },
   {
+    label: "request_messages.firm_id column (migration 0012)",
+    query: `SELECT 1 FROM information_schema.columns WHERE table_name = 'request_messages' AND column_name = 'firm_id'`,
+  },
+  {
+    label: "fk_messages_client_same_firm is a composite tenant-safe FK into clients (migration 0012 - a message cannot pair a client with a different firm)",
+    query: `SELECT 1 FROM pg_constraint WHERE conname = 'fk_messages_client_same_firm' AND pg_get_constraintdef(oid) LIKE '%REFERENCES clients(%,%'`,
+  },
+  {
     label: "uq_requests_active_bank_txn is a partial unique index enforcing race-safe exception-request idempotency (migration 0012)",
     query: `SELECT 1 FROM pg_indexes WHERE indexname = 'uq_requests_active_bank_txn'`,
   },

@@ -8,6 +8,7 @@ import { requireActiveBeta } from "../middleware/beta";
 import { ensureFirm } from "../services/firm";
 import { getClient } from "../services/clients";
 import { createEngagement, getEngagement, isEngagementStatus, listEngagementsWithProgress, updateEngagementDetails, updateEngagementStatus } from "../services/engagements";
+import { calendarDateSchema, taxYearSchema } from "../services/date-validation";
 
 export const engagementRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 engagementRoutes.use("*", requireSession);
@@ -21,11 +22,11 @@ const SERVICE_TYPES = [
 const createSchema = z.object({
   serviceType: z.enum(SERVICE_TYPES),
   title: z.string().trim().min(1).max(200),
-  startDate: z.string().nullable().optional(),
-  dueDate: z.string().nullable().optional(),
+  startDate: calendarDateSchema.nullable().optional(),
+  dueDate: calendarDateSchema.nullable().optional(),
   recurrence: z.string().nullable().optional(),
   assignedUserId: z.string().nullable().optional(),
-  taxYear: z.number().int().nullable().optional(),
+  taxYear: taxYearSchema.nullable().optional(),
 });
 
 const statusSchema = z.object({ status: z.string().min(1) });
@@ -62,10 +63,10 @@ engagementRoutes.post("/:clientId/engagements", async (c) => {
 });
 
 const detailsSchema = z.object({
-  startDate: z.string().nullable().optional(),
-  dueDate: z.string().nullable().optional(),
+  startDate: calendarDateSchema.nullable().optional(),
+  dueDate: calendarDateSchema.nullable().optional(),
   recurrence: z.string().nullable().optional(),
-  taxYear: z.number().int().nullable().optional(),
+  taxYear: taxYearSchema.nullable().optional(),
 });
 
 engagementRoutes.patch("/:clientId/engagements/:engagementId", async (c) => {

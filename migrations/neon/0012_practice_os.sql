@@ -12,16 +12,16 @@
 -- client. Not yet applied to production, so this file is edited directly
 -- rather than patched with a follow-up migration. Replay-safe.
 
-DO $ BEGIN
+DO $$ BEGIN
   ALTER TABLE clients
     ADD CONSTRAINT uq_clients_id_firm UNIQUE (id, firm_id);
 EXCEPTION WHEN duplicate_object THEN NULL;
-END $;
-DO $ BEGIN
+END $$;
+DO $$ BEGIN
   ALTER TABLE bank_transactions
     ADD CONSTRAINT uq_bank_transactions_id_client UNIQUE (id, client_id);
 EXCEPTION WHEN duplicate_object THEN NULL;
-END $;
+END $$;
 
 CREATE TABLE IF NOT EXISTS engagements (
   id TEXT PRIMARY KEY,
@@ -46,16 +46,16 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
-DO $ BEGIN
+DO $$ BEGIN
   ALTER TABLE engagements
     ADD CONSTRAINT uq_engagements_id_firm UNIQUE (id, firm_id);
 EXCEPTION WHEN duplicate_object THEN NULL;
-END $;
-DO $ BEGIN
+END $$;
+DO $$ BEGIN
   ALTER TABLE engagements
     ADD CONSTRAINT uq_engagements_id_client UNIQUE (id, client_id);
 EXCEPTION WHEN duplicate_object THEN NULL;
-END $;
+END $$;
 
 DO $$ BEGIN
   ALTER TABLE engagements
@@ -111,16 +111,16 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
-DO $ BEGIN
+DO $$ BEGIN
   ALTER TABLE work_items
     ADD CONSTRAINT uq_work_items_id_firm UNIQUE (id, firm_id);
 EXCEPTION WHEN duplicate_object THEN NULL;
-END $;
-DO $ BEGIN
+END $$;
+DO $$ BEGIN
   ALTER TABLE work_items
     ADD CONSTRAINT uq_work_items_id_client UNIQUE (id, client_id);
 EXCEPTION WHEN duplicate_object THEN NULL;
-END $;
+END $$;
 
 DO $$ BEGIN
   ALTER TABLE work_items
@@ -188,16 +188,16 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
-DO $ BEGIN
+DO $$ BEGIN
   ALTER TABLE client_requests
     ADD CONSTRAINT uq_requests_id_firm UNIQUE (id, firm_id);
 EXCEPTION WHEN duplicate_object THEN NULL;
-END $;
-DO $ BEGIN
+END $$;
+DO $$ BEGIN
   ALTER TABLE client_requests
     ADD CONSTRAINT uq_requests_id_client UNIQUE (id, client_id);
 EXCEPTION WHEN duplicate_object THEN NULL;
-END $;
+END $$;
 
 DO $$ BEGIN
   ALTER TABLE client_requests
@@ -232,6 +232,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_requests_active_bank_txn
 
 CREATE TABLE IF NOT EXISTS request_messages (
   id TEXT PRIMARY KEY,
+  firm_id TEXT NOT NULL REFERENCES firms(id) ON DELETE CASCADE,
   request_id TEXT NOT NULL,
   client_id TEXT NOT NULL,
   author_type TEXT NOT NULL,
@@ -240,12 +241,19 @@ CREATE TABLE IF NOT EXISTS request_messages (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-DO $$ BEGIN
+DO $ BEGIN
   ALTER TABLE request_messages
     ADD CONSTRAINT fk_messages_request_same_client
     FOREIGN KEY (request_id, client_id) REFERENCES client_requests(id, client_id) ON DELETE CASCADE;
 EXCEPTION WHEN duplicate_object THEN NULL;
-END $$;
+END $;
+
+DO $ BEGIN
+  ALTER TABLE request_messages
+    ADD CONSTRAINT fk_messages_client_same_firm
+    FOREIGN KEY (client_id, firm_id) REFERENCES clients(id, firm_id) ON DELETE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $;
 
 DO $$ BEGIN
   ALTER TABLE request_messages

@@ -104,4 +104,40 @@ describe("PortalPage", () => {
 
     vi.unstubAllGlobals();
   });
+  it("opens a document using the Authorization header (never a URL-embedded token) via an accessible Open action", async () => {
+    window.location.hash = "#token=abc123";
+    const documentsList = { documents: [{ id: "doc_1", filename: "w2.pdf", document_type: "tax_document", status: "needs_review", uploaded_at: "2026-01-01" }] };
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url.includes("/api/portal/home")) return jsonResponse(HOME);
+      if (url.includes("/api/portal/documents/doc_1/source")) {
+        return Promise.resolve({ ok: true, blob: () => Promise.resolve(new Blob(["pdf-bytes"])) } as unknown as Response);
+      }
+      if (url.includes("/api/portal/documents")) return jsonResponse(documentsList);
+      return jsonResponse({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const createObjectURL = vi.fn().mockReturnValue("blob:fake-url");
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal("URL", { ...URL, createObjectURL, revokeObjectURL });
+    const windowOpen = vi.spyOn(window, "open").mockImplementation(() => null);
+
+    render(<MemoryRouter><PortalPage /></MemoryRouter>);
+    fireEvent.click(await screen.findByText("Documents"));
+    const openButton = await screen.findByText("Open");
+    fireEvent.click(openButton);
+
+    await waitFor(() => {
+      const sourceCall = fetchMock.mock.calls.find((c) => (c[0] as string).includes("/source"));
+      expect(sourceCall).toBeDefined();
+      const headers = sourceCall![1].headers as Record<string, string>;
+      expect(headers.Authorization).toBe("Bearer abc123");
+      // The document source URL itself never carries the token as a query parameter.
+      expect(sourceCall![0]).not.toContain("token=");
+    });
+    expect(createObjectURL).toHaveBeenCalled();
+    expect(windowOpen).toHaveBeenCalledWith("blob:fake-url", "_blank", "noopener,noreferrer");
+
+    windowOpen.mockRestore();
+    vi.unstubAllGlobals();
+  });
 });

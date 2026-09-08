@@ -100,18 +100,23 @@ export async function getWorkItem(db: Db, workItemId: string, firmId: string): P
   return row;
 }
 
-export async function updateWorkItemStatus(
-  db: Db,
+/**
+ * Pure statement builder (update + audit, 2 statements), no I/O. Lets a
+ * caller such as satisfyRequest/cancelRequest in client-requests.ts fold a
+ * work-item status change into its own larger db.transaction() call so the
+ * request transition and the work-item transition (and both of their audit
+ * events) commit as a single atomic unit instead of two separate
+ * round-trips.
+ */
+export function workItemStatusUpdateStatements(
+  current: Pick<WorkItemRow, "status">,
   workItemId: string,
   firmId: string,
   actorUserId: string | null,
   status: string,
-): Promise<WorkItemRow | undefined> {
-  const current = await getWorkItem(db, workItemId, firmId);
-  if (!current) return undefined;
-
+): DbStatement[] {
   const completedAtClause = status === "complete" ? "NOW()" : "NULL";
-  await db.transaction([
+  return [
     {
       query: `UPDATE work_items SET status = $1, completed_at = ${completedAtClause}, updated_at = NOW() WHERE id = $2 AND firm_id = $3`,
       params: [status, workItemId, firmId],
@@ -125,7 +130,20 @@ export async function updateWorkItemStatus(
       beforeJson: { status: current.status },
       afterJson: { status },
     }),
-  ]);
+  ];
+}
+
+export async function updateWorkItemStatus(
+  db: Db,
+  workItemId: string,
+  firmId: string,
+  actorUserId: string | null,
+  status: string,
+): Promise<WorkItemRow | undefined> {
+  const current = await getWorkItem(db, workItemId, firmId);
+  if (!current) return undefined;
+
+  await db.transaction(workItemStatusUpdateStatements(current, workItemId, firmId, actorUserId, status));
   return getWorkItem(db, workItemId, firmId);
 }
 

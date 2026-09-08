@@ -96,7 +96,7 @@ portalRoutes.post("/requests/:requestId/messages", async (c) => {
 
   const db = createDb(c.env);
   const body = messageSchema.parse(await c.req.json());
-  const message = await addRequestMessage(db, request.id, c.get("portalFirmId"), "client", null, body.body);
+  const message = await addRequestMessage(db, request.id, c.get("portalFirmId"), c.get("portalClientId"), "client", null, body.body);
   return c.json({ message }, 201);
 });
 
@@ -131,11 +131,11 @@ portalRoutes.post("/requests/:requestId/evidence", async (c) => {
     try {
       const result = await ingestReceiptForClient(db, c.env, client, file, null, request.related_bank_transaction_id);
       if (!result.ok) return c.json({ error: result.error }, 500);
-      await addRequestMessage(db, request.id, c.get("portalFirmId"), "system", null, `Client uploaded a receipt (${file.name}).`);
+      await addRequestMessage(db, request.id, c.get("portalFirmId"), c.get("portalClientId"), "system", null, `Client uploaded a receipt (${file.name}).`);
       await respondToRequest(db, request.id, c.get("portalFirmId"));
       return c.json({ receiptId: result.receiptId }, 201);
     } catch (error) {
-      if (error instanceof HttpError) return c.json({ error: error.message }, error.status as 404 | 409);
+      if (error instanceof HttpError) return c.json({ error: error.message }, error.status as 400 | 404 | 409);
       throw error;
     }
   }
@@ -170,7 +170,7 @@ portalRoutes.post("/requests/:requestId/evidence", async (c) => {
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'needs_review', $10, TRUE, NULL)`,
     [documentId, client.id, file.name, key, file.type || null, file.size, suggestedType, taxYear, hash, request.id],
   );
-  await addRequestMessage(db, request.id, c.get("portalFirmId"), "system", null, `Client uploaded a document (${file.name}).`);
+  await addRequestMessage(db, request.id, c.get("portalFirmId"), c.get("portalClientId"), "system", null, `Client uploaded a document (${file.name}).`);
   await respondToRequest(db, request.id, c.get("portalFirmId"));
 
   return c.json({ documentId, suggestedType }, 201);

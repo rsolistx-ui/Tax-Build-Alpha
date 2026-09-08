@@ -4,10 +4,37 @@ import { newId } from "../lib/id";
 import { getLlmProvider, type ReceiptBusinessContext, type ReceiptExtraction } from "../providers/llm";
 import { validateReceipt } from "../services/receipt-validation";
 import type { ClientRow } from "../services/clients";
+import { MAX_UPLOAD_BYTES } from "../services/documents";
 
 export type ReceiptIngestResult =
   | { ok: true; receiptId: string; jobId: string; bankTransactionId: string | null }
   | { ok: false; receiptId: string; jobId: string; error: string; requestId: string };
+
+/**
+ * Receipt-specific upload gate, narrower than the general document
+ * whitelist (no docx/xlsx/csv - a receipt goes through image/PDF
+ * extraction, per providers/llm/workers-ai.ts, which branches on
+ * application/pdf and otherwise treats the file as an image). Both the
+ * staff route and the portal missing_receipt route call
+ * ingestReceiptForClient, so this single check protects both - server-
+ * side, never trusting frontend validation.
+ */
+const RECEIPT_EXTENSION_CONTENT_TYPES: Record<string, string[]> = {
+  pdf: ["application/pdf"],
+  png: ["image/png"],
+  jpg: ["image/jpeg"],
+  jpeg: ["image/jpeg"],
+  heic: ["image/heic", "image/heif", "application/octet-stream"],
+};
+
+export function isSupportedReceiptUpload(filename: string, contentType: string | null): boolean {
+  const ext = filename.toLowerCase().split(".").pop() ?? "";
+  const allowed = RECEIPT_EXTENSION_CONTENT_TYPES[ext];
+  if (!allowed) return false;
+  const ct = (contentType || "").toLowerCase().split(";")[0].trim();
+  if (!ct) return true;
+  return allowed.includes(ct);
+}
 
 export class HttpError extends Error {
   status: number;
@@ -36,6 +63,16 @@ export async function ingestReceiptForClient(
   actorUserId: string | null,
   bankTransactionId: string | null,
 ): Promise<ReceiptIngestResult> {
+  if (file.size <= 0) {
+    throw new HttpError(400, "file is empty");
+  }
+  if (file.size > MAX_UPLOAD_BYTES) {
+    throw new HttpError(400, `File exceeds the ${Math.floor(MAX_UPLOAD_BYTES / (1024 * 1024))}MB upload limit`);
+  }
+  if (!isSupportedReceiptUpload(file.name, file.type || null)) {
+    throw new HttpError(400, "Unsupported file type. Supported: PDF, PNG, JPG, JPEG, HEIC.");
+  }
+
   if (bankTransactionId) {
     const [bankTransaction] = await db.query<Record<string, unknown>>(
       `SELECT * FROM bank_transactions WHERE id = $1 AND client_id = $2`,
