@@ -14,6 +14,12 @@ describe("isoTimestampSchema", () => {
   it("rejects an empty string", () => {
     expect(isoTimestampSchema.safeParse("").success).toBe(false);
   });
+  it("rejects an impossible calendar date instead of letting Date.parse roll it forward (Feb 30)", () => {
+    expect(isoTimestampSchema.safeParse("2026-02-30").success).toBe(false);
+  });
+  it("rejects an impossible calendar date with a time portion attached", () => {
+    expect(isoTimestampSchema.safeParse("2026-02-30T00:00:00Z").success).toBe(false);
+  });
 });
 
 describe("calendarDateSchema", () => {

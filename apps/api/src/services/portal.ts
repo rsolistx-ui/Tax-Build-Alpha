@@ -1,5 +1,6 @@
 import { newId } from "../lib/id";
 import type { Db } from "../db";
+import { workAuditEventStatement } from "./work-audit";
 
 const TOKEN_BYTES = 32;
 
@@ -41,11 +42,21 @@ export async function createPortalLink(
   const tokenHash = await hashPortalToken(token);
   const expiresAt = new Date(Date.now() + ttlDays * 24 * 60 * 60 * 1000).toISOString();
 
-  await db.query(
-    `INSERT INTO client_portal_links (id, firm_id, client_id, token_hash, created_by_user_id, expires_at)
-     VALUES ($1, $2, $3, $4, $5, $6)`,
-    [id, firmId, clientId, tokenHash, createdByUserId, expiresAt],
-  );
+  await db.transaction([
+    {
+      query: `INSERT INTO client_portal_links (id, firm_id, client_id, token_hash, created_by_user_id, expires_at)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      params: [id, firmId, clientId, tokenHash, createdByUserId, expiresAt],
+    },
+    workAuditEventStatement({
+      firmId,
+      entityType: "client_portal_link",
+      entityId: id,
+      action: "portal_link_created",
+      actorUserId: createdByUserId,
+      afterJson: { clientId, expiresAt },
+    }),
+  ]);
 
   return { id, token, expiresAt };
 }
@@ -73,10 +84,20 @@ export async function resolvePortalToken(
   return { firmId: link.firm_id, clientId: link.client_id, linkId: link.id };
 }
 
-export async function revokePortalLink(db: Db, linkId: string, firmId: string): Promise<boolean> {
+export async function revokePortalLink(db: Db, linkId: string, firmId: string, actorUserId: string | null = null): Promise<boolean> {
+  // One CTE-chained statement: the audit INSERT only runs when the
+  // UPDATE actually revoked an active link, atomically with the revoke
+  // itself.
   const rows = await db.query<{ id: string }>(
-    `UPDATE client_portal_links SET revoked_at = NOW() WHERE id = $1 AND firm_id = $2 AND revoked_at IS NULL RETURNING id`,
-    [linkId, firmId],
+    `WITH revoked AS (
+       UPDATE client_portal_links SET revoked_at = NOW() WHERE id = $1 AND firm_id = $2 AND revoked_at IS NULL
+       RETURNING id
+     )
+     INSERT INTO work_audit_events (id, firm_id, entity_type, entity_id, action, actor_user_id, after_json)
+     SELECT $3, $2, 'client_portal_link', $1, 'portal_link_revoked', $4, '{}'::jsonb
+     FROM revoked
+     RETURNING id`,
+    [linkId, firmId, newId("wae"), actorUserId],
   );
   return rows.length > 0;
 }

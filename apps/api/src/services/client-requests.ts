@@ -232,22 +232,23 @@ export async function approveDraftRequest(
  * produces no further transition and no duplicate audit event.
  */
 export async function markRequestViewed(db: Db, requestId: string, firmId: string): Promise<void> {
-  const [transitioned] = await db.query<{ id: string }>(
-    `UPDATE client_requests SET status = 'viewed', viewed_at = COALESCE(viewed_at, NOW()), updated_at = NOW() WHERE id = $1 AND firm_id = $2 AND status = 'requested' RETURNING id`,
-    [requestId, firmId],
+  // A single CTE-chained statement, not two separate queries: the audit
+  // INSERT only runs (via the SELECT ... FROM updated) when the UPDATE
+  // actually matched a row, and both happen as one atomic Postgres
+  // statement - a mid-failure can never leave a real transition with no
+  // audit trail, and repeatedly viewing an already-viewed request writes
+  // nothing at all.
+  await db.query(
+    `WITH updated AS (
+       UPDATE client_requests SET status = 'viewed', viewed_at = COALESCE(viewed_at, NOW()), updated_at = NOW()
+       WHERE id = $1 AND firm_id = $2 AND status = 'requested'
+       RETURNING id
+     )
+     INSERT INTO work_audit_events (id, firm_id, entity_type, entity_id, action, actor_user_id, before_json, after_json)
+     SELECT $3, $2, 'client_request', $1, 'request_viewed', NULL, $4::jsonb, $5::jsonb
+     FROM updated`,
+    [requestId, firmId, newId("wae"), { status: "requested" }, { status: "viewed" }],
   );
-  if (!transitioned) return;
-
-  const auditStatement = workAuditEventStatement({
-    firmId,
-    entityType: "client_request",
-    entityId: requestId,
-    action: "request_viewed",
-    actorUserId: null,
-    beforeJson: { status: "requested" },
-    afterJson: { status: "viewed" },
-  });
-  await db.query(auditStatement.query, auditStatement.params);
 }
 
 /**
@@ -260,7 +261,10 @@ export async function markRequestViewed(db: Db, requestId: string, firmId: strin
  */
 export async function respondToRequest(db: Db, requestId: string, firmId: string): Promise<void> {
   const current = await getClientRequest(db, requestId, firmId);
-  if (!current) return;
+  // A closed request (satisfied or cancelled) never reopens from a client
+  // message or evidence upload - only a professional action can undo a
+  // terminal state, and no such action exists today.
+  if (!current || current.status === "satisfied" || current.status === "cancelled") return;
 
   const statements: DbStatement[] = [
     {
@@ -298,7 +302,9 @@ export async function satisfyRequest(
   actorUserId: string,
 ): Promise<ClientRequestRow | undefined> {
   const current = await getClientRequest(db, requestId, firmId);
-  if (!current) return undefined;
+  // A cancelled request can never be resurrected as satisfied - mirrors
+  // cancelRequest's own no-op guard on the reverse transition.
+  if (!current || current.status === "satisfied" || current.status === "cancelled") return current;
 
   const statements: DbStatement[] = [
     {

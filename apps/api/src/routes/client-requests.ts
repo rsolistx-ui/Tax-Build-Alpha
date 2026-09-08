@@ -202,6 +202,6 @@ clientRequestRoutes.post("/:clientId/portal-links/:linkId/revoke", async (c) => 
   const client = await getClient(db, c.req.param("clientId"), firm.id);
   if (!client) return c.json({ error: "Not found" }, 404);
 
-  const revoked = await revokePortalLink(db, c.req.param("linkId"), firm.id);
+  const revoked = await revokePortalLink(db, c.req.param("linkId"), firm.id, c.get("userId"));
   return c.json({ revoked });
 });

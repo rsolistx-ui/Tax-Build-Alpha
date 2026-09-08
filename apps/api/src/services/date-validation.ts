@@ -10,7 +10,24 @@ import { z } from "zod";
  */
 
 function isValidTimestamp(value: string): boolean {
-  return !Number.isNaN(Date.parse(value));
+  if (Number.isNaN(Date.parse(value))) return false;
+  // Date.parse alone is not enough: it silently rolls an impossible date
+  // like 2026-02-30 forward to a valid one (e.g. 2026-03-02) instead of
+  // rejecting it. If the value leads with a YYYY-MM-DD date portion,
+  // reconstruct it from its own year/month/day and require an exact
+  // match, the same technique isValidCalendarDate below uses.
+  const dateMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!dateMatch) return true;
+  const [, yearStr, monthStr, dayStr] = dateMatch;
+  const year = Number(yearStr);
+  const month = Number(monthStr);
+  const day = Number(dayStr);
+  const reconstructed = new Date(Date.UTC(year, month - 1, day));
+  return (
+    reconstructed.getUTCFullYear() === year &&
+    reconstructed.getUTCMonth() === month - 1 &&
+    reconstructed.getUTCDate() === day
+  );
 }
 
 function isValidCalendarDate(value: string): boolean {

@@ -146,6 +146,23 @@ describe("respondToRequest state transition", () => {
     const workItemUpdate = transactionCalls[0].find((s) => s.query.includes("UPDATE work_items"));
     expect(workItemUpdate).toBeUndefined();
   });
+  it("never reopens an already-satisfied request from a client message", async () => {
+    const requestRow = { id: "creq_1", firm_id: "firm_1", client_id: "cli_1", work_item_id: "wi_1", status: "satisfied" };
+    const { db, transactionCalls } = fakeDb({ [REQUEST_LOOKUP_KEY]: [requestRow] });
+
+    await respondToRequest(db, "creq_1", "firm_1");
+
+    expect(transactionCalls).toHaveLength(0);
+  });
+
+  it("never reopens an already-cancelled request from a client message", async () => {
+    const requestRow = { id: "creq_1", firm_id: "firm_1", client_id: "cli_1", work_item_id: "wi_1", status: "cancelled" };
+    const { db, transactionCalls } = fakeDb({ [REQUEST_LOOKUP_KEY]: [requestRow] });
+
+    await respondToRequest(db, "creq_1", "firm_1");
+
+    expect(transactionCalls).toHaveLength(0);
+  });
 });
 
 describe("satisfyRequest", () => {
@@ -167,6 +184,25 @@ describe("satisfyRequest", () => {
     expect(workItemUpdate?.query).toContain("completed_at = NOW()");
     const auditEvents = statements.filter((s) => s.query.includes("INSERT INTO work_audit_events"));
     expect(auditEvents).toHaveLength(2);
+  });
+  it("never resurrects an already-satisfied request", async () => {
+    const requestRow = { id: "creq_1", firm_id: "firm_1", client_id: "cli_1", work_item_id: "wi_1", status: "satisfied" };
+    const { db, transactionCalls } = fakeDb({ [REQUEST_LOOKUP_KEY]: [requestRow] });
+
+    const result = await satisfyRequest(db, "creq_1", "firm_1", "user_1");
+
+    expect(result?.status).toBe("satisfied");
+    expect(transactionCalls).toHaveLength(0);
+  });
+
+  it("never resurrects an already-cancelled request as satisfied", async () => {
+    const requestRow = { id: "creq_1", firm_id: "firm_1", client_id: "cli_1", work_item_id: "wi_1", status: "cancelled" };
+    const { db, transactionCalls } = fakeDb({ [REQUEST_LOOKUP_KEY]: [requestRow] });
+
+    const result = await satisfyRequest(db, "creq_1", "firm_1", "user_1");
+
+    expect(result?.status).toBe("cancelled");
+    expect(transactionCalls).toHaveLength(0);
   });
 });
 
@@ -248,12 +284,11 @@ describe("actor attribution", () => {
 });
 
 describe("markRequestViewed", () => {
-  it("transitions requested -> viewed and writes exactly one audit event", async () => {
-    const updated: { sql: string; params: unknown[] }[] = [];
+  it("issues exactly ONE atomic statement for the view+audit transition, not two separate queries", async () => {
+    const calls: { sql: string; params: unknown[] }[] = [];
     const db: Db = {
       async query<T>(sql: string, params: unknown[] = []) {
-        updated.push({ sql, params });
-        if (sql.startsWith("UPDATE client_requests")) return [{ id: "creq_1" }] as T[]; // RETURNING id: a real transition happened
+        calls.push({ sql, params });
         return [] as T[];
       },
       async transaction<T>(): Promise<T[][]> {
@@ -263,16 +298,21 @@ describe("markRequestViewed", () => {
 
     await markRequestViewed(db, "creq_1", "firm_1");
 
-    const auditCalls = updated.filter((c) => c.sql.includes("INSERT INTO work_audit_events"));
-    expect(auditCalls).toHaveLength(1);
+    // A mid-failure can never leave a real transition with no audit trail
+    // (or vice versa) only if both live in one statement, not two.
+    expect(calls).toHaveLength(1);
+    expect(calls[0].sql).toContain("WITH updated AS");
+    expect(calls[0].sql).toContain("UPDATE client_requests");
+    expect(calls[0].sql).toContain("status = 'requested'");
+    expect(calls[0].sql).toContain("INSERT INTO work_audit_events");
+    expect(calls[0].sql).toContain("FROM updated");
   });
 
-  it("does not write a duplicate audit event when the request is already viewed (no real transition)", async () => {
-    const updated: { sql: string; params: unknown[] }[] = [];
+  it("conditions the audit insert on the update actually matching a row via the FROM updated CTE, not an unconditional insert", async () => {
+    const calls: { sql: string; params: unknown[] }[] = [];
     const db: Db = {
       async query<T>(sql: string, params: unknown[] = []) {
-        updated.push({ sql, params });
-        if (sql.startsWith("UPDATE client_requests")) return [] as T[]; // RETURNING nothing: status was not 'requested'
+        calls.push({ sql, params });
         return [] as T[];
       },
       async transaction<T>(): Promise<T[][]> {
@@ -282,7 +322,29 @@ describe("markRequestViewed", () => {
 
     await markRequestViewed(db, "creq_1", "firm_1");
 
-    const auditCalls = updated.filter((c) => c.sql.includes("INSERT INTO work_audit_events"));
-    expect(auditCalls).toHaveLength(0);
+    const [sql] = [calls[0].sql];
+    const insertIndex = sql.indexOf("INSERT INTO work_audit_events");
+    const fromUpdatedIndex = sql.indexOf("FROM updated", insertIndex);
+    expect(insertIndex).toBeGreaterThan(-1);
+    expect(fromUpdatedIndex).toBeGreaterThan(insertIndex);
+  });
+
+  it("scopes the transition by id and firm_id, never trusting an unscoped id alone", async () => {
+    const calls: { sql: string; params: unknown[] }[] = [];
+    const db: Db = {
+      async query<T>(sql: string, params: unknown[] = []) {
+        calls.push({ sql, params });
+        return [] as T[];
+      },
+      async transaction<T>(): Promise<T[][]> {
+        return [] as T[][];
+      },
+    };
+
+    await markRequestViewed(db, "creq_1", "firm_1");
+
+    expect(calls[0].sql).toContain("id = $1 AND firm_id = $2");
+    expect(calls[0].params[0]).toBe("creq_1");
+    expect(calls[0].params[1]).toBe("firm_1");
   });
 });
