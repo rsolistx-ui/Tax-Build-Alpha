@@ -2,12 +2,31 @@
 -- Engagements, work items, client requests, request threads, and a
 -- token-based client portal access mechanism (no separate client identity
 -- system yet; a hashed access link scopes a portal session to one client,
--- the same pattern already used for beta invitation tokens). Replay-safe.
+-- the same pattern already used for beta invitation tokens).
+--
+-- Every parent/child relationship that crosses a tenant boundary is
+-- enforced with a composite foreign key against a (id, tenant_column)
+-- unique constraint on the parent, not just a plain id FK, so the database
+-- itself rejects a row that pairs a client with another client's
+-- engagement/work item/bank transaction, or a firm with another firm's
+-- client. Not yet applied to production, so this file is edited directly
+-- rather than patched with a follow-up migration. Replay-safe.
+
+DO $ BEGIN
+  ALTER TABLE clients
+    ADD CONSTRAINT uq_clients_id_firm UNIQUE (id, firm_id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $;
+DO $ BEGIN
+  ALTER TABLE bank_transactions
+    ADD CONSTRAINT uq_bank_transactions_id_client UNIQUE (id, client_id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $;
 
 CREATE TABLE IF NOT EXISTS engagements (
   id TEXT PRIMARY KEY,
   firm_id TEXT NOT NULL REFERENCES firms(id) ON DELETE CASCADE,
-  client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  client_id TEXT NOT NULL,
   service_type TEXT NOT NULL,
   title TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'planned',
@@ -19,6 +38,24 @@ CREATE TABLE IF NOT EXISTS engagements (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+DO $$ BEGIN
+  ALTER TABLE engagements
+    ADD CONSTRAINT fk_engagements_client_same_firm
+    FOREIGN KEY (client_id, firm_id) REFERENCES clients(id, firm_id) ON DELETE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $ BEGIN
+  ALTER TABLE engagements
+    ADD CONSTRAINT uq_engagements_id_firm UNIQUE (id, firm_id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $;
+DO $ BEGIN
+  ALTER TABLE engagements
+    ADD CONSTRAINT uq_engagements_id_client UNIQUE (id, client_id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $;
 
 DO $$ BEGIN
   ALTER TABLE engagements
@@ -43,8 +80,8 @@ CREATE INDEX IF NOT EXISTS idx_engagements_client ON engagements(client_id);
 CREATE TABLE IF NOT EXISTS work_items (
   id TEXT PRIMARY KEY,
   firm_id TEXT NOT NULL REFERENCES firms(id) ON DELETE CASCADE,
-  client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
-  engagement_id TEXT REFERENCES engagements(id) ON DELETE SET NULL,
+  client_id TEXT NOT NULL,
+  engagement_id TEXT,
   title TEXT NOT NULL,
   description TEXT,
   work_type TEXT NOT NULL DEFAULT 'general',
@@ -59,6 +96,31 @@ CREATE TABLE IF NOT EXISTS work_items (
   completed_at TIMESTAMPTZ,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+DO $$ BEGIN
+  ALTER TABLE work_items
+    ADD CONSTRAINT fk_work_items_client_same_firm
+    FOREIGN KEY (client_id, firm_id) REFERENCES clients(id, firm_id) ON DELETE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  ALTER TABLE work_items
+    ADD CONSTRAINT fk_work_items_engagement_same_client
+    FOREIGN KEY (engagement_id, client_id) REFERENCES engagements(id, client_id) ON DELETE SET NULL (engagement_id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $ BEGIN
+  ALTER TABLE work_items
+    ADD CONSTRAINT uq_work_items_id_firm UNIQUE (id, firm_id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $;
+DO $ BEGIN
+  ALTER TABLE work_items
+    ADD CONSTRAINT uq_work_items_id_client UNIQUE (id, client_id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $;
 
 DO $$ BEGIN
   ALTER TABLE work_items
@@ -82,15 +144,16 @@ CREATE INDEX IF NOT EXISTS idx_work_items_source ON work_items(source_type, sour
 CREATE TABLE IF NOT EXISTS client_requests (
   id TEXT PRIMARY KEY,
   firm_id TEXT NOT NULL REFERENCES firms(id) ON DELETE CASCADE,
-  client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
-  work_item_id TEXT REFERENCES work_items(id) ON DELETE SET NULL,
+  client_id TEXT NOT NULL,
+  work_item_id TEXT,
   request_type TEXT NOT NULL,
   title TEXT NOT NULL,
   description TEXT,
   status TEXT NOT NULL DEFAULT 'draft',
   source_type TEXT NOT NULL DEFAULT 'manual',
   source_id TEXT,
-  related_bank_transaction_id TEXT REFERENCES bank_transactions(id) ON DELETE SET NULL,
+  related_bank_transaction_id TEXT,
+  due_at TIMESTAMPTZ,
   created_by_user_id TEXT,
   approved_by_user_id TEXT,
   approved_at TIMESTAMPTZ,
@@ -103,6 +166,38 @@ CREATE TABLE IF NOT EXISTS client_requests (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+DO $$ BEGIN
+  ALTER TABLE client_requests
+    ADD CONSTRAINT fk_requests_client_same_firm
+    FOREIGN KEY (client_id, firm_id) REFERENCES clients(id, firm_id) ON DELETE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  ALTER TABLE client_requests
+    ADD CONSTRAINT fk_requests_work_item_same_client
+    FOREIGN KEY (work_item_id, client_id) REFERENCES work_items(id, client_id) ON DELETE SET NULL (work_item_id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  ALTER TABLE client_requests
+    ADD CONSTRAINT fk_requests_bank_txn_same_client
+    FOREIGN KEY (related_bank_transaction_id, client_id) REFERENCES bank_transactions(id, client_id) ON DELETE SET NULL (related_bank_transaction_id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $ BEGIN
+  ALTER TABLE client_requests
+    ADD CONSTRAINT uq_requests_id_firm UNIQUE (id, firm_id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $;
+DO $ BEGIN
+  ALTER TABLE client_requests
+    ADD CONSTRAINT uq_requests_id_client UNIQUE (id, client_id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $;
 
 DO $$ BEGIN
   ALTER TABLE client_requests
@@ -126,14 +221,31 @@ CREATE INDEX IF NOT EXISTS idx_requests_client ON client_requests(client_id, sta
 CREATE INDEX IF NOT EXISTS idx_requests_reminder_due ON client_requests(next_reminder_at) WHERE status IN ('requested', 'viewed');
 CREATE INDEX IF NOT EXISTS idx_requests_bank_txn ON client_requests(related_bank_transaction_id) WHERE related_bank_transaction_id IS NOT NULL;
 
+-- Race-safe exception-to-request idempotency: at most one non-cancelled
+-- request may exist per bank transaction. Two concurrent prepare calls
+-- race on this index, not on a prior SELECT, so a duplicate is impossible
+-- rather than merely unlikely. A cancelled request does not hold the slot,
+-- so a replacement request can always be prepared afterward.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_requests_active_bank_txn
+  ON client_requests(related_bank_transaction_id)
+  WHERE related_bank_transaction_id IS NOT NULL AND status != 'cancelled';
+
 CREATE TABLE IF NOT EXISTS request_messages (
   id TEXT PRIMARY KEY,
-  request_id TEXT NOT NULL REFERENCES client_requests(id) ON DELETE CASCADE,
+  request_id TEXT NOT NULL,
+  client_id TEXT NOT NULL,
   author_type TEXT NOT NULL,
   author_user_id TEXT,
   body TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+DO $$ BEGIN
+  ALTER TABLE request_messages
+    ADD CONSTRAINT fk_messages_request_same_client
+    FOREIGN KEY (request_id, client_id) REFERENCES client_requests(id, client_id) ON DELETE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 DO $$ BEGIN
   ALTER TABLE request_messages
@@ -143,20 +255,22 @@ END $$;
 
 CREATE INDEX IF NOT EXISTS idx_request_messages_request ON request_messages(request_id, created_at);
 
--- Evidence must be a first-class relationship to the work that needed it,
--- not just a folder. A document can now be linked to the client request
--- that produced it, and flagged as visible in the client portal.
-ALTER TABLE client_documents ADD COLUMN IF NOT EXISTS request_id TEXT REFERENCES client_requests(id) ON DELETE SET NULL;
+ALTER TABLE client_documents ADD COLUMN IF NOT EXISTS request_id TEXT;
 ALTER TABLE client_documents ADD COLUMN IF NOT EXISTS client_visible BOOLEAN NOT NULL DEFAULT FALSE;
+
+DO $$ BEGIN
+  ALTER TABLE client_documents
+    ADD CONSTRAINT fk_documents_request_same_client
+    FOREIGN KEY (request_id, client_id) REFERENCES client_requests(id, client_id) ON DELETE SET NULL (request_id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
 CREATE INDEX IF NOT EXISTS idx_documents_request ON client_documents(request_id) WHERE request_id IS NOT NULL;
 
--- Client portal access: a hashed, expiring, revocable link scoped to one
--- client, mirroring the existing beta-invitation token pattern rather than
--- introducing a separate client identity/password system this milestone.
 CREATE TABLE IF NOT EXISTS client_portal_links (
   id TEXT PRIMARY KEY,
   firm_id TEXT NOT NULL REFERENCES firms(id) ON DELETE CASCADE,
-  client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  client_id TEXT NOT NULL,
   token_hash TEXT NOT NULL UNIQUE,
   created_by_user_id TEXT NOT NULL,
   expires_at TIMESTAMPTZ NOT NULL,
@@ -165,11 +279,15 @@ CREATE TABLE IF NOT EXISTS client_portal_links (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+DO $$ BEGIN
+  ALTER TABLE client_portal_links
+    ADD CONSTRAINT fk_portal_links_client_same_firm
+    FOREIGN KEY (client_id, firm_id) REFERENCES clients(id, firm_id) ON DELETE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
 CREATE INDEX IF NOT EXISTS idx_portal_links_client ON client_portal_links(client_id);
 
--- Service templates: sensible defaults for the three named engagement
--- types, not an arbitrary pipeline builder. A template is a fixed ordered
--- list of work-item titles created alongside a new engagement.
 CREATE TABLE IF NOT EXISTS service_templates (
   id TEXT PRIMARY KEY,
   service_type TEXT NOT NULL UNIQUE,
@@ -178,9 +296,6 @@ CREATE TABLE IF NOT EXISTS service_templates (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Audit chain for practice-OS state transitions, mirroring the existing
--- beta_access_events shape so exception -> request -> resolution history
--- stays traceable end to end.
 CREATE TABLE IF NOT EXISTS work_audit_events (
   id TEXT PRIMARY KEY,
   firm_id TEXT NOT NULL REFERENCES firms(id) ON DELETE CASCADE,

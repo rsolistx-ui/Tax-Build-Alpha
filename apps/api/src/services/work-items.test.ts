@@ -35,7 +35,7 @@ describe("createWorkItem", () => {
     await createWorkItem(db, "user_1", { firmId: "firm_1", clientId: "cli_1", title: "Chase receipt" });
 
     const insert = transactionCalls[0].find((s) => s.query.includes("INSERT INTO work_items"));
-    expect(insert?.query).toContain("VALUES ($1, $2, $3, $4, $5, $6, $7, 'open'");
+    expect(insert?.params?.[7]).toBe("open"); // status defaults to open
     const audit = transactionCalls[0].find((s) => s.query.includes("INSERT INTO work_audit_events"));
     expect(audit).toBeDefined();
   });

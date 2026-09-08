@@ -1637,6 +1637,129 @@ try {
     if (-not $focusedDoc) { throw "The document_review deep link's focus id '$focusedId' does not resolve to a real, actionable document in the review queue." }
   }
 
+  Write-Host "Exercising the Practice OS: engagement, exception-to-request automation, portal, and evidence upload..."
+
+  $posEngagementBody = @{ serviceType = "bookkeeping"; title = "Practice OS smoke engagement" } | ConvertTo-Json -Compress
+  $posEngagementPayloadPath = New-JsonPayloadFile $posEngagementBody
+  $posEngagement = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-H", "Content-Type: application/json", "--data-binary", "@$posEngagementPayloadPath", "$BaseUrl/api/clients/$clientId/engagements")
+  Remove-TempFile $posEngagementPayloadPath
+  $posEngagementId = [string]$posEngagement.engagement.id
+  if (-not $posEngagementId) { throw "Engagement creation did not return an id." }
+
+  $posEngagementList = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/engagements")
+  $posEngagementRow = @($posEngagementList.engagements) | Where-Object { $_.id -eq $posEngagementId } | Select-Object -First 1
+  if (-not $posEngagementRow -or [int]$posEngagementRow.total_work_items -ne 8) {
+    throw "Bookkeeping service template must produce exactly 8 work items, got $([int]$posEngagementRow.total_work_items)."
+  }
+  Write-Host "Confirmed: bookkeeping service template produced its 8 work items automatically."
+
+  $posCsvPath = Join-Path $env:TEMP "folio-smoke-pos-bank-$([guid]::NewGuid().ToString('N')).csv"
+  $posCsv = "Date,Description,Amount`n2026-02-01,Practice OS Smoke Unknown Vendor,-88.40`n"
+  [System.IO.File]::WriteAllText($posCsvPath, $posCsv, $utf8)
+  $posMappingBody = @{ date = "Date"; description = "Description"; amount = "Amount" } | ConvertTo-Json -Compress
+  $posMappingPayloadPath = New-JsonPayloadFile $posMappingBody
+  $posBankImport = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-F", "file=@$posCsvPath", "-F", "mapping=<$posMappingPayloadPath", "$BaseUrl/api/clients/$clientId/bank-transactions/import")
+  Remove-TempFile $posCsvPath
+  Remove-TempFile $posMappingPayloadPath
+  if ($posBankImport.insertedCount -ne 1) { throw "Practice OS smoke bank import did not insert exactly one transaction." }
+  $posQueue = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/bank-transactions")
+  $posTxn = @($posQueue.transactions) | Where-Object { $_.description -eq "Practice OS Smoke Unknown Vendor" } | Select-Object -First 1
+  $posTxnId = [string]$posTxn.id
+  if (-not $posTxnId) { throw "Could not find the Practice OS smoke bank transaction after import." }
+
+  $posPrepareBody = @{ bankTransactionId = $posTxnId } | ConvertTo-Json -Compress
+  $posPreparePayloadPath = New-JsonPayloadFile $posPrepareBody
+  $posDraft = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-H", "Content-Type: application/json", "--data-binary", "@$posPreparePayloadPath", "$BaseUrl/api/clients/$clientId/requests/prepare-missing-receipt")
+  $posRequestId = [string]$posDraft.request.id
+  if (-not $posRequestId -or $posDraft.request.status -ne "draft") { throw "Exception-to-request preparation did not create a draft request." }
+
+  Write-Host "Verifying the exception-request idempotency slot is race-safe: repeating the same preparation call returns the SAME request, not a duplicate..."
+  $posDraftAgain = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-H", "Content-Type: application/json", "--data-binary", "@$posPreparePayloadPath", "$BaseUrl/api/clients/$clientId/requests/prepare-missing-receipt")
+  Remove-TempFile $posPreparePayloadPath
+  if ([string]$posDraftAgain.request.id -ne $posRequestId) { throw "A second exception-request preparation call for the same transaction created a duplicate request instead of returning the existing one." }
+
+  $posApproved = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-X", "POST", "$BaseUrl/api/clients/$clientId/requests/$posRequestId/approve")
+  if ($posApproved.request.status -ne "requested") { throw "Approving the draft request did not move it to requested." }
+
+  Write-Host "Verifying Firm A cannot approve/satisfy a request through Firm C's client path (cross-firm)..."
+  $crossFirmRequestStatus = Get-HttpStatus "$BaseUrl/api/clients/$clientCId/requests/$posRequestId/messages" $cookieJarC
+  if ($crossFirmRequestStatus -ne "404") { throw "Firm C must not be able to read Firm A's request via its own client path, got HTTP $crossFirmRequestStatus." }
+
+  Write-Host "Issuing a client portal link and verifying portal-only access..."
+  $posLinkPayloadPath = New-JsonPayloadFile "{}"
+  $posLinkResult = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-H", "Content-Type: application/json", "--data-binary", "@$posLinkPayloadPath", "$BaseUrl/api/clients/$clientId/portal-links")
+  Remove-TempFile $posLinkPayloadPath
+  $posPortalToken = [string]$posLinkResult.link.token
+  if (-not $posPortalToken) { throw "Portal link issuance did not return a token." }
+
+  $posHome = Invoke-CurlJson @("-H", "Authorization: Bearer $posPortalToken", "$BaseUrl/api/portal/home")
+  if (-not $posHome.client.id -or [int]$posHome.outstandingRequestCount -lt 1) {
+    throw "Portal home did not report the expected client and outstanding-request count."
+  }
+
+  $posPortalRequests = Invoke-CurlJson @("-H", "Authorization: Bearer $posPortalToken", "$BaseUrl/api/portal/requests")
+  $posPortalRequestRow = @($posPortalRequests.requests) | Where-Object { $_.id -eq $posRequestId } | Select-Object -First 1
+  if (-not $posPortalRequestRow) { throw "The approved request did not appear in the client portal's request list." }
+
+  $null = Invoke-CurlJson @("-H", "Authorization: Bearer $posPortalToken", "$BaseUrl/api/portal/requests/$posRequestId")
+  $posAfterView = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/requests")
+  $posAfterViewRow = @($posAfterView.requests) | Where-Object { $_.id -eq $posRequestId } | Select-Object -First 1
+  if ($posAfterViewRow.status -ne "viewed") { throw "Opening the request in the portal must move it to viewed, got '$($posAfterViewRow.status)'." }
+
+  Write-Host "Verifying a portal token cannot access a different client's data (same firm)..."
+  $posOtherLinkPayloadPath = New-JsonPayloadFile "{}"
+  $posOtherClientLinkResult = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-H", "Content-Type: application/json", "--data-binary", "@$posOtherLinkPayloadPath", "$BaseUrl/api/clients/$clientBId/portal-links")
+  Remove-TempFile $posOtherLinkPayloadPath
+  $posOtherClientToken = [string]$posOtherClientLinkResult.link.token
+  $crossClientPortalStatus = (& curl.exe --silent --output NUL --write-out "%{http_code}" -H "Authorization: Bearer $posOtherClientToken" "$BaseUrl/api/portal/requests/$posRequestId")
+  if ($crossClientPortalStatus -ne "404") { throw "A different client's portal token must not be able to open Client A's request, got HTTP $crossClientPortalStatus." }
+
+  Write-Host "Verifying a revoked portal link is rejected..."
+  $posRevokeStatus = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-X", "POST", "$BaseUrl/api/clients/$clientBId/portal-links/$([string]$posOtherClientLinkResult.link.id)/revoke")
+  if (-not $posRevokeStatus.revoked) { throw "Portal link revocation did not report success." }
+  $revokedTokenStatus = (& curl.exe --silent --output NUL --write-out "%{http_code}" -H "Authorization: Bearer $posOtherClientToken" "$BaseUrl/api/portal/home")
+  if ($revokedTokenStatus -ne "401") { throw "A revoked portal token must return 401, got HTTP $revokedTokenStatus." }
+  Write-Host "Note: expiry (as opposed to explicit revocation) is not live-tested here - the API's minimum issuable TTL is 1 day, so producing an already-expired link requires either waiting a full day or direct database access, neither of which this script does. resolvePortalToken's expiry check is covered instead by services/portal.test.ts."
+
+  Write-Host "Uploading receipt evidence through the client portal for the still-valid request token..."
+  $posReceiptPath = Join-Path $env:TEMP "folio-smoke-pos-receipt-$([guid]::NewGuid().ToString('N')).png"
+  New-SampleReceiptPng $posReceiptPath
+  $posUpload = Invoke-CurlJson @("-H", "Authorization: Bearer $posPortalToken", "-F", "file=@$posReceiptPath;type=image/png", "$BaseUrl/api/portal/requests/$posRequestId/evidence")
+  Remove-TempFile $posReceiptPath
+  $posUploadedReceiptId = [string]$posUpload.receiptId
+  if (-not $posUploadedReceiptId) { throw "Portal evidence upload did not return a receiptId." }
+
+  Write-Host "Verifying the client-uploaded evidence flowed through the SAME receipt pipeline and linked to the originating transaction..."
+  $posQueueAfterUpload = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/bank-transactions")
+  $posTxnAfterUpload = @($posQueueAfterUpload.transactions) | Where-Object { $_.id -eq $posTxnId } | Select-Object -First 1
+  if ($posTxnAfterUpload.triage -ne "receipt_pending" -or [string]$posTxnAfterUpload.pendingReceipt.id -ne $posUploadedReceiptId) {
+    throw "Client-uploaded evidence did not enter pending-receipt review for its originating transaction."
+  }
+
+  Write-Host "Verifying evidence upload alone moved the request to responded (never satisfied, and never sets accounting treatment by itself)..."
+  $posAfterUploadRequest = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/requests")
+  $posAfterUploadRow = @($posAfterUploadRequest.requests) | Where-Object { $_.id -eq $posRequestId } | Select-Object -First 1
+  if ($posAfterUploadRow.status -ne "responded") { throw "Evidence upload must move the request to responded, got '$($posAfterUploadRow.status)'." }
+
+  Write-Host "Professional reviews and files the client-uploaded receipt through the existing receipt-approval workflow, which auto-resolves its pending bank transaction, then the request is closed..."
+  $posApproveBody = @{ confirmOverride = $true } | ConvertTo-Json -Compress
+  $posApprovePayloadPath = New-JsonPayloadFile $posApproveBody
+  $posReceiptApproval = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-H", "Content-Type: application/json", "--data-binary", "@$posApprovePayloadPath", "$BaseUrl/api/clients/$clientId/receipts/$posUploadedReceiptId/approve")
+  Remove-TempFile $posApprovePayloadPath
+  if (@($posReceiptApproval.resolvedBankTransactions) -notcontains $posTxnId) { throw "Filing the client-uploaded receipt did not auto-resolve its originating pending bank transaction." }
+  $posSatisfied = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-X", "POST", "$BaseUrl/api/clients/$clientId/requests/$posRequestId/satisfy")
+  if ($posSatisfied.request.status -ne "satisfied") { throw "Satisfying the request did not report status satisfied." }
+
+  Write-Host "Verifying the linked work item completed and the work queue / dashboard counts reflect it..."
+  $posWorkQueueClosed = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/work-queue?clientId=$clientId&status=complete")
+  $posCompletedItem = @($posWorkQueueClosed.items) | Where-Object { $_.source_id -eq $posRequestId } | Select-Object -First 1
+  if (-not $posCompletedItem) { throw "The work item linked to the satisfied request did not appear as complete in the work queue." }
+  $posDashboardAfter = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/dashboard")
+  if (-not $posDashboardAfter.operationsCommandCenter) { throw "Dashboard response is missing operationsCommandCenter after Practice OS activity." }
+  Write-Host "Confirmed: exception -> draft request -> approval -> portal -> client upload -> professional review -> satisfied -> work item complete -> Operations Command Center all connect end to end."
+
+  Write-Host "Note: true concurrent-request race coverage (two simultaneous prepare-missing-receipt calls) is not exercised by this sequential script; it is covered instead by the deterministic race-safe-claim unit tests in services/exception-automation.test.ts, which assert the DB-level ON CONFLICT DO NOTHING behavior directly."
+
   if ($env:SMOKE_CLEANUP_TOKEN) {
     Write-Host "Cleaning up the second synthetic tenant $firmCId..."
     $cleanupCBody = @{ firmId = $firmCId } | ConvertTo-Json -Compress

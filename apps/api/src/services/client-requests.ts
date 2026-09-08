@@ -1,7 +1,7 @@
-import type { Db } from "../db";
+import type { Db, DbStatement } from "../db";
 import { newId } from "../lib/id";
 import { workAuditEventStatement } from "./work-audit";
-import { createWorkItem, updateWorkItemStatus } from "./work-items";
+import { updateWorkItemStatus, workItemInsertStatement, type CreateWorkItemInput } from "./work-items";
 
 export type ClientRequestRow = {
   id: string;
@@ -15,6 +15,7 @@ export type ClientRequestRow = {
   source_type: string;
   source_id: string | null;
   related_bank_transaction_id: string | null;
+  due_at: string | null;
   created_by_user_id: string | null;
   approved_by_user_id: string | null;
   approved_at: string | null;
@@ -27,6 +28,12 @@ export type ClientRequestRow = {
   created_at: string;
   updated_at: string;
 };
+
+const DEFAULT_REMINDER_DELAY_DAYS = 5;
+
+export function nextReminderAfterSend(from: Date = new Date()): Date {
+  return new Date(from.getTime() + DEFAULT_REMINDER_DELAY_DAYS * 24 * 60 * 60 * 1000);
+}
 
 export async function listRequestsDueForReminder(db: Db, firmId: string, asOf: Date = new Date()): Promise<ClientRequestRow[]> {
   return db.query<ClientRequestRow>(
@@ -56,53 +63,84 @@ export async function getClientRequest(db: Db, requestId: string, firmId: string
   return row;
 }
 
+export type CreateClientRequestInput = {
+  firmId: string;
+  clientId: string;
+  requestType: string;
+  title: string;
+  description?: string | null;
+  status?: "draft" | "requested";
+  sourceType?: string;
+  sourceId?: string | null;
+  relatedBankTransactionId?: string | null;
+  dueAt?: string | null;
+};
+
+export function clientRequestInsertStatement(id: string, workItemId: string, input: CreateClientRequestInput): DbStatement {
+  const status = input.status ?? "requested";
+  const now = new Date();
+  const approvedAt = status === "requested" ? now.toISOString() : null;
+  const nextReminderAt = status === "requested" ? nextReminderAfterSend(now).toISOString() : null;
+
+  return {
+    query: `INSERT INTO client_requests
+      (id, firm_id, client_id, work_item_id, request_type, title, description, status,
+       source_type, source_id, related_bank_transaction_id, due_at, created_by_user_id,
+       approved_by_user_id, approved_at, next_reminder_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+    params: [
+      id, input.firmId, input.clientId, workItemId, input.requestType, input.title, input.description ?? null,
+      status, input.sourceType ?? "manual", input.sourceId ?? null, input.relatedBankTransactionId ?? null,
+      input.dueAt ?? null, null, status === "requested" ? "system" : null, approvedAt, nextReminderAt,
+    ],
+  };
+}
+
 /**
- * Creates a request already in "requested" status, tied to a work item that
- * tracks it on the practice work queue. Used both for manually created
- * requests (professional supplies everything) and for exception-prepared
- * requests that a professional then approves via approveDraftRequest.
+ * Creates the linked work item and the client request as a single atomic
+ * transaction, so a failure creating one never leaves the other orphaned -
+ * closes the audit finding that a request-creation failure could strand a
+ * work item with no request. Used both for manually created requests
+ * (professional supplies everything) and for exception-prepared requests
+ * that a professional then approves via approveDraftRequest.
  */
 export async function createClientRequest(
   db: Db,
   actorUserId: string | null,
-  input: {
-    firmId: string;
-    clientId: string;
-    requestType: string;
-    title: string;
-    description?: string | null;
-    status?: "draft" | "requested";
-    sourceType?: string;
-    sourceId?: string | null;
-    relatedBankTransactionId?: string | null;
-  },
+  input: CreateClientRequestInput,
 ): Promise<ClientRequestRow> {
   const id = newId("creq");
+  const workItemId = newId("wi");
   const status = input.status ?? "requested";
 
-  const workItem = await createWorkItem(db, actorUserId, {
+  // A request created already-"requested" (manual send, or an approved
+  // draft folded into this same insert path) puts its work item straight
+  // into waiting_on_client, matching the required state chain. A draft's
+  // work item stays "open" and actionable for the professional until
+  // approveDraftRequest sends it.
+  const workItemInput: CreateWorkItemInput = {
     firmId: input.firmId,
     clientId: input.clientId,
     title: input.title,
     workType: "client_request",
+    status: status === "requested" ? "waiting_on_client" : "open",
     sourceType: "client_request",
     sourceId: id,
     clientVisible: true,
-  });
+    dueAt: input.dueAt ?? null,
+  };
 
-  await db.transaction([
-    {
-      query: `INSERT INTO client_requests
-        (id, firm_id, client_id, work_item_id, request_type, title, description, status,
-         source_type, source_id, related_bank_transaction_id, created_by_user_id,
-         approved_by_user_id, approved_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
-      params: [
-        id, input.firmId, input.clientId, workItem.id, input.requestType, input.title, input.description ?? null,
-        status, input.sourceType ?? "manual", input.sourceId ?? null, input.relatedBankTransactionId ?? null,
-        actorUserId, status === "requested" ? actorUserId : null, status === "requested" ? new Date().toISOString() : null,
-      ],
-    },
+  const statements: DbStatement[] = [
+    workItemInsertStatement(workItemId, workItemInput),
+    workAuditEventStatement({
+      firmId: input.firmId,
+      entityType: "work_item",
+      entityId: workItemId,
+      action: "work_item_created",
+      actorUserId,
+      afterJson: { title: input.title, sourceType: "client_request" },
+    }),
+    clientRequestInsertStatement(id, workItemId, input),
     workAuditEventStatement({
       firmId: input.firmId,
       entityType: "client_request",
@@ -111,13 +149,21 @@ export async function createClientRequest(
       actorUserId,
       afterJson: { requestType: input.requestType, title: input.title, sourceType: input.sourceType ?? "manual" },
     }),
-  ]);
+  ];
+
+  await db.transaction(statements);
 
   const created = await getClientRequest(db, id, input.firmId);
   if (!created) throw new Error("Client request was not created");
   return created;
 }
 
+/**
+ * draft -> requested. Moves the linked work item to waiting_on_client in
+ * the same transaction (it was "open" while still a draft) and schedules
+ * the first reminder, closing the audit finding that approval never
+ * touched work-item state.
+ */
 export async function approveDraftRequest(
   db: Db,
   requestId: string,
@@ -127,10 +173,11 @@ export async function approveDraftRequest(
   const current = await getClientRequest(db, requestId, firmId);
   if (!current || current.status !== "draft") return current;
 
-  await db.transaction([
+  const nextReminderAt = nextReminderAfterSend().toISOString();
+  const statements: DbStatement[] = [
     {
-      query: `UPDATE client_requests SET status = 'requested', approved_by_user_id = $1, approved_at = NOW(), updated_at = NOW() WHERE id = $2 AND firm_id = $3`,
-      params: [actorUserId, requestId, firmId],
+      query: `UPDATE client_requests SET status = 'requested', approved_by_user_id = $1, approved_at = NOW(), next_reminder_at = $2, updated_at = NOW() WHERE id = $3 AND firm_id = $4`,
+      params: [actorUserId, nextReminderAt, requestId, firmId],
     },
     workAuditEventStatement({
       firmId,
@@ -141,10 +188,30 @@ export async function approveDraftRequest(
       beforeJson: { status: "draft" },
       afterJson: { status: "requested" },
     }),
-  ]);
+  ];
+  if (current.work_item_id) {
+    statements.push(
+      {
+        query: `UPDATE work_items SET status = 'waiting_on_client', updated_at = NOW() WHERE id = $1 AND firm_id = $2`,
+        params: [current.work_item_id, firmId],
+      },
+      workAuditEventStatement({
+        firmId,
+        entityType: "work_item",
+        entityId: current.work_item_id,
+        action: "work_item_status_changed",
+        actorUserId,
+        beforeJson: { status: "open" },
+        afterJson: { status: "waiting_on_client" },
+      }),
+    );
+  }
+
+  await db.transaction(statements);
   return getClientRequest(db, requestId, firmId);
 }
 
+/** requested -> viewed. The linked work item stays waiting_on_client: a client opening a request is not yet a response. */
 export async function markRequestViewed(db: Db, requestId: string, firmId: string): Promise<void> {
   await db.query(
     `UPDATE client_requests SET status = CASE WHEN status = 'requested' THEN 'viewed' ELSE status END, viewed_at = COALESCE(viewed_at, NOW()), updated_at = NOW() WHERE id = $1 AND firm_id = $2`,
@@ -152,10 +219,21 @@ export async function markRequestViewed(db: Db, requestId: string, firmId: strin
   );
 }
 
+/**
+ * Client reply or evidence upload -> responded. The linked work item moves
+ * from waiting_on_client back to in_progress so it lands on the
+ * professional's queue for action - work_items has no "professional_review"
+ * status value, so in_progress is the schema-valid stand-in for "back with
+ * the professional." Never sets accounting treatment: only satisfyRequest,
+ * a professional action, can close the request.
+ */
 export async function respondToRequest(db: Db, requestId: string, firmId: string): Promise<void> {
-  await db.transaction([
+  const current = await getClientRequest(db, requestId, firmId);
+  if (!current) return;
+
+  const statements: DbStatement[] = [
     {
-      query: `UPDATE client_requests SET status = 'responded', responded_at = NOW(), updated_at = NOW() WHERE id = $1 AND firm_id = $2`,
+      query: `UPDATE client_requests SET status = 'responded', responded_at = NOW(), next_reminder_at = NULL, updated_at = NOW() WHERE id = $1 AND firm_id = $2`,
       params: [requestId, firmId],
     },
     workAuditEventStatement({
@@ -165,14 +243,20 @@ export async function respondToRequest(db: Db, requestId: string, firmId: string
       action: "request_responded",
       actorUserId: null,
     }),
-  ]);
+  ];
+  if (current.work_item_id) {
+    statements.push({
+      query: `UPDATE work_items SET status = 'in_progress', updated_at = NOW() WHERE id = $1 AND firm_id = $2 AND status != 'complete'`,
+      params: [current.work_item_id, firmId],
+    });
+  }
+  await db.transaction(statements);
 }
 
 /**
  * The professional's final disposition. Marking satisfied never happens
- * automatically from a client response alone - a client upload or reply
- * only moves a request to "responded"; only a professional action reaches
- * "satisfied", per the rule that client input never silently sets
+ * automatically from a client response alone - only a professional action
+ * reaches "satisfied", per the rule that client input never silently sets
  * accounting treatment. Completing the linked work item is part of the
  * same transaction so the audit chain and queue state move together.
  */
@@ -187,7 +271,7 @@ export async function satisfyRequest(
 
   await db.transaction([
     {
-      query: `UPDATE client_requests SET status = 'satisfied', satisfied_at = NOW(), updated_at = NOW() WHERE id = $1 AND firm_id = $2`,
+      query: `UPDATE client_requests SET status = 'satisfied', satisfied_at = NOW(), next_reminder_at = NULL, updated_at = NOW() WHERE id = $1 AND firm_id = $2`,
       params: [requestId, firmId],
     },
     workAuditEventStatement({
@@ -203,6 +287,49 @@ export async function satisfyRequest(
 
   if (current.work_item_id) {
     await updateWorkItemStatus(db, current.work_item_id, firmId, actorUserId, "complete");
+  }
+
+  return getClientRequest(db, requestId, firmId);
+}
+
+/**
+ * Cancels a request that no longer needs a client response. The linked
+ * work item is cancelled too (unless it already completed some other way)
+ * so cancelling a request never leaves stale "waiting on client" work
+ * sitting on the queue. Clearing next_reminder_at stops a cancelled
+ * request from ever being selected by listRequestsDueForReminder. A
+ * cancelled request does not hold the exception-idempotency slot (see
+ * migration 0012's uq_requests_active_bank_txn), so a fresh request can
+ * always be prepared afterward for the same transaction.
+ */
+export async function cancelRequest(
+  db: Db,
+  requestId: string,
+  firmId: string,
+  actorUserId: string,
+): Promise<ClientRequestRow | undefined> {
+  const current = await getClientRequest(db, requestId, firmId);
+  if (!current || current.status === "satisfied" || current.status === "cancelled") return current;
+
+  const statements: DbStatement[] = [
+    {
+      query: `UPDATE client_requests SET status = 'cancelled', next_reminder_at = NULL, updated_at = NOW() WHERE id = $1 AND firm_id = $2`,
+      params: [requestId, firmId],
+    },
+    workAuditEventStatement({
+      firmId,
+      entityType: "client_request",
+      entityId: requestId,
+      action: "request_cancelled",
+      actorUserId,
+      beforeJson: { status: current.status },
+      afterJson: { status: "cancelled" },
+    }),
+  ];
+  await db.transaction(statements);
+
+  if (current.work_item_id) {
+    await updateWorkItemStatus(db, current.work_item_id, firmId, actorUserId, "cancelled");
   }
 
   return getClientRequest(db, requestId, firmId);

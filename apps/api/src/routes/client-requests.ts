@@ -9,6 +9,7 @@ import { ensureFirm } from "../services/firm";
 import { getClient } from "../services/clients";
 import {
   approveDraftRequest,
+  cancelRequest,
   createClientRequest,
   getClientRequest,
   listClientRequests,
@@ -31,6 +32,7 @@ const createSchema = z.object({
   requestType: z.enum(REQUEST_TYPES),
   title: z.string().trim().min(1).max(200),
   description: z.string().trim().max(2000).nullable().optional(),
+  dueAt: z.string().nullable().optional(),
 });
 
 clientRequestRoutes.get("/:clientId/requests", async (c) => {
@@ -56,6 +58,7 @@ clientRequestRoutes.post("/:clientId/requests", async (c) => {
     requestType: body.requestType,
     title: body.title,
     description: body.description,
+    dueAt: body.dueAt,
     status: "requested",
   });
   return c.json({ request }, 201);
@@ -90,6 +93,19 @@ clientRequestRoutes.post("/:clientId/requests/:requestId/satisfy", async (c) => 
   if (!existing) return c.json({ error: "Not found" }, 404);
 
   const request = await satisfyRequest(db, existing.id, firm.id, c.get("userId"));
+  return c.json({ request });
+});
+
+clientRequestRoutes.post("/:clientId/requests/:requestId/cancel", async (c) => {
+  const db = createDb(c.env);
+  const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
+  const client = await getClient(db, c.req.param("clientId"), firm.id);
+  if (!client) return c.json({ error: "Not found" }, 404);
+
+  const existing = await loadOwnedRequest(db, c.req.param("requestId"), client.id, firm.id);
+  if (!existing) return c.json({ error: "Not found" }, 404);
+
+  const request = await cancelRequest(db, existing.id, firm.id, c.get("userId"));
   return c.json({ request });
 });
 

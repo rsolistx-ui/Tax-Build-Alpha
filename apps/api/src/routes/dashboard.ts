@@ -301,6 +301,18 @@ dashboardRoutes.get("/", async (c) => {
     `SELECT COUNT(*)::int AS n FROM work_items WHERE firm_id = $1 AND status NOT IN ('complete', 'cancelled') AND due_at IS NOT NULL AND due_at <= NOW() + INTERVAL '7 days'`,
     [firm.id],
   );
+  const [dueTodayWork] = await db.query<{ n: number }>(
+    `SELECT COUNT(*)::int AS n FROM work_items WHERE firm_id = $1 AND status NOT IN ('complete', 'cancelled') AND due_at IS NOT NULL AND due_at::date = CURRENT_DATE`,
+    [firm.id],
+  );
+  const [professionalReview] = await db.query<{ n: number }>(
+    `SELECT COUNT(*)::int AS n FROM work_items WHERE firm_id = $1 AND work_type = 'review' AND status NOT IN ('complete', 'cancelled')`,
+    [firm.id],
+  );
+  const [blockedWork] = await db.query<{ n: number }>(
+    `SELECT COUNT(*)::int AS n FROM work_items WHERE firm_id = $1 AND status = 'blocked'`,
+    [firm.id],
+  );
   const [requestAging] = await db.query<{ oldest_pending_days: number | null }>(
     `SELECT EXTRACT(DAY FROM NOW() - MIN(created_at))::int AS oldest_pending_days FROM client_requests WHERE firm_id = $1 AND status IN ('requested', 'viewed')`,
     [firm.id],
@@ -315,7 +327,10 @@ dashboardRoutes.get("/", async (c) => {
       openEngagements: engagementCounts?.open_engagements ?? 0,
       waitingOnClientCount: waitingOnClient?.n ?? 0,
       overdueWorkCount: overdueWork?.n ?? 0,
+      dueTodayWorkCount: dueTodayWork?.n ?? 0,
       dueSoonWorkCount: dueWork?.n ?? 0,
+      professionalReviewCount: professionalReview?.n ?? 0,
+      blockedCount: blockedWork?.n ?? 0,
       oldestPendingRequestDays: requestAging?.oldest_pending_days ?? null,
     },
   });

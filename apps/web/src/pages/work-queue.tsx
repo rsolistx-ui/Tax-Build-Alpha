@@ -13,6 +13,7 @@ type WorkItem = {
   priority: string;
   due_at: string | null;
   source_type: string;
+  source_id: string | null;
 };
 
 const VIEWS = [
@@ -30,19 +31,58 @@ function label(value: string): string {
   return value.replace(/_/g, " ");
 }
 
+/**
+ * A client_request-sourced item deep-links to the requests tab focused on
+ * the request itself (source_id), not the work item. An engagement-scoped
+ * item deep-links to the engagements tab focused on the engagement. Any
+ * other item falls back to the client overview - there is no bank-tab
+ * deep link target from this milestone's work items since bank exceptions
+ * become client_request work items, they are not their own work-item
+ * source type.
+ */
+function deepLink(item: WorkItem): string {
+  if (item.source_type === "client_request" && item.source_id) {
+    return `/clients/${item.client_id}?tab=requests&focus=${item.source_id}`;
+  }
+  if (item.engagement_id) {
+    return `/clients/${item.client_id}?tab=engagements&focus=${item.engagement_id}`;
+  }
+  return `/clients/${item.client_id}`;
+}
+
 export function WorkQueuePage() {
   const [view, setView] = useState("");
   const [items, setItems] = useState<WorkItem[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function load(activeView: string) {
     try {
       const params = new URLSearchParams();
       if (activeView) params.set("view", activeView);
-      const data = await api<{ items: WorkItem[] }>(`/api/work-queue?${params.toString()}`);
+      const data = await api<{ items: WorkItem[]; nextCursor: string | null }>(`/api/work-queue?${params.toString()}`);
       setItems(data.items);
+      setNextCursor(data.nextCursor);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load the work queue");
+    }
+  }
+
+  async function loadMore() {
+    if (!nextCursor) return;
+    setLoadingMore(true);
+    try {
+      const params = new URLSearchParams();
+      if (view) params.set("view", view);
+      params.set("cursor", nextCursor);
+      const data = await api<{ items: WorkItem[]; nextCursor: string | null }>(`/api/work-queue?${params.toString()}`);
+      setItems((current) => [...current, ...data.items]);
+      setNextCursor(data.nextCursor);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load more");
+    } finally {
+      setLoadingMore(false);
     }
   }
 
@@ -56,7 +96,7 @@ export function WorkQueuePage() {
       <div>
         <h1 className="text-xl font-semibold">Work queue</h1>
         <p className="text-sm text-[var(--color-muted-foreground)]">
-          Every open item across every client, in one firm-wide list. Deep-links to the exact client and engagement.
+          Every open item across every client, in one firm-wide list. Deep-links to the exact client and record.
         </p>
       </div>
 
@@ -85,7 +125,7 @@ export function WorkQueuePage() {
           {items.map((item) => (
             <Link
               key={item.id}
-              to={`/clients/${item.client_id}?tab=${item.source_type === "client_request" ? "requests" : "engagements"}`}
+              to={deepLink(item)}
               className="flex flex-wrap items-center justify-between gap-2 p-3 text-sm hover:bg-[var(--color-muted)]"
             >
               <div>
@@ -102,6 +142,18 @@ export function WorkQueuePage() {
           ))}
         </div>
       )}
+
+      {nextCursor ? (
+        <div className="flex justify-center">
+          <button
+            className="rounded-md border border-[var(--color-border)] px-4 py-2 text-sm"
+            onClick={() => void loadMore()}
+            disabled={loadingMore}
+          >
+            {loadingMore ? "Loading..." : "Load more"}
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

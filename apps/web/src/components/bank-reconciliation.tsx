@@ -263,6 +263,24 @@ export function BankReconciliation({
     }
   }
 
+  async function requestFromClient(transactionId: string, kind: "receipt" | "explanation") {
+    setDecisionId(transactionId);
+    setError(null);
+    setMessage(null);
+    try {
+      const path = kind === "receipt" ? "prepare-missing-receipt" : "prepare-explanation";
+      await api(`/api/clients/${clientId}/requests/${path}`, {
+        method: "POST",
+        body: JSON.stringify({ bankTransactionId: transactionId }),
+      });
+      setMessage("Draft request prepared - review and send it from the Requests tab before the client sees it.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not prepare a client request");
+    } finally {
+      setDecisionId(null);
+    }
+  }
+
   async function uploadReceipt(transactionId: string, nextFile: File | null) {
     if (!nextFile) return;
     setUploadingId(transactionId);
@@ -531,6 +549,12 @@ export function BankReconciliation({
                         setNoReceiptReason("");
                       }}>
                         No receipt required
+                      </Button>
+                      <Button size="sm" variant="secondary" onClick={() => void requestFromClient(transaction.id, "receipt")} disabled={decisionId === transaction.id}>
+                        Request receipt from client
+                      </Button>
+                      <Button size="sm" variant="secondary" onClick={() => void requestFromClient(transaction.id, "explanation")} disabled={decisionId === transaction.id}>
+                        Request explanation from client
                       </Button>
                       <Button size="sm" variant="ghost" onClick={() => void loadHistory(transaction.id)}>
                         <History className="h-3.5 w-3.5" /> History

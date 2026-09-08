@@ -1,4 +1,4 @@
-import type { Db } from "../db";
+import type { Db, DbStatement } from "../db";
 import { newId } from "../lib/id";
 import { workAuditEventStatement } from "./work-audit";
 
@@ -35,36 +35,49 @@ export type WorkQueueFilter = {
 
 const MAX_PAGE_SIZE = 100;
 
+export type CreateWorkItemInput = {
+  firmId: string;
+  clientId: string;
+  engagementId?: string | null;
+  title: string;
+  description?: string | null;
+  workType?: string;
+  status?: string;
+  priority?: string;
+  dueAt?: string | null;
+  assignedUserId?: string | null;
+  sourceType?: string;
+  sourceId?: string | null;
+  clientVisible?: boolean;
+};
+
+/**
+ * Pure statement builder, no I/O. Lets a caller (createWorkItem below, or
+ * createClientRequest in client-requests.ts) fold a work-item insert into
+ * its own larger db.transaction() call so a request and its work item are
+ * never left half-created if the other insert fails.
+ */
+export function workItemInsertStatement(id: string, input: CreateWorkItemInput): DbStatement {
+  return {
+    query: `INSERT INTO work_items
+      (id, firm_id, client_id, engagement_id, title, description, work_type, status, priority, due_at, assigned_user_id, source_type, source_id, client_visible)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+    params: [
+      id, input.firmId, input.clientId, input.engagementId ?? null, input.title, input.description ?? null,
+      input.workType ?? "general", input.status ?? "open", input.priority ?? "normal", input.dueAt ?? null,
+      input.assignedUserId ?? null, input.sourceType ?? "manual", input.sourceId ?? null, input.clientVisible ?? false,
+    ],
+  };
+}
+
 export async function createWorkItem(
   db: Db,
   actorUserId: string | null,
-  input: {
-    firmId: string;
-    clientId: string;
-    engagementId?: string | null;
-    title: string;
-    description?: string | null;
-    workType?: string;
-    priority?: string;
-    dueAt?: string | null;
-    assignedUserId?: string | null;
-    sourceType?: string;
-    sourceId?: string | null;
-    clientVisible?: boolean;
-  },
+  input: CreateWorkItemInput,
 ): Promise<WorkItemRow> {
   const id = newId("wi");
   await db.transaction([
-    {
-      query: `INSERT INTO work_items
-        (id, firm_id, client_id, engagement_id, title, description, work_type, status, priority, due_at, assigned_user_id, source_type, source_id, client_visible)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'open', $8, $9, $10, $11, $12, $13)`,
-      params: [
-        id, input.firmId, input.clientId, input.engagementId ?? null, input.title, input.description ?? null,
-        input.workType ?? "general", input.priority ?? "normal", input.dueAt ?? null, input.assignedUserId ?? null,
-        input.sourceType ?? "manual", input.sourceId ?? null, input.clientVisible ?? false,
-      ],
-    },
+    workItemInsertStatement(id, input),
     workAuditEventStatement({
       firmId: input.firmId,
       entityType: "work_item",
@@ -161,6 +174,13 @@ export async function queryWorkQueue(db: Db, firmId: string, filter: WorkQueueFi
       conditions.push(`status = 'complete' AND completed_at IS NOT NULL AND completed_at > NOW() - INTERVAL '14 days'`);
       break;
     default:
+      // "All open" default: no view and no explicit status means open
+      // work only. A caller that explicitly asks for a status (including
+      // complete/cancelled) is respected instead - this default never
+      // overrides an explicit status filter.
+      if (!filter.status) {
+        conditions.push(`status NOT IN ('complete', 'cancelled')`);
+      }
       break;
   }
 

@@ -74,7 +74,24 @@ type Summary = {
   currencyConflicts: number;
 };
 
-type DashboardData = { summary: Summary; clients: ClientRow[]; actions: Action[]; recentActivity: Activity[] };
+type OperationsCommandCenter = {
+  openEngagements: number;
+  waitingOnClientCount: number;
+  overdueWorkCount: number;
+  dueTodayWorkCount: number;
+  dueSoonWorkCount: number;
+  professionalReviewCount: number;
+  blockedCount: number;
+  oldestPendingRequestDays: number | null;
+};
+
+type DashboardData = {
+  summary: Summary;
+  clients: ClientRow[];
+  actions: Action[];
+  recentActivity: Activity[];
+  operationsCommandCenter?: OperationsCommandCenter;
+};
 
 type Filter = "all" | "needs_attention" | "ready" | "missing_evidence" | "bank_issues" | "receipt_review";
 
@@ -146,6 +163,42 @@ function timeAgo(iso: string): string {
   const days = Math.floor(hours / 24);
   if (days < 30) return `${days}d ago`;
   return new Date(iso).toLocaleDateString();
+}
+
+function PracticeOsStrip({ counts }: { counts: OperationsCommandCenter }) {
+  const items: Array<{ label: string; value: number | string; href: string; tone?: "warn" }> = [
+    { label: "Open engagements", value: counts.openEngagements, href: "/work-queue" },
+    { label: "Overdue work", value: counts.overdueWorkCount, href: "/work-queue?view=overdue", tone: counts.overdueWorkCount > 0 ? "warn" : undefined },
+    { label: "Due today", value: counts.dueTodayWorkCount, href: "/work-queue?view=due_today" },
+    { label: "Due soon", value: counts.dueSoonWorkCount, href: "/work-queue?view=due_soon" },
+    { label: "Waiting on client", value: counts.waitingOnClientCount, href: "/work-queue?view=waiting_on_client" },
+    { label: "Professional review", value: counts.professionalReviewCount, href: "/work-queue?view=professional_review" },
+    { label: "Blocked", value: counts.blockedCount, href: "/work-queue?view=blocked", tone: counts.blockedCount > 0 ? "warn" : undefined },
+    {
+      label: "Oldest pending request",
+      value: counts.oldestPendingRequestDays === null ? "none" : `${counts.oldestPendingRequestDays}d`,
+      href: "/work-queue",
+      tone: counts.oldestPendingRequestDays !== null && counts.oldestPendingRequestDays > 7 ? "warn" : undefined,
+    },
+  ];
+  return (
+    <div>
+      <p className="mb-1.5 text-xs font-medium text-[var(--color-muted-foreground)]">Practice OS</p>
+      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-border)] sm:grid-cols-4">
+        {items.map((item) => (
+          <Link key={item.label} to={item.href} className="bg-[var(--color-card)] px-4 py-3 hover:bg-[var(--color-muted)]">
+            <div
+              className="text-xl font-semibold tabular-nums"
+              style={item.tone === "warn" ? { color: "var(--color-warning)" } : undefined}
+            >
+              {item.value}
+            </div>
+            <div className="mt-0.5 text-xs text-[var(--color-muted-foreground)]">{item.label}</div>
+          </Link>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function SummaryStrip({ summary }: { summary: Summary }) {
@@ -320,6 +373,7 @@ export function DashboardPage() {
       </div>
 
       <SummaryStrip summary={data.summary} />
+      {data.operationsCommandCenter ? <PracticeOsStrip counts={data.operationsCommandCenter} /> : null}
 
       {caughtUp ? (
         <Card>

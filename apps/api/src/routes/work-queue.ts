@@ -5,6 +5,8 @@ import type { AuthedVars } from "../middleware/session";
 import { requireSession } from "../middleware/session";
 import { requireActiveBeta } from "../middleware/beta";
 import { ensureFirm } from "../services/firm";
+import { getClient } from "../services/clients";
+import { getEngagement } from "../services/engagements";
 import { createWorkItem, queryWorkQueue, updateWorkItemStatus, type WorkQueueFilter } from "../services/work-items";
 import { z } from "zod";
 
@@ -15,6 +17,22 @@ workQueueRoutes.use("*", requireActiveBeta);
 const VIEWS = [
   "overdue", "due_today", "due_soon", "waiting_on_client", "professional_review", "blocked", "recently_completed",
 ] as const;
+const STATUSES = ["open", "in_progress", "waiting_on_client", "blocked", "complete", "cancelled"] as const;
+const PRIORITIES = ["low", "normal", "high", "urgent"] as const;
+const MAX_LIMIT = 100;
+
+const querySchema = z.object({
+  clientId: z.string().min(1).optional(),
+  engagementId: z.string().min(1).optional(),
+  assignedUserId: z.string().min(1).optional(),
+  status: z.enum(STATUSES).optional(),
+  priority: z.enum(PRIORITIES).optional(),
+  view: z.enum(VIEWS).optional(),
+  // created_at|id - both segments required and non-empty, matching what
+  // queryWorkQueue's own cursor encoding produces.
+  cursor: z.string().regex(/^[^|]+\|[^|]+$/).optional(),
+  limit: z.coerce.number().int().min(1).max(MAX_LIMIT).optional(),
+});
 
 /**
  * Firm-wide practice work queue. Every returned item is a deep link:
@@ -25,17 +43,19 @@ workQueueRoutes.get("/", async (c) => {
   const db = createDb(c.env);
   const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
 
-  const query = c.req.query();
-  const view = VIEWS.includes(query.view as (typeof VIEWS)[number]) ? (query.view as (typeof VIEWS)[number]) : undefined;
+  const parsed = querySchema.safeParse(c.req.query());
+  if (!parsed.success) return c.json({ error: "Invalid query parameters" }, 400);
+  const query = parsed.data;
+
   const filter: WorkQueueFilter = {
-    clientId: query.clientId || undefined,
-    engagementId: query.engagementId || undefined,
-    assignedUserId: query.assignedUserId || undefined,
-    status: query.status || undefined,
-    priority: query.priority || undefined,
-    view,
-    cursor: query.cursor || undefined,
-    limit: query.limit ? Number(query.limit) : undefined,
+    clientId: query.clientId,
+    engagementId: query.engagementId,
+    assignedUserId: query.assignedUserId,
+    status: query.status,
+    priority: query.priority,
+    view: query.view,
+    cursor: query.cursor,
+    limit: query.limit,
   };
 
   const result = await queryWorkQueue(db, firm.id, filter);
@@ -48,19 +68,34 @@ const createSchema = z.object({
   title: z.string().trim().min(1).max(200),
   description: z.string().trim().max(2000).nullable().optional(),
   workType: z.string().optional(),
-  priority: z.enum(["low", "normal", "high", "urgent"]).optional(),
+  priority: z.enum(PRIORITIES).optional(),
   dueAt: z.string().nullable().optional(),
   assignedUserId: z.string().nullable().optional(),
 });
 
+/**
+ * clientId and engagementId are never trusted as-is: both are verified to
+ * belong to the caller's firm (and the engagement to the same client)
+ * before any row is written. A mismatch returns a plain 404 - never a
+ * response that reveals whether the referenced object exists at all in
+ * some other firm or client.
+ */
 workQueueRoutes.post("/", async (c) => {
   const db = createDb(c.env);
   const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
   const body = createSchema.parse(await c.req.json());
 
+  const client = await getClient(db, body.clientId, firm.id);
+  if (!client) return c.json({ error: "Not found" }, 404);
+
+  if (body.engagementId) {
+    const engagement = await getEngagement(db, body.engagementId, firm.id);
+    if (!engagement || engagement.client_id !== client.id) return c.json({ error: "Not found" }, 404);
+  }
+
   const workItem = await createWorkItem(db, c.get("userId"), {
     firmId: firm.id,
-    clientId: body.clientId,
+    clientId: client.id,
     engagementId: body.engagementId,
     title: body.title,
     description: body.description,
@@ -72,9 +107,7 @@ workQueueRoutes.post("/", async (c) => {
   return c.json({ workItem }, 201);
 });
 
-const statusSchema = z.object({
-  status: z.enum(["open", "in_progress", "waiting_on_client", "blocked", "complete", "cancelled"]),
-});
+const statusSchema = z.object({ status: z.enum(STATUSES) });
 
 workQueueRoutes.patch("/:workItemId/status", async (c) => {
   const db = createDb(c.env);

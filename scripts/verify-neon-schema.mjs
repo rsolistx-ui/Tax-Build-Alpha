@@ -117,6 +117,122 @@ const checks = [
     label: "work_audit_events table (practice OS, migration 0012)",
     query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'work_audit_events'`,
   },
+  {
+    label: "uq_clients_id_firm unique constraint (tenant-safety anchor for clients) (migration 0012)",
+    query: `SELECT 1 FROM pg_constraint WHERE conname = 'uq_clients_id_firm'`,
+  },
+  {
+    label: "uq_bank_transactions_id_client unique constraint (tenant-safety anchor for bank_transactions) (migration 0012)",
+    query: `SELECT 1 FROM pg_constraint WHERE conname = 'uq_bank_transactions_id_client'`,
+  },
+  {
+    label: "uq_engagements_id_firm unique constraint (migration 0012)",
+    query: `SELECT 1 FROM pg_constraint WHERE conname = 'uq_engagements_id_firm'`,
+  },
+  {
+    label: "uq_engagements_id_client unique constraint (migration 0012)",
+    query: `SELECT 1 FROM pg_constraint WHERE conname = 'uq_engagements_id_client'`,
+  },
+  {
+    label: "uq_work_items_id_firm unique constraint (migration 0012)",
+    query: `SELECT 1 FROM pg_constraint WHERE conname = 'uq_work_items_id_firm'`,
+  },
+  {
+    label: "uq_work_items_id_client unique constraint (migration 0012)",
+    query: `SELECT 1 FROM pg_constraint WHERE conname = 'uq_work_items_id_client'`,
+  },
+  {
+    label: "uq_requests_id_firm unique constraint (migration 0012)",
+    query: `SELECT 1 FROM pg_constraint WHERE conname = 'uq_requests_id_firm'`,
+  },
+  {
+    label: "uq_requests_id_client unique constraint (migration 0012)",
+    query: `SELECT 1 FROM pg_constraint WHERE conname = 'uq_requests_id_client'`,
+  },
+  {
+    label: "fk_engagements_client_same_firm is a composite tenant-safe FK into clients (migration 0012 - an engagement cannot pair a client with a different firm)",
+    query: `SELECT 1 FROM pg_constraint WHERE conname = 'fk_engagements_client_same_firm' AND pg_get_constraintdef(oid) LIKE '%REFERENCES clients(%,%'`,
+  },
+  {
+    label: "fk_work_items_client_same_firm is a composite tenant-safe FK into clients (migration 0012 - a work item cannot pair a client with a different firm)",
+    query: `SELECT 1 FROM pg_constraint WHERE conname = 'fk_work_items_client_same_firm' AND pg_get_constraintdef(oid) LIKE '%REFERENCES clients(%,%'`,
+  },
+  {
+    label: "fk_work_items_engagement_same_client is a composite tenant-safe FK into engagements (migration 0012 - a work item cannot reference another client's engagement)",
+    query: `SELECT 1 FROM pg_constraint WHERE conname = 'fk_work_items_engagement_same_client' AND pg_get_constraintdef(oid) LIKE '%REFERENCES engagements(%,%'`,
+  },
+  {
+    label: "fk_requests_client_same_firm is a composite tenant-safe FK into clients (migration 0012 - a request cannot pair a client with a different firm)",
+    query: `SELECT 1 FROM pg_constraint WHERE conname = 'fk_requests_client_same_firm' AND pg_get_constraintdef(oid) LIKE '%REFERENCES clients(%,%'`,
+  },
+  {
+    label: "fk_requests_work_item_same_client is a composite tenant-safe FK into work_items (migration 0012 - a request cannot reference another client's work item)",
+    query: `SELECT 1 FROM pg_constraint WHERE conname = 'fk_requests_work_item_same_client' AND pg_get_constraintdef(oid) LIKE '%REFERENCES work_items(%,%'`,
+  },
+  {
+    label: "fk_requests_bank_txn_same_client is a composite tenant-safe FK into bank_transactions (migration 0012 - a request cannot reference another client's bank transaction)",
+    query: `SELECT 1 FROM pg_constraint WHERE conname = 'fk_requests_bank_txn_same_client' AND pg_get_constraintdef(oid) LIKE '%REFERENCES bank_transactions(%,%'`,
+  },
+  {
+    label: "fk_messages_request_same_client is a composite tenant-safe FK into client_requests (migration 0012 - a message cannot reference another client's request)",
+    query: `SELECT 1 FROM pg_constraint WHERE conname = 'fk_messages_request_same_client' AND pg_get_constraintdef(oid) LIKE '%REFERENCES client_requests(%,%'`,
+  },
+  {
+    label: "fk_documents_request_same_client is a composite tenant-safe FK into client_requests (migration 0012 - a document cannot reference another client's request)",
+    query: `SELECT 1 FROM pg_constraint WHERE conname = 'fk_documents_request_same_client' AND pg_get_constraintdef(oid) LIKE '%REFERENCES client_requests(%,%'`,
+  },
+  {
+    label: "fk_portal_links_client_same_firm is a composite tenant-safe FK into clients (migration 0012 - a portal link cannot pair a client with a different firm)",
+    query: `SELECT 1 FROM pg_constraint WHERE conname = 'fk_portal_links_client_same_firm' AND pg_get_constraintdef(oid) LIKE '%REFERENCES clients(%,%'`,
+  },
+  {
+    label: "fk_work_items_engagement_same_client has column-specific ON DELETE SET NULL (migration 0012 - never nulls the tenant column)",
+    query: `SELECT 1 FROM pg_constraint WHERE conname = 'fk_work_items_engagement_same_client' AND pg_get_constraintdef(oid) LIKE '%SET NULL (engagement_id)%'`,
+  },
+  {
+    label: "fk_requests_work_item_same_client has column-specific ON DELETE SET NULL (migration 0012 - never nulls the tenant column)",
+    query: `SELECT 1 FROM pg_constraint WHERE conname = 'fk_requests_work_item_same_client' AND pg_get_constraintdef(oid) LIKE '%SET NULL (work_item_id)%'`,
+  },
+  {
+    label: "fk_requests_bank_txn_same_client has column-specific ON DELETE SET NULL (migration 0012 - never nulls the tenant column)",
+    query: `SELECT 1 FROM pg_constraint WHERE conname = 'fk_requests_bank_txn_same_client' AND pg_get_constraintdef(oid) LIKE '%SET NULL (related_bank_transaction_id)%'`,
+  },
+  {
+    label: "fk_documents_request_same_client has column-specific ON DELETE SET NULL (migration 0012 - never nulls the tenant column)",
+    query: `SELECT 1 FROM pg_constraint WHERE conname = 'fk_documents_request_same_client' AND pg_get_constraintdef(oid) LIKE '%SET NULL (request_id)%'`,
+  },
+  {
+    label: "client_requests.due_at column (due-date support for reminders and portal display) (migration 0012)",
+    query: `SELECT 1 FROM information_schema.columns WHERE table_name = 'client_requests' AND column_name = 'due_at'`,
+  },
+  {
+    label: "client_requests.next_reminder_at column (migration 0012)",
+    query: `SELECT 1 FROM information_schema.columns WHERE table_name = 'client_requests' AND column_name = 'next_reminder_at'`,
+  },
+  {
+    label: "client_requests.reminder_count column (migration 0012)",
+    query: `SELECT 1 FROM information_schema.columns WHERE table_name = 'client_requests' AND column_name = 'reminder_count'`,
+  },
+  {
+    label: "client_requests.last_reminded_at column (migration 0012)",
+    query: `SELECT 1 FROM information_schema.columns WHERE table_name = 'client_requests' AND column_name = 'last_reminded_at'`,
+  },
+  {
+    label: "client_documents.request_id column (evidence-to-request linkage) (migration 0012)",
+    query: `SELECT 1 FROM information_schema.columns WHERE table_name = 'client_documents' AND column_name = 'request_id'`,
+  },
+  {
+    label: "client_documents.client_visible column (portal document visibility flag) (migration 0012)",
+    query: `SELECT 1 FROM information_schema.columns WHERE table_name = 'client_documents' AND column_name = 'client_visible'`,
+  },
+  {
+    label: "request_messages.client_id column (tenant column enabling the composite FK to client_requests) (migration 0012)",
+    query: `SELECT 1 FROM information_schema.columns WHERE table_name = 'request_messages' AND column_name = 'client_id'`,
+  },
+  {
+    label: "uq_requests_active_bank_txn is a partial unique index enforcing race-safe exception-request idempotency (migration 0012)",
+    query: `SELECT 1 FROM pg_indexes WHERE indexname = 'uq_requests_active_bank_txn'`,
+  },
 ];
 
 // The pre-0007 per-state indexes are superseded by idx_bank_unique_receipt_claim

@@ -10,6 +10,7 @@ import { getClient, type ClientRow } from "../services/clients";
 import { newId } from "../lib/id";
 import { getLlmProvider, type ReceiptBusinessContext, type ReceiptExtraction } from "../providers/llm";
 import { validateReceipt } from "../services/receipt-validation";
+import { ingestReceiptForClient, HttpError } from "../services/receipt-intake";
 
 export const receiptRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 receiptRoutes.use("*", requireSession);
@@ -86,144 +87,19 @@ receiptRoutes.post("/:clientId/receipts", async (c) => {
   const bankTransactionId = typeof bankTransactionValue === "string" && bankTransactionValue.trim()
     ? bankTransactionValue.trim()
     : null;
-  let bankTransactionBefore: Record<string, unknown> | null = null;
-  if (bankTransactionId) {
-    const [bankTransaction] = await db.query<Record<string, unknown>>(
-      `SELECT * FROM bank_transactions WHERE id = $1 AND client_id = $2`,
-      [bankTransactionId, client.id],
-    );
-    if (!bankTransaction) return c.json({ error: "Bank transaction was not found" }, 404);
-    if (bankTransaction.triage === "matched" || bankTransaction.triage === "no_receipt_required") {
-      return c.json({ error: "This bank transaction is already resolved" }, 409);
-    }
-    bankTransactionBefore = bankTransaction;
-  }
 
-  const receiptId = newId("rcp");
-  const jobId = newId("job");
-  const key = `${client.firm_id}/${client.id}/${receiptId}/${file.name}`;
-  const bytes = await file.arrayBuffer();
-
-  await c.env.RECEIPTS.put(key, bytes, {
-    httpMetadata: { contentType: file.type || "application/octet-stream" },
-    customMetadata: { filename: file.name, clientId: client.id },
-  });
-
-  await db.transaction([
-    {
-      query: `INSERT INTO receipts
-        (id, client_id, r2_key, filename, content_type, size_bytes, status, validation_status)
-        VALUES ($1, $2, $3, $4, $5, $6, 'uploaded', 'pending')`,
-      params: [receiptId, client.id, key, file.name, file.type || null, file.size],
-    },
-    {
-      query: `INSERT INTO jobs (id, type, payload, status)
-              VALUES ($1, 'receipt_extract', $2::jsonb, 'running')`,
-      params: [jobId, { receiptId, clientId: client.id, r2Key: key }],
-    },
-    {
-      query: `UPDATE receipts SET status = 'extracting', updated_at = NOW() WHERE id = $1`,
-      params: [receiptId],
-    },
-  ]);
-
+  let result: Awaited<ReturnType<typeof ingestReceiptForClient>>;
   try {
-    const llm = getLlmProvider(c.env);
-    const context = await loadBusinessContext(db, client);
-    let extraction = await llm.extractReceipt({
-      bytes,
-      contentType: file.type || "application/octet-stream",
-      filename: file.name,
-      context,
-    });
-    extraction = await applyCorrectionMemory(db, client.id, extraction);
-    const validation = validateReceipt(extraction);
-
-    const statements: DbStatement[] = [
-      {
-        query: `UPDATE receipts SET
-          status = 'review', extracted_date = $1, extracted_merchant = $2,
-          extracted_subtotal = $3, extracted_tax = $4, extracted_tip = $5,
-          extracted_total = $6, extracted_currency = $7, extracted_category = $8,
-          confidence = $9, provider = $10, model = $11,
-          validation_status = $12, validation_json = $13::jsonb, updated_at = NOW()
-          WHERE id = $14`,
-        params: [
-          extraction.date,
-          extraction.merchant,
-          extraction.subtotal,
-          extraction.tax,
-          extraction.tip,
-          extraction.total,
-          extraction.currency,
-          extraction.category,
-          extraction.confidence,
-          llm.name,
-          llm.model,
-          validation.status,
-          validation,
-          receiptId,
-        ],
-      },
-      ...lineItemStatements(receiptId, extraction),
-      {
-        query: `UPDATE jobs SET status = 'done', result = $1::jsonb, updated_at = NOW() WHERE id = $2`,
-        params: [{ extraction, validation, provider: llm.name, model: llm.model }, jobId],
-      },
-      {
-        query: `INSERT INTO audit_events (id, client_id, receipt_id, actor_user_id, action, after_json)
-                VALUES ($1, $2, $3, $4, 'receipt_extracted', $5::jsonb)`,
-        params: [newId("aud"), client.id, receiptId, c.get("userId"), { extraction, validation }],
-      },
-    ];
-
-    if (bankTransactionId && bankTransactionBefore) {
-      statements.push(
-        {
-          query: `UPDATE bank_transactions SET
-            triage = 'receipt_pending', pending_receipt_id = $1,
-            suggested_receipt_id = NULL, suggested_score = NULL, suggested_reason = NULL,
-            matched_receipt_id = NULL, resolution_reason = NULL,
-            resolved_at = NULL, resolved_by_user_id = NULL,
-            reviewed_at = NOW(), reviewed_by_user_id = $2
-            WHERE id = $3 AND client_id = $4`,
-          params: [receiptId, c.get("userId"), bankTransactionId, client.id],
-        },
-        {
-          query: `INSERT INTO audit_events
-            (id, client_id, receipt_id, actor_user_id, action, before_json, after_json)
-            VALUES ($1, $2, $3, $4, 'bank_receipt_uploaded', $5::jsonb, $6::jsonb)`,
-          params: [
-            newId("aud"),
-            client.id,
-            receiptId,
-            c.get("userId"),
-            bankTransactionBefore,
-            { id: bankTransactionId, transactionId: bankTransactionId, triage: "receipt_pending", pending_receipt_id: receiptId },
-          ],
-        },
-      );
-    }
-
-    await db.transaction(statements);
-
-    return c.json({ receipt: await getReceiptDetails(db, receiptId, client.id), jobId, bankTransactionId }, 201);
+    result = await ingestReceiptForClient(db, c.env, client, file, c.get("userId"), bankTransactionId);
   } catch (error) {
-    const requestId = crypto.randomUUID();
-    const message = error instanceof Error ? error.message : "extract failed";
-    console.error(`[${requestId}] receipt extraction failed for ${receiptId}:`, error);
-    await db.transaction([
-      {
-        query: `UPDATE jobs SET status = 'failed', error = $1, updated_at = NOW() WHERE id = $2`,
-        params: [message, jobId],
-      },
-      {
-        query: `UPDATE receipts SET status = 'failed', updated_at = NOW() WHERE id = $1`,
-        params: [receiptId],
-      },
-    ]);
-    return c.json({ receiptId, jobId, error: "Receipt extraction failed", code: "EXTRACTION_FAILED", requestId }, 500);
+    if (error instanceof HttpError) return c.json({ error: error.message }, error.status as 404 | 409);
+    throw error;
   }
+
+  if (!result.ok) {
+    return c.json({ receiptId: result.receiptId, jobId: result.jobId, error: result.error, code: "EXTRACTION_FAILED", requestId: result.requestId }, 500);
+  }
+  return c.json({ receipt: await getReceiptDetails(db, result.receiptId, client.id), jobId: result.jobId, bankTransactionId: result.bankTransactionId }, 201);
 });
 
 receiptRoutes.get("/:clientId/review", async (c) => {

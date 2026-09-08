@@ -24,6 +24,20 @@ Y = confirmed present, P = partial/plan-gated, N = not present, ? = unverified f
 | QBO integration | native | N | N | Y | Y | Y | Y | N |
 | Native mobile app | Y | Y | Y | Y | Y | P | Y | P |
 
+## Tax preparation desktop/professional suites (added after the release-gate audit)
+
+Research date: 2026-09-07. Facts below come from each vendor's own pricing/feature pages and independent review roundups (Capterra, aggregator sites); pain themes are labeled USER-REPORTED COMPLAINT, not verified defects.
+
+| Capability | Intuit ProConnect Tax | Drake Tax | UltraTax CS (Thomson Reuters) |
+|---|---|---|---|
+| Pricing model | Pay-per-return from about $95/return, or feature-tier annual | Volume tiers (Pro line, 1040 line) plus pay-per-return; promotional pricing before Dec 1 rate reset | Custom-quoted, about $1,650/year base plus $150/user setup for a mid-sized firm |
+| Client portal | Free built-in client portal | Portal via add-on/integration | Portal via eSignature add-on module |
+| QBO integration | Deep native integration (same vendor) | Third-party/import-based | Integrates with Thomson Reuters Accounting CS / Practice CS |
+| e-file | Yes | Yes, federal and state, with error-checking | Yes, federal and state |
+| AI/OCR source-document extraction | Not confirmed in this pass | Gruntworx add-on reduces data entry | Not confirmed in this pass |
+| Capterra review population (2026-09-07) | 23 reviews, 87% positive / 9% neutral / 4% negative | Not confirmed in this pass | Not confirmed in this pass |
+| USER-REPORTED COMPLAINT | Pay-per-return pricing expensive for low-volume firms; recent price increases for new integrations | Outdated UI; unclear plan/refund terms alongside price increases | Slow with large client databases; cannot open multiple returns at once |
+
 ## Key takeaways for Folio
 
 1. No competitor combines **native bookkeeping + native tax workbench + client portal + document/evidence workflow** in one system. QBO/Wave/Xero own accounting but have no portal or tax layer. TaxDome/Canopy/Financial Cents/Karbon own portal + workflow but have no ledger and depend on QBO for accounting. MyTAXPrepOffice owns tax prep but has no bookkeeping or workflow layer.

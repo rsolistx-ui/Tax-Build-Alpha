@@ -7,7 +7,7 @@ import { requireSession } from "../middleware/session";
 import { requireActiveBeta } from "../middleware/beta";
 import { ensureFirm } from "../services/firm";
 import { getClient } from "../services/clients";
-import { createEngagement, getEngagement, isEngagementStatus, listEngagements, updateEngagementStatus } from "../services/engagements";
+import { createEngagement, getEngagement, isEngagementStatus, listEngagementsWithProgress, updateEngagementDetails, updateEngagementStatus } from "../services/engagements";
 
 export const engagementRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 engagementRoutes.use("*", requireSession);
@@ -36,7 +36,7 @@ engagementRoutes.get("/:clientId/engagements", async (c) => {
   const client = await getClient(db, c.req.param("clientId"), firm.id);
   if (!client) return c.json({ error: "Not found" }, 404);
 
-  const engagements = await listEngagements(db, firm.id, client.id);
+  const engagements = await listEngagementsWithProgress(db, firm.id, client.id);
   return c.json({ engagements });
 });
 
@@ -59,6 +59,27 @@ engagementRoutes.post("/:clientId/engagements", async (c) => {
     taxYear: body.taxYear,
   });
   return c.json({ engagement }, 201);
+});
+
+const detailsSchema = z.object({
+  startDate: z.string().nullable().optional(),
+  dueDate: z.string().nullable().optional(),
+  recurrence: z.string().nullable().optional(),
+  taxYear: z.number().int().nullable().optional(),
+});
+
+engagementRoutes.patch("/:clientId/engagements/:engagementId", async (c) => {
+  const db = createDb(c.env);
+  const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
+  const client = await getClient(db, c.req.param("clientId"), firm.id);
+  if (!client) return c.json({ error: "Not found" }, 404);
+
+  const engagement = await getEngagement(db, c.req.param("engagementId"), firm.id);
+  if (!engagement || engagement.client_id !== client.id) return c.json({ error: "Not found" }, 404);
+
+  const body = detailsSchema.parse(await c.req.json());
+  const updated = await updateEngagementDetails(db, engagement.id, firm.id, c.get("userId"), body);
+  return c.json({ engagement: updated });
 });
 
 engagementRoutes.patch("/:clientId/engagements/:engagementId/status", async (c) => {

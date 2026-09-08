@@ -127,3 +127,68 @@ export async function updateEngagementStatus(
 
   return getEngagement(db, engagementId, firmId);
 }
+
+export type EngagementWithProgress = EngagementRow & {
+  total_work_items: number;
+  completed_work_items: number;
+  open_professional_work_items: number;
+  waiting_on_client_work_items: number;
+};
+
+/**
+ * One query shaped for the UI instead of forcing N+1 client calls per
+ * engagement: total/completed/open/waiting-on-client work-item counts are
+ * computed server-side via a LEFT JOIN aggregate.
+ */
+export async function listEngagementsWithProgress(db: Db, firmId: string, clientId?: string): Promise<EngagementWithProgress[]> {
+  const clientClause = clientId ? "AND e.client_id = $2" : "";
+  const params = clientId ? [firmId, clientId] : [firmId];
+  return db.query<EngagementWithProgress>(
+    `SELECT
+       e.*,
+       COUNT(wi.id)::int AS total_work_items,
+       COUNT(wi.id) FILTER (WHERE wi.status = 'complete')::int AS completed_work_items,
+       COUNT(wi.id) FILTER (WHERE wi.status NOT IN ('complete', 'cancelled', 'waiting_on_client'))::int AS open_professional_work_items,
+       COUNT(wi.id) FILTER (WHERE wi.status = 'waiting_on_client')::int AS waiting_on_client_work_items
+     FROM engagements e
+     LEFT JOIN work_items wi ON wi.engagement_id = e.id
+     WHERE e.firm_id = $1 ${clientClause}
+     GROUP BY e.id
+     ORDER BY e.due_date NULLS LAST, e.created_at DESC`,
+    params,
+  );
+}
+
+export async function updateEngagementDetails(
+  db: Db,
+  engagementId: string,
+  firmId: string,
+  actorUserId: string,
+  input: { startDate?: string | null; dueDate?: string | null; recurrence?: string | null; taxYear?: number | null },
+): Promise<EngagementRow | undefined> {
+  const current = await getEngagement(db, engagementId, firmId);
+  if (!current) return undefined;
+
+  const startDate = input.startDate !== undefined ? input.startDate : current.start_date;
+  const dueDate = input.dueDate !== undefined ? input.dueDate : current.due_date;
+  const recurrence = input.recurrence !== undefined ? input.recurrence : current.recurrence;
+  const taxYear = input.taxYear !== undefined ? input.taxYear : current.tax_year;
+
+  await db.transaction([
+    {
+      query: `UPDATE engagements SET start_date = $1, due_date = $2, recurrence = $3, tax_year = $4, updated_at = NOW() WHERE id = $5 AND firm_id = $6`,
+      params: [startDate, dueDate, recurrence, taxYear, engagementId, firmId],
+    },
+    workAuditEventStatement({
+      firmId,
+      entityType: "engagement",
+      entityId: engagementId,
+      action: "engagement_details_updated",
+      actorUserId,
+      beforeJson: { startDate: current.start_date, dueDate: current.due_date, recurrence: current.recurrence, taxYear: current.tax_year },
+      afterJson: { startDate, dueDate, recurrence, taxYear },
+    }),
+  ]);
+
+  return getEngagement(db, engagementId, firmId);
+}

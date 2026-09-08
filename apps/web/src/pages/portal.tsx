@@ -1,64 +1,133 @@
-import { useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
+const SESSION_KEY = "folio_portal_token";
 
 type PortalClient = { id: string; name: string };
-type PortalRequest = { id: string; title: string; description: string | null; status: string; request_type: string };
+type PortalEngagement = {
+  id: string; service_type: string; title: string; status: string; due_date: string | null; tax_year: number | null;
+  total_work_items: number; completed_work_items: number;
+};
+type PortalRequest = { id: string; title: string; description: string | null; status: string; request_type: string; due_at: string | null };
 type PortalMessage = { id: string; author_type: string; body: string; created_at: string };
-
-async function portalApi<T>(token: string, path: string, init?: RequestInit): Promise<T> {
-  const headers = new Headers(init?.headers);
-  headers.set("Authorization", `Bearer ${token}`);
-  if (!(init?.body instanceof FormData) && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
-  const res = await fetch(`${API_BASE}${path}`, { ...init, headers });
-  if (!res.ok) throw new Error("Something went wrong. Your link may have expired.");
-  return res.json() as Promise<T>;
-}
+type PortalDocument = { id: string; filename: string; document_type: string; status: string; uploaded_at: string };
+type HomeSummary = {
+  client: PortalClient;
+  activeEngagements: PortalEngagement[];
+  outstandingRequestCount: number;
+  overdueRequests: PortalRequest[];
+  dueRequests: PortalRequest[];
+  recentlyCompletedRequests: PortalRequest[];
+};
 
 function label(value: string): string {
   return value.replace(/_/g, " ");
 }
 
 /**
- * Mobile-first client portal. Authenticated by a bearer token in the URL,
- * never a Better Auth session - a client is not a Folio staff account.
- * Shows only this client's own engagements, requests, and client-visible
- * documents; all scoping happens server-side from the token.
+ * Reads a one-time portal token from the URL fragment (never the query
+ * string, so it is never sent to the server in the initial request or
+ * logged server-side), keeps it only in sessionStorage for this browser
+ * session (never localStorage), and strips it from the visible URL
+ * immediately via history.replaceState. Never logged, never sent to
+ * analytics, never included in an error string.
  */
+function resolvePortalToken(): string | null {
+  const hash = window.location.hash;
+  if (hash.startsWith("#token=")) {
+    const token = decodeURIComponent(hash.slice("#token=".length));
+    try {
+      sessionStorage.setItem(SESSION_KEY, token);
+    } catch {
+      // sessionStorage can throw in a private/locked-down browser context;
+      // the token still works for this page load via the in-memory value
+      // returned below, it just won't survive a reload.
+    }
+    window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    return token;
+  }
+  try {
+    return sessionStorage.getItem(SESSION_KEY);
+  } catch {
+    return null;
+  }
+}
+
+async function portalApi<T>(token: string, path: string, init?: RequestInit): Promise<T> {
+  const headers = new Headers(init?.headers);
+  headers.set("Authorization", `Bearer ${token}`);
+  if (!(init?.body instanceof FormData) && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+  const res = await fetch(`${API_BASE}${path}`, { ...init, headers });
+  if (!res.ok) throw new Error("Something went wrong. Your link may have expired or been revoked.");
+  return res.json() as Promise<T>;
+}
+
+type View = "home" | "requests" | "documents" | { request: string };
+
 export function PortalPage() {
-  const [searchParams] = useSearchParams();
-  const token = searchParams.get("token") || "";
-  const [client, setClient] = useState<PortalClient | null>(null);
+  const tokenRef = useRef<string | null>(null);
+  const [ready, setReady] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [view, setView] = useState<View>("home");
+  const [home, setHome] = useState<HomeSummary | null>(null);
   const [requests, setRequests] = useState<PortalRequest[]>([]);
+  const [documents, setDocuments] = useState<PortalDocument[]>([]);
   const [selected, setSelected] = useState<PortalRequest | null>(null);
   const [messages, setMessages] = useState<PortalMessage[]>([]);
   const [reply, setReply] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    const token = resolvePortalToken();
     if (!token) {
       setError("This link is missing its access token.");
+      setReady(true);
       return;
     }
-    (async () => {
-      try {
-        const [meData, requestsData] = await Promise.all([
-          portalApi<{ client: PortalClient }>(token, "/api/portal/me"),
-          portalApi<{ requests: PortalRequest[] }>(token, "/api/portal/requests"),
-        ]);
-        setClient(meData.client);
-        setRequests(requestsData.requests);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "Could not load your portal");
-      }
-    })();
-  }, [token]);
+    tokenRef.current = token;
+    void loadHome(token);
+  }, []);
+
+  async function loadHome(token: string) {
+    try {
+      const data = await portalApi<HomeSummary>(token, "/api/portal/home");
+      setHome(data);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not load your portal");
+    } finally {
+      setReady(true);
+    }
+  }
+
+  async function loadRequests() {
+    if (!tokenRef.current) return;
+    try {
+      const data = await portalApi<{ requests: PortalRequest[] }>(tokenRef.current, "/api/portal/requests");
+      setRequests(data.requests);
+      setView("requests");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not load requests");
+    }
+  }
+
+  async function loadDocuments() {
+    if (!tokenRef.current) return;
+    try {
+      const data = await portalApi<{ documents: PortalDocument[] }>(tokenRef.current, "/api/portal/documents");
+      setDocuments(data.documents);
+      setView("documents");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not load documents");
+    }
+  }
 
   async function openRequest(request: PortalRequest) {
+    if (!tokenRef.current) return;
     setSelected(request);
+    setView({ request: request.id });
     try {
-      const data = await portalApi<{ request: PortalRequest; messages: PortalMessage[] }>(token, `/api/portal/requests/${request.id}`);
+      const data = await portalApi<{ request: PortalRequest; messages: PortalMessage[] }>(tokenRef.current, `/api/portal/requests/${request.id}`);
       setMessages(data.messages);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not open this request");
@@ -66,9 +135,9 @@ export function PortalPage() {
   }
 
   async function sendReply() {
-    if (!selected || !reply.trim()) return;
+    if (!selected || !reply.trim() || !tokenRef.current) return;
     try {
-      await portalApi(token, `/api/portal/requests/${selected.id}/messages`, {
+      await portalApi(tokenRef.current, `/api/portal/requests/${selected.id}/messages`, {
         method: "POST",
         body: JSON.stringify({ body: reply.trim() }),
       });
@@ -79,24 +148,70 @@ export function PortalPage() {
     }
   }
 
-  if (error) {
+  async function uploadEvidence(files: FileList | null) {
+    if (!selected || !files?.length || !tokenRef.current) return;
+    setUploading(true);
+    try {
+      for (const file of Array.from(files)) {
+        const form = new FormData();
+        form.append("file", file);
+        await portalApi(tokenRef.current, `/api/portal/requests/${selected.id}/evidence`, { method: "POST", body: form });
+      }
+      await openRequest(selected);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not upload your file");
+    } finally {
+      setUploading(false);
+      if (fileInput.current) fileInput.current.value = "";
+    }
+  }
+
+  if (!ready) {
+    return <div className="mx-auto max-w-md p-6 text-center text-sm text-[var(--color-muted-foreground)]">Loading...</div>;
+  }
+  if (error && !home) {
     return <div className="mx-auto max-w-md p-6 text-center text-sm text-[var(--color-destructive)]">{error}</div>;
   }
+
+  const isRequestView = typeof view === "object";
 
   return (
     <div className="mx-auto max-w-md space-y-4 p-4">
       <div>
         <p className="text-xs text-[var(--color-muted-foreground)]">Folio client portal</p>
-        <h1 className="text-lg font-semibold">{client ? client.name : "Loading..."}</h1>
+        <h1 className="text-lg font-semibold">{home?.client.name ?? "Loading..."}</h1>
       </div>
 
-      {selected ? (
+      {!isRequestView ? (
+        <div className="flex gap-2 border-b border-[var(--color-border)] pb-2 text-sm">
+          <button className={view === "home" ? "font-semibold" : "text-[var(--color-muted-foreground)]"} onClick={() => setView("home")}>Home</button>
+          <button className={view === "requests" ? "font-semibold" : "text-[var(--color-muted-foreground)]"} onClick={() => void loadRequests()}>Requests</button>
+          <button className={view === "documents" ? "font-semibold" : "text-[var(--color-muted-foreground)]"} onClick={() => void loadDocuments()}>Documents</button>
+        </div>
+      ) : null}
+
+      {error ? <p className="text-sm text-[var(--color-destructive)]">{error}</p> : null}
+
+      {isRequestView && selected ? (
         <div className="space-y-3">
-          <button className="text-sm text-[var(--color-muted-foreground)]" onClick={() => setSelected(null)}>&larr; Back to requests</button>
+          <button className="text-sm text-[var(--color-muted-foreground)]" onClick={() => setView("home")}>&larr; Back</button>
           <div className="rounded-md border border-[var(--color-border)] p-3">
             <p className="font-medium">{selected.title}</p>
             {selected.description ? <p className="mt-1 text-sm text-[var(--color-muted-foreground)]">{selected.description}</p> : null}
+            {selected.due_at ? <p className="mt-1 text-xs text-[var(--color-muted-foreground)]">Due {new Date(selected.due_at).toLocaleDateString()}</p> : null}
           </div>
+          {selected.status !== "satisfied" && selected.status !== "cancelled" ? (
+            <label>
+              <input ref={fileInput} type="file" className="hidden" onChange={(e) => void uploadEvidence(e.target.files)} />
+              <button
+                className="w-full rounded-md border border-[var(--color-border)] py-2 text-sm font-medium"
+                onClick={() => fileInput.current?.click()}
+                disabled={uploading}
+              >
+                {uploading ? "Uploading..." : "Upload evidence"}
+              </button>
+            </label>
+          ) : null}
           <div className="space-y-2">
             {messages.map((m) => (
               <div key={m.id} className={`rounded-md p-2 text-sm ${m.author_type === "client" ? "bg-[var(--color-primary)] text-white" : "bg-[var(--color-muted)]"}`}>
@@ -104,34 +219,89 @@ export function PortalPage() {
               </div>
             ))}
           </div>
-          <div className="flex gap-2">
-            <input
-              className="h-10 flex-1 rounded-md border border-[var(--color-border)] px-3 text-sm"
-              value={reply}
-              onChange={(e) => setReply(e.target.value)}
-              placeholder="Type a reply"
-            />
-            <button className="rounded-md bg-[var(--color-primary)] px-4 text-sm text-white" onClick={sendReply}>Send</button>
+          {selected.status !== "satisfied" && selected.status !== "cancelled" ? (
+            <div className="flex gap-2">
+              <input
+                className="h-10 flex-1 rounded-md border border-[var(--color-border)] px-3 text-sm"
+                value={reply}
+                onChange={(e) => setReply(e.target.value)}
+                placeholder="Type a reply"
+              />
+              <button className="rounded-md bg-[var(--color-primary)] px-4 text-sm text-white" onClick={sendReply}>Send</button>
+            </div>
+          ) : null}
+        </div>
+      ) : view === "home" && home ? (
+        <div className="space-y-4">
+          <div className="rounded-md border border-[var(--color-border)] p-3 text-sm">
+            <p className="font-medium">What we need from you</p>
+            <p className="mt-1 text-xs text-[var(--color-muted-foreground)]">
+              {home.outstandingRequestCount === 0 ? "Nothing outstanding right now." : `${home.outstandingRequestCount} outstanding request${home.outstandingRequestCount === 1 ? "" : "s"}.`}
+            </p>
+          </div>
+          {home.overdueRequests.length > 0 ? (
+            <div>
+              <p className="mb-1 text-xs font-semibold text-[var(--color-destructive)]">Overdue</p>
+              {home.overdueRequests.map((r) => (
+                <button key={r.id} onClick={() => openRequest(r)} className="mb-1 block w-full rounded-md border border-[var(--color-destructive)] p-2 text-left text-sm">
+                  {r.title}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {home.dueRequests.length > 0 ? (
+            <div>
+              <p className="mb-1 text-xs font-semibold text-[var(--color-muted-foreground)]">Due</p>
+              {home.dueRequests.map((r) => (
+                <button key={r.id} onClick={() => openRequest(r)} className="mb-1 block w-full rounded-md border border-[var(--color-border)] p-2 text-left text-sm">
+                  {r.title}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          <div>
+            <p className="mb-1 text-xs font-semibold text-[var(--color-muted-foreground)]">Active engagements</p>
+            {home.activeEngagements.length === 0 ? (
+              <p className="text-xs text-[var(--color-muted-foreground)]">None right now.</p>
+            ) : (
+              home.activeEngagements.map((e) => (
+                <div key={e.id} className="mb-1 rounded-md border border-[var(--color-border)] p-2 text-sm">
+                  <p className="font-medium">{label(e.service_type)}{e.tax_year ? ` \u00b7 ${e.tax_year}` : ""}</p>
+                  <p className="text-xs text-[var(--color-muted-foreground)]">
+                    {label(e.status)}{e.due_date ? ` \u00b7 due ${new Date(e.due_date).toLocaleDateString()}` : ""} \u00b7 {e.completed_work_items}/{e.total_work_items} complete
+                  </p>
+                </div>
+              ))
+            )}
           </div>
         </div>
-      ) : (
+      ) : view === "requests" ? (
         <div className="space-y-2">
           {requests.length === 0 ? (
             <p className="text-sm text-[var(--color-muted-foreground)]">Nothing needs your attention right now.</p>
           ) : (
             requests.map((r) => (
-              <button
-                key={r.id}
-                onClick={() => openRequest(r)}
-                className="w-full rounded-md border border-[var(--color-border)] p-3 text-left text-sm"
-              >
+              <button key={r.id} onClick={() => openRequest(r)} className="w-full rounded-md border border-[var(--color-border)] p-3 text-left text-sm">
                 <p className="font-medium">{r.title}</p>
-                <p className="text-xs text-[var(--color-muted-foreground)]">{label(r.status)}</p>
+                <p className="text-xs text-[var(--color-muted-foreground)]">{label(r.status)}{r.due_at ? ` \u00b7 due ${new Date(r.due_at).toLocaleDateString()}` : ""}</p>
               </button>
             ))
           )}
         </div>
-      )}
+      ) : view === "documents" ? (
+        <div className="space-y-2">
+          {documents.length === 0 ? (
+            <p className="text-sm text-[var(--color-muted-foreground)]">No documents yet.</p>
+          ) : (
+            documents.map((d) => (
+              <div key={d.id} className="rounded-md border border-[var(--color-border)] p-3 text-sm">
+                <p className="font-medium">{d.filename}</p>
+                <p className="text-xs text-[var(--color-muted-foreground)]">{label(d.document_type)} \u00b7 {new Date(d.uploaded_at).toLocaleDateString()}</p>
+              </div>
+            ))
+          )}
+        </div>
+      ) : null}
     </div>
   );
 }

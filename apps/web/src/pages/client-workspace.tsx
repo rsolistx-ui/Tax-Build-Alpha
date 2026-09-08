@@ -388,9 +388,9 @@ export function ClientWorkspacePage() {
 
       {tab === "documents" ? <DocumentsPanel clientId={clientId} /> : null}
 
-      {tab === "engagements" ? <EngagementsPanel clientId={clientId} /> : null}
+      {tab === "engagements" ? <EngagementsPanel clientId={clientId} focusEngagementId={focusId} /> : null}
 
-      {tab === "requests" ? <RequestsPanel clientId={clientId} /> : null}
+      {tab === "requests" ? <RequestsPanel clientId={clientId} focusRequestId={focusId} /> : null}
 
       {tab === "folders" ? (
         <div className="grid gap-4 lg:grid-cols-[240px_1fr]">

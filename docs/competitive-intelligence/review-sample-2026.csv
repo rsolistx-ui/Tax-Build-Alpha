@@ -1,0 +1,29 @@
+competitor,source,review_date,rating,role,firm_size,pain_point_theme,positive_theme,workflow_affected,severity,source_url
+QuickBooks Online,G2,2026-09-07,4.0,,,,,,,https://www.g2.com/products/quickbooks-online/reviews
+QuickBooks Online,Capterra,2026-09-07,4.3,,,bank-feed matching failures,,bank reconciliation,medium,https://www.capterra.com/p/190778/QuickBooks-Online/reviews/
+QuickBooks Online,Trustpilot,2026-09-07,1.1,,,billing and support escalations,,billing/support,high,https://www.capterra.com/p/190778/QuickBooks-Online/
+QuickBooks Online,Intuit Developer Community,2026-09-07,,,,pending bank-feed transactions not exposed via API,,bank integration,high,https://help.developer.intuit.com/s/question/0D5TR00001JtbjS0AR/i-want-to-fetch-bank-feed-pending-trasnactions-in-my-app-is-it-possible
+Wave,Capterra,2026-09-07,4.4,,,receipt-scan image quality inconsistent,,receipt intake,medium,https://www.capterra.com/p/178021/Wave-Apps/
+Wave,Capterra,2026-09-07,4.4,,,customer support response time,,support,high,https://www.capterra.com/p/178021/Wave-Apps/
+Wave,Beancount.io,2026-08-05,,,,OCR moved behind paid Pro plan June 2026,,receipt intake pricing,medium,https://beancount.io/blog/2026/08/05/wave-accounting-bank-feeds-collaborator-paywall-guide
+Wave,Wave Help Center,2026-09-07,,,,bulk upload capped at 10 files per batch,,receipt intake,high,https://support.waveapps.com/hc/en-us/articles/360059848112-Scan-and-upload-your-receipts
+TaxDome,G2,2026-09-07,4.7,,,,,,,https://www.g2.com/products/taxdome/reviews
+TaxDome,Capterra,2026-09-07,,,,initial setup burden 10-15 hours,,onboarding,medium,https://www.capterra.com/p/186749/TaxDome/reviews/
+TaxDome,Capterra,2026-09-07,,,,pipeline automation is linear-only,,workflow automation,medium,https://www.capterra.com/p/186749/TaxDome/reviews/
+TaxDome,Capterra,2026-09-07,,,,annual upfront billing and Stripe-only payments,,billing,low,https://www.capterra.com/p/186749/TaxDome/reviews/
+MyTAXPrepOffice,Capterra,2026-09-07,4.5,,,,,,,https://www.capterra.com/p/179883/my-TAXprep-office/reviews/
+MyTAXPrepOffice,ComplaintsBoard,2026-09-07,1.0,,,calculation and migration accuracy,,tax calculation,high,https://www.complaintsboard.com/mytaxprepoffice-b135297
+MyTAXPrepOffice,ComplaintsBoard,2026-09-07,,,,unresolved 1065 application error cost a client return,,tax preparation,high,https://www.complaintsboard.com/mytaxprepoffice-b135297
+Financial Cents,Capterra,2026-07-01,4.8,,,slow chat/bot-first support triage,,support,low,https://www.capterra.com/p/186837/Financial-Cents/reviews/
+Financial Cents,financial-cents.com comparison,2026-09-07,,,,,fast onboarding hours to days,onboarding,,https://financial-cents.com/financial-cents-vs-canopy/
+Canopy,Capterra,2026-09-07,4.5,,,setup and workflow configuration time,,onboarding,medium,https://www.capterra.com/p/150647/Canopy-Tax/reviews/
+Karbon,Capterra,2026-03-26,4.7,,,clunky and slow to learn,,onboarding,medium,https://www.capterra.com/p/156181/Karbon/reviews/
+Karbon,financial-cents.com comparison,2026-09-07,,,,vendor feedback loop feels unheard,,product feedback,low,https://financial-cents.com/financial-cents-vs-karbon/
+Xero,Capterra,2026-09-07,4.4,,,support response times and pricing increases,,support/billing,medium,https://www.capterra.com/p/120109/Xero/reviews/
+Xero,Capterra,2026-09-07,,,,multi-currency support limited and costly,,international transactions,low,https://www.capterra.com/p/120109/Xero/reviews/
+Intuit ProConnect Tax,Capterra,2026-09-07,,,,pay-per-return pricing expensive for low volume,,pricing,medium,https://capterra.com/p/249727/ProConnect-Tax/reviews/
+Intuit ProConnect Tax,Capterra,2026-09-07,,,,recent price increases for new integrations,,pricing,medium,https://capterra.com/p/249727/ProConnect-Tax/reviews/
+Drake Tax,thesagenext.com review roundup,2026-09-07,,,,outdated UI needs modernization,,usability,medium,https://www.thesagenext.com/blog/drake-tax-software-review-pricing-features-and-limitations
+Drake Tax,thefinopartners.com review roundup,2026-09-07,,,,price increases and unclear plan/refund terms,,pricing,medium,https://thefinopartners.com/blogs/drake-tax-software-review-2026-pricing-features-limitations
+UltraTax CS,cpafieldguide.com review roundup,2026-09-07,,,,slow performance with large client databases,,performance,medium,https://cpafieldguide.com/tools/ultratax-cs
+UltraTax CS,cpafieldguide.com review roundup,2026-09-07,,,,cannot open multiple returns simultaneously,,workflow,medium,https://cpafieldguide.com/tools/ultratax-cs

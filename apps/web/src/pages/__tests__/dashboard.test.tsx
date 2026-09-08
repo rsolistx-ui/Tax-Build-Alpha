@@ -99,4 +99,52 @@ describe("DashboardPage", () => {
     const link = await screen.findByRole("link", { name: /Missing receipt or evidence/i });
     expect(link).toHaveAttribute("href", "/clients/cli_needs?tab=bank&focus=t1");
   });
+  it("renders Practice OS metrics with deep links into the matching work-queue view", async () => {
+    const { api } = await import("@/lib/api");
+    (api as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      summary: { clients: 1, clientsReady: 1, clientsNeedingAttention: 0, totalOpenActions: 0, receiptsAwaitingReview: 0, missingEvidence: 0, unresolvedBankExceptions: 0, unclassifiedTransactions: 0, uncategorizedActivity: 0, currencyConflicts: 0 },
+      clients: [READY_ROW],
+      actions: [],
+      recentActivity: [],
+      operationsCommandCenter: {
+        openEngagements: 3,
+        waitingOnClientCount: 2,
+        overdueWorkCount: 1,
+        dueTodayWorkCount: 0,
+        dueSoonWorkCount: 4,
+        professionalReviewCount: 5,
+        blockedCount: 0,
+        oldestPendingRequestDays: 9,
+      },
+    });
+    render(
+      <MemoryRouter>
+        <DashboardPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("Open engagements")).toBeInTheDocument();
+    const overdueLink = screen.getByText("Overdue work").closest("a");
+    expect(overdueLink).toHaveAttribute("href", "/work-queue?view=overdue");
+    const waitingLink = screen.getByText("Waiting on client").closest("a");
+    expect(waitingLink).toHaveAttribute("href", "/work-queue?view=waiting_on_client");
+    expect(screen.getByText("9d")).toBeInTheDocument();
+  });
+
+  it("does not render the Practice OS strip when the backend omits operationsCommandCenter", async () => {
+    const { api } = await import("@/lib/api");
+    (api as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      summary: { clients: 1, clientsReady: 1, clientsNeedingAttention: 0, totalOpenActions: 0, receiptsAwaitingReview: 0, missingEvidence: 0, unresolvedBankExceptions: 0, unclassifiedTransactions: 0, uncategorizedActivity: 0, currencyConflicts: 0 },
+      clients: [READY_ROW],
+      actions: [],
+      recentActivity: [],
+    });
+    render(
+      <MemoryRouter>
+        <DashboardPage />
+      </MemoryRouter>,
+    );
+    await screen.findByText("Clients");
+    expect(screen.queryByText("Open engagements")).not.toBeInTheDocument();
+  });
 });
