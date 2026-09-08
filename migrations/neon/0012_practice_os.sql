@@ -241,19 +241,19 @@ CREATE TABLE IF NOT EXISTS request_messages (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-DO $ BEGIN
+DO $$ BEGIN
   ALTER TABLE request_messages
     ADD CONSTRAINT fk_messages_request_same_client
     FOREIGN KEY (request_id, client_id) REFERENCES client_requests(id, client_id) ON DELETE CASCADE;
 EXCEPTION WHEN duplicate_object THEN NULL;
-END $;
+END $$;
 
-DO $ BEGIN
+DO $$ BEGIN
   ALTER TABLE request_messages
     ADD CONSTRAINT fk_messages_client_same_firm
     FOREIGN KEY (client_id, firm_id) REFERENCES clients(id, firm_id) ON DELETE CASCADE;
 EXCEPTION WHEN duplicate_object THEN NULL;
-END $;
+END $$;
 
 DO $$ BEGIN
   ALTER TABLE request_messages

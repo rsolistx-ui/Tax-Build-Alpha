@@ -79,8 +79,27 @@ test("migration 0012 defines the race-safe partial unique index for exception-re
 });
 
 test("migration 0012 contains no malformed single-dollar anonymous DO blocks", () => {
-  assert.doesNotMatch(sql, /DO $ BEGIN/, "found a malformed 'DO $ BEGIN' - anonymous blocks must use $$ dollar-quoting");
-  assert.doesNotMatch(sql, /END $;/, "found a malformed 'END $;' - anonymous blocks must close with $$;");
+  // A single literal $ (not $$) immediately followed by BEGIN, or a single
+  // literal $ (not $$) immediately followed by ;, is invalid anonymous-
+  // block dollar-quoting. The negative lookahead (?!\$) is what makes this
+  // detect a lone $ without also matching (and false-flagging) a valid $$
+  // pair - a bare /DO \$ BEGIN/ would never match anything at all, since an
+  // unescaped $ in a JS regex is the end-of-string anchor, not a literal
+  // dollar sign; that silent no-op was the exact defect that let the real
+  // malformed migration blocks ship undetected.
+  const malformedOpen = /DO \$(?!\$)\s*BEGIN/;
+  const malformedClose = /END \$(?!\$)\s*;/;
+  assert.doesNotMatch(sql, malformedOpen, "found a malformed 'DO $ BEGIN' (single-dollar) - anonymous blocks must use $$ dollar-quoting");
+  assert.doesNotMatch(sql, malformedClose, "found a malformed 'END $;' (single-dollar) - anonymous blocks must close with $$;");
+});
+
+test("the malformed-single-dollar detector above actually distinguishes $ from $$ (regression guard for the detector itself)", () => {
+  const malformedOpen = /DO \$(?!\$)\s*BEGIN/;
+  const malformedClose = /END \$(?!\$)\s*;/;
+  assert.match("DO $ BEGIN", malformedOpen, "the detector must actually match a real single-dollar DO block");
+  assert.match("END $;", malformedClose, "the detector must actually match a real single-dollar END");
+  assert.doesNotMatch("DO $$ BEGIN", malformedOpen, "the detector must not false-positive on a valid double-dollar DO block");
+  assert.doesNotMatch("END $$;", malformedClose, "the detector must not false-positive on a valid double-dollar END");
 });
 
 
