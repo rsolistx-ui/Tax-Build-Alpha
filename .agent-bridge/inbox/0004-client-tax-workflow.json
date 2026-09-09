@@ -1,0 +1,11 @@
+{
+  "id": "0004-client-tax-workflow",
+  "project": "Tax-Build-Alpha",
+  "repo": "rsolistx-ui/Tax-Build-Alpha",
+  "instruction": "Start only after task 0003-premium-command-center completes successfully. Implement the premium client and tax-workflow operating layer described by the blueprint. Strengthen Client 360, service engagements, tax-year readiness, reusable organizers/checklists, secure document requests, evidence intake, missing-information workflows, reminders, status visibility, extensions tracking, review/approval states, client-visible next actions, secure messaging, portal document delivery, and white-label portal experience. Add reusable workflow templates for common individual and business tax engagements while keeping the professional in control of substantive tax decisions. Where e-signature, tax-preparation, e-file, IRS transcript, payment, or external accounting capabilities require established providers, implement clean provider abstractions/adapters and status-import/export flows instead of inventing unvalidated tax or filing logic. Make the client experience extremely simple on desktop and mobile, with one clear task list and progress view. Maintain audit trails, tenant safety, and closed-state protections. Add meaningful tests for workflow transitions, reminders, client actions, portal security, and data isolation. Run full verification, commit, and push to main. Do not deploy production.",
+  "mode": "work",
+  "network": true,
+  "production_authorized": false,
+  "commit_push": true,
+  "max_minutes": 360
+}
