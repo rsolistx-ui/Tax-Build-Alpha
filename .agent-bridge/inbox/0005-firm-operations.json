@@ -1,0 +1,11 @@
+{
+  "id": "0005-firm-operations",
+  "project": "Tax-Build-Alpha",
+  "repo": "rsolistx-ui/Tax-Build-Alpha",
+  "instruction": "Start only after task 0004-client-tax-workflow completes successfully. Implement the remaining firm-operations capabilities from the premium product blueprint. Add or strengthen proposals and engagement tracking, recurring service workflows, team assignment and capacity, due-date workload views, firm reporting, client communication history, notification center, and modular integration boundaries for QuickBooks, tax-preparation software, IRS transcript workflows, and filing-status imports where public integration paths exist. Keep external-provider integrations modular and provider-neutral. Do not create unsupported tax-preparation or filing logic. Every dashboard metric must have a clear operational meaning and drill into the underlying records. Maintain tenant isolation, auditability, idempotency, and fail-closed behavior. Add tests for workflow metrics, capacity calculations, integration contracts, and tenant boundaries. Run full typecheck, tests, build, and Wrangler dry-run. Commit and push to main. Do not deploy production.",
+  "mode": "work",
+  "network": true,
+  "production_authorized": false,
+  "commit_push": true,
+  "max_minutes": 360
+}
