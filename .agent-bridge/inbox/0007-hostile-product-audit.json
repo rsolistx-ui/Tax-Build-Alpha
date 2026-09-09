@@ -1,0 +1,11 @@
+{
+  "id": "0007-hostile-product-audit",
+  "project": "Tax-Build-Alpha",
+  "repo": "rsolistx-ui/Tax-Build-Alpha",
+  "instruction": "Start only after task 0006-premium-polish-desktop completes successfully. Conduct an independent hostile pre-production audit of the upgraded Folio product. Re-check current public competitor capabilities for TaxDome, Canopy, Karbon, Financial Cents and other relevant tax-practice platforms and compare Folio against the blueprint. Audit product completeness, workflow correctness, tenant isolation, authorization, audit trails, state machines, document security, portal security, metric correctness, accessibility, responsive behavior, performance, Windows packaging, migration safety, deploy safety, smoke coverage, and whether dashboards are meaningful rather than decorative. Identify any BLOCKER or MATERIAL issue and fix it in this task using fail-before/pass-after regression proof, then rerun the full verification suite. Repeat within this task until no BLOCKER or MATERIAL findings remain or until max time is reached. Do not deploy production. Final result must clearly state READY FOR CONTROLLED PRODUCTION RELEASE only if code, tests, migrations, build, Windows package, and product-quality audit are all clean. Commit and push all verified fixes to main.",
+  "mode": "work",
+  "network": true,
+  "production_authorized": false,
+  "commit_push": true,
+  "max_minutes": 420
+}
