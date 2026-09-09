@@ -1,0 +1,12 @@
+{
+  "id": "0001-folio-finish-release",
+  "project": "Tax-Build-Alpha",
+  "repo": "rsolistx-ui/Tax-Build-Alpha",
+  "expected_sha": "c65c9127e05cbb96d7faf95d28b89731fcfc88ae",
+  "instruction": "Finish the already-approved Folio Practice OS production release end to end without asking the user to relay commands between chats. First verify main is clean and exactly at expected_sha. Treat the previously printed Neon DATABASE_URL as compromised and never reuse, print, log, commit, or report it. If the currently deployed Worker still depends on that credential, rotate the existing folio-alpha production database role password using a command path that suppresses all secret output, capture the replacement pooled URL only in process memory, update the existing Cloudflare DATABASE_URL Worker secret without echoing it, and verify health. Do not recreate infrastructure or rotate unrelated secrets. Then run the repository's narrow production sequence only: Neon migrations, Neon schema verification, Worker/API+SPA deploy, production health, synthetic production smoke, expired portal link 401, revoked portal link 401, synthetic cleanup, final schema verification, final health, and repository integrity. Fail closed at the first failed gate and do not improvise destructive repairs. Never touch Phyllis or real client data. Do not run bootstrap-production.ps1. Do not begin Accounting OS. GitHub verify and windows-build for expected_sha have already been independently confirmed successful. Commit/push only if an actual source-code fix is required by a newly discovered deterministic defect; if so, run full tests and wait for CI using git/GitHub-visible mechanisms before production continuation. At completion, write a concise result with exact deployed SHA, migration/schema/deploy/smoke/cleanup verdicts, any blockers, and final verdict PRACTICE OS PRODUCTION RELEASE VERIFIED or PRODUCTION RELEASE INCOMPLETE.",
+  "mode": "release",
+  "network": true,
+  "production_authorized": true,
+  "commit_push": true,
+  "max_minutes": 180
+}
