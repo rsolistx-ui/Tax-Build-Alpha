@@ -92,6 +92,9 @@ clientRequestRoutes.post("/:clientId/requests/:requestId/satisfy", async (c) => 
 
   const existing = await loadOwnedRequest(db, c.req.param("requestId"), client.id, firm.id);
   if (!existing) return c.json({ error: "Not found" }, 404);
+  if (existing.status === "satisfied" || existing.status === "cancelled") {
+    return c.json({ error: "This request is already closed" }, 409);
+  }
 
   const request = await satisfyRequest(db, existing.id, firm.id, c.get("userId"));
   return c.json({ request });

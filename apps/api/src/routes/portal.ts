@@ -93,6 +93,9 @@ const messageSchema = z.object({ body: z.string().trim().min(1).max(4000) });
 portalRoutes.post("/requests/:requestId/messages", async (c) => {
   const request = await loadPortalRequest(c, c.req.param("requestId"));
   if (!request) return c.json({ error: "Not found" }, 404);
+  if (request.status === "satisfied" || request.status === "cancelled") {
+    return c.json({ error: "This request is already closed" }, 409);
+  }
 
   const db = createDb(c.env);
   const body = messageSchema.parse(await c.req.json());
