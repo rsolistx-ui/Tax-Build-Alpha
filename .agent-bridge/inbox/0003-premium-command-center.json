@@ -1,0 +1,11 @@
+{
+  "id": "0003-premium-command-center",
+  "project": "Tax-Build-Alpha",
+  "repo": "rsolistx-ui/Tax-Build-Alpha",
+  "instruction": "Start only after task 0002-premium-tax-product completes successfully. Read its blueprint and inspect the current Folio app. Implement the premium firm command center and design system as the first major product upgrade. Build a role-appropriate home experience that is immediately useful to a tax professional, not a generic SaaS dashboard. Include real or derivable metrics for tax-year readiness, returns by stage, approaching deadlines, extensions, missing documents, unresolved client requests, client responsiveness, work-item aging, team capacity where data exists, billing/AR where data exists, exceptions requiring judgment, and recent progress. Every card and chart must answer a real operating question and drill into the underlying work. Add strong visual hierarchy, purposeful color semantics, excellent typography and spacing, polished responsive behavior, accessible contrast, useful motion, first-rate empty/loading/error states, and consistent design tokens/components. Do not fabricate production metrics; show honest empty states or clearly labeled demo fixtures only in tests/dev. Preserve tenant isolation and current security contracts. Add tests for metric derivation, navigation, and critical dashboard states. Run full typecheck, tests, production build, and Wrangler dry-run. Commit and push to main. Do not deploy production.",
+  "mode": "work",
+  "network": true,
+  "production_authorized": false,
+  "commit_push": true,
+  "max_minutes": 300
+}
