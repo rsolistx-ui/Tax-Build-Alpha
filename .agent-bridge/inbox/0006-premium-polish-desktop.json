@@ -1,0 +1,11 @@
+{
+  "id": "0006-premium-polish-desktop",
+  "project": "Tax-Build-Alpha",
+  "repo": "rsolistx-ui/Tax-Build-Alpha",
+  "instruction": "Start only after task 0005-firm-operations completes successfully. Perform a full premium-polish pass across the web app, client portal, and Windows desktop package. The target reaction is immediate confidence and delight from a professional tax-firm owner on first launch. Refine visual hierarchy, spacing, typography, purposeful color semantics, charts, table density, filters, drill-downs, navigation, onboarding, empty states, loading states, errors, success feedback, notifications, responsive behavior, keyboard/accessibility support, and subtle motion. Remove generic admin-template or generic AI-dashboard styling. Keep screens information-rich but calm and legible. Ensure every chart and KPI has a real definition and useful action path. Polish white-label client-facing surfaces separately from firm-facing surfaces. Improve first-run desktop experience and Tauri packaging without weakening security. Add or strengthen visual/interaction tests supported by the repo, accessibility checks, performance checks, and Windows build verification. Run full tests, typecheck, production build, Wrangler dry-run, Rust tests, and Windows packaging checks. Commit and push to main. Do not deploy production.",
+  "mode": "work",
+  "network": true,
+  "production_authorized": false,
+  "commit_push": true,
+  "max_minutes": 360
+}
