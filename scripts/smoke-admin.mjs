@@ -89,6 +89,18 @@ if (command === "seed-invite") {
      ORDER BY c.created_at`,
   );
   console.log(JSON.stringify({ rows: result.rows ?? [] }));
+} else if (command === "inventory-smoke-firms") {
+  // Recovery-only inventory for an interrupted smoke run. It returns no
+  // credentials or customer data: just the synthetic tenant identifiers
+  // required by the Worker cleanup endpoint.
+  const result = await query(
+    `SELECT f.id AS firm_id, f.name AS firm_name, bi.email
+     FROM firms f
+     JOIN beta_invitations bi ON bi.redeemed_by_user_id = f.owner_user_id
+     WHERE bi.email LIKE 'folio-smoke-%@example.com'
+     ORDER BY f.created_at`,
+  );
+  console.log(JSON.stringify({ rows: result.rows ?? [] }));
 } else if (command === "cascade-delete-test") {
   // Live proof (not just schema inspection) that migration 0011's
   // column-specific ON DELETE SET NULL constraints behave correctly:
@@ -249,6 +261,6 @@ if (command === "seed-invite") {
   console.log(JSON.stringify({ expired: updated.length > 0, linkId }));
   if (updated.length === 0) process.exit(1);
 } else {
-  console.error("Unknown command. Use: seed-invite | revoke-by-email | find-firm-id-by-email | inventory-smoke-clients | cascade-delete-test | verify-clean | expire-portal-link");
+  console.error("Unknown command. Use: seed-invite | revoke-by-email | find-firm-id-by-email | inventory-smoke-clients | inventory-smoke-firms | cascade-delete-test | verify-clean | expire-portal-link");
   process.exit(1);
 }

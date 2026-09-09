@@ -13,6 +13,8 @@ Set-StrictMode -Version Latest
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $configPath = Join-Path $repoRoot "apps\api\wrangler.toml"
 $smokeScriptPath = Join-Path $repoRoot "scripts\smoke-production.ps1"
+$smokeTokenHelperPath = Join-Path $repoRoot "scripts\get-smoke-cleanup-token.ps1"
+$storeSmokeTokenPath = Join-Path $repoRoot "scripts\store-smoke-cleanup-token.ps1"
 
 function Assert-ExitCode([string]$Step) {
   if ($LASTEXITCODE -ne 0) {
@@ -324,6 +326,17 @@ try {
   Patch-WorkerConfig -DatabaseId $databaseId -WorkerUrl $workerUrl
   Set-WorkerSecret "BETTER_AUTH_SECRET" (New-RandomSecret)
   Set-WorkerSecret "DATABASE_URL" $databaseUrl
+
+  # The production smoke harness will not create a synthetic tenant unless it
+  # can later clean it up. Keep this secret encrypted for the current Windows
+  # user (DPAPI) and install the identical value on the Worker.
+  . $smokeTokenHelperPath
+  if (-not (Import-SmokeCleanupToken)) {
+    $env:SMOKE_CLEANUP_TOKEN = New-RandomSecret
+    & $storeSmokeTokenPath
+    Assert-ExitCode "Persisting smoke cleanup token"
+  }
+  Set-WorkerSecret "SMOKE_CLEANUP_TOKEN" $env:SMOKE_CLEANUP_TOKEN
 
   if (-not [string]::IsNullOrWhiteSpace($env:GEMINI_API_KEY)) {
     Write-Host "Configuring optional Gemini fallback from GEMINI_API_KEY..."

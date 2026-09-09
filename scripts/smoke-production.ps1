@@ -133,6 +133,7 @@ $cookieJar = Join-Path $env:TEMP "folio-smoke-cookies-$([guid]::NewGuid().ToStri
 $generatedReceipt = $false
 $firmId = $null
 $ownerUserId = $null
+$firmCId = $null
 $clientPayloadPath = ""
 $approvePayloadPath = ""
 $bankDecisionPayloadPath = ""
@@ -1786,6 +1787,7 @@ try {
     if (($cleanupCProps -contains "r2Failures") -and @($cleanupCResult.r2Failures).Count -gt 0) { throw "Second-tenant cleanup could not remove R2 object(s): $($cleanupCResult.r2Failures -join ', ')" }
     if (($cleanupCProps -contains "authFailures") -and @($cleanupCResult.authFailures).Count -gt 0) { throw "Second-tenant cleanup could not remove the synthetic auth account: $($cleanupCResult.authFailures -join ', ')" }
     if (($cleanupCProps -contains "betaMetadataFailures") -and @($cleanupCResult.betaMetadataFailures).Count -gt 0) { throw "Second-tenant cleanup could not remove beta security metadata: $($cleanupCResult.betaMetadataFailures -join ', ')" }
+    $firmCId = $null
 
   }
   Remove-TempFile $cookieJarC
@@ -1851,6 +1853,28 @@ try {
   Remove-TempFile $bankExceptionCsvPath
   if ($generatedReceipt) {
     Remove-TempFile $ReceiptPath
+  }
+
+  # The second tenant is normally removed immediately after the isolation
+  # checks. Keep a finally-path cleanup as well: an assertion failure in the
+  # Practice OS portion must not strand it or conceal the original failure
+  # behind a later global-residue error.
+  if ($firmCId -and $env:SMOKE_CLEANUP_TOKEN) {
+    try {
+      Write-Host "Cleaning up interrupted second synthetic tenant $firmCId..."
+      $cleanupCBody = @{ firmId = $firmCId } | ConvertTo-Json -Compress
+      $cleanupCPayloadPath = New-JsonPayloadFile $cleanupCBody
+      $cleanupCResult = Invoke-CurlJson @(
+        "-H", "Content-Type: application/json",
+        "-H", "X-Internal-Token: $($env:SMOKE_CLEANUP_TOKEN)",
+        "--data-binary", "@$cleanupCPayloadPath",
+        "$BaseUrl/api/internal/smoke-cleanup"
+      )
+      if (-not $cleanupCResult.removed) { throw "Cleanup endpoint did not report removal for second-tenant firm $firmCId." }
+      $firmCId = $null
+    } finally {
+      Remove-TempFile $cleanupCPayloadPath
+    }
   }
 
   if ($firmId) {
