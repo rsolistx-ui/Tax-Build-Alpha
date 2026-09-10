@@ -163,6 +163,18 @@ export async function ingestReceiptForClient(
           WHERE id = $3 AND client_id = $4`,
         params: [receiptId, actorUserId, bankTransactionId, client.id],
       });
+      statements.push({
+        query: `INSERT INTO audit_events
+          (id, client_id, receipt_id, actor_user_id, action, after_json)
+          VALUES ($1, $2, $3, $4, 'bank_receipt_linked_pending_review', $5::jsonb)`,
+        params: [
+          newId("aud"),
+          client.id,
+          receiptId,
+          actorUserId,
+          { id: bankTransactionId, transactionId: bankTransactionId, pendingReceiptId: receiptId, triage: "receipt_pending" },
+        ],
+      });
     }
 
     await db.transaction(statements);
