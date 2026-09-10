@@ -275,6 +275,28 @@ try {
     throw "Smoke test stopped before filing. Review the source evidence instead of overriding automatically."
   }
 
+  Write-Host "Verifying the event-driven AI supervisor's completed and approval-gated work..."
+  $receiptAgentTasks = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/agent-tasks")
+  $intakeTask = @($receiptAgentTasks.tasks) | Where-Object { $_.source_id -eq $receiptId -and $_.agent_name -eq "intake_specialist" } | Select-Object -First 1
+  $categoryTask = @($receiptAgentTasks.tasks) | Where-Object { $_.source_id -eq $receiptId -and $_.agent_name -eq "practice_coordinator" } | Select-Object -First 1
+  if (-not $intakeTask -or $intakeTask.status -ne "completed" -or $intakeTask.autonomy -ne "autonomous") {
+    throw "Receipt upload did not create the completed autonomous intake task."
+  }
+  if (-not $categoryTask -or $categoryTask.status -ne "awaiting_approval" -or $categoryTask.autonomy -ne "approval_required") {
+    throw "Receipt categorization was not held for professional approval."
+  }
+  $agentApprovalBody = @{ action = "approve"; note = "Smoke test: professional reviewed recommendation" } | ConvertTo-Json -Compress
+  $agentApprovalPayloadPath = New-JsonPayloadFile $agentApprovalBody
+  $approvedAgentTask = Invoke-CurlJson @(
+    "-c", $cookieJar, "-b", $cookieJar, "-H", "Content-Type: application/json",
+    "-X", "PATCH", "--data-binary", "@$agentApprovalPayloadPath",
+    "$BaseUrl/api/clients/$clientId/agent-tasks/$($categoryTask.id)"
+  )
+  Remove-TempFile $agentApprovalPayloadPath
+  if ($approvedAgentTask.task.status -ne "approved") {
+    throw "Professional approval of the agent recommendation was not persisted."
+  }
+
   Write-Host "Filing the validated receipt..."
   $approveBody = @{ confirmOverride = $false } | ConvertTo-Json -Compress
   $approvePayloadPath = New-JsonPayloadFile $approveBody
@@ -361,6 +383,11 @@ try {
   )
   if ($bankImport.insertedCount -ne 1 -or $bankImport.duplicateCount -ne 0) {
     throw "Initial bank CSV import did not insert exactly one normalized transaction."
+  }
+  $bankAgentTasks = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/agent-tasks")
+  $bankTriageTask = @($bankAgentTasks.tasks) | Where-Object { $_.source_id -eq $bankImport.importBatchId -and $_.agent_name -eq "reconciliation_specialist" } | Select-Object -First 1
+  if (-not $bankTriageTask -or $bankTriageTask.status -ne "awaiting_approval" -or $bankTriageTask.autonomy -ne "approval_required") {
+    throw "Bank import triage was not held for professional approval."
   }
 
   $duplicateImport = Invoke-CurlJson @(
