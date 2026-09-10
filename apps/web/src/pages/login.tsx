@@ -1,6 +1,6 @@
 import type { FormEvent } from "react";
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { authClient } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -74,12 +74,7 @@ export function LoginPage() {
                 {loading ? "Signing in…" : "Sign in"}
               </Button>
             </form>
-            <p className="mt-4 text-center text-sm text-[var(--color-muted-foreground)]">
-              New firm?{" "}
-              <Link className="font-medium text-[var(--color-foreground)] underline-offset-4 hover:underline" to="/signup">
-                Create an account
-              </Link>
-            </p>
+            <p className="mt-4 text-center text-sm text-[var(--color-muted-foreground)]">Folio beta is invitation-only. Use the secure invitation link sent by your firm.</p>
           </CardContent>
         </Card>
       </div>

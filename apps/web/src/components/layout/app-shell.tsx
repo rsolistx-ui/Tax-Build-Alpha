@@ -1,8 +1,10 @@
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
-import { Building2, ClipboardList, LayoutDashboard, LogOut, ShieldCheck, Users } from "lucide-react";
+import { Building2, ClipboardList, LayoutDashboard, LogOut, Map, ShieldCheck, Users } from "lucide-react";
+import { useEffect, useState } from "react";
 import { authClient } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { shouldShowWelcomeTour, WelcomeTour } from "@/components/welcome-tour";
 
 export function AppShell({
   firmName,
@@ -14,6 +16,9 @@ export function AppShell({
   isOwner?: boolean;
 }) {
   const navigate = useNavigate();
+  const [tourOpen, setTourOpen] = useState(false);
+
+  useEffect(() => setTourOpen(shouldShowWelcomeTour()), []);
 
   async function signOut() {
     await authClient.signOut();
@@ -100,6 +105,7 @@ export function AppShell({
                 {firmName}
               </span>
             ) : null}
+            <button onClick={() => setTourOpen(true)} className="hidden items-center gap-1.5 text-xs text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)] sm:inline-flex"><Map className="h-3.5 w-3.5" /> Guide</button>
             <span className="text-sm text-[var(--color-muted-foreground)]">{userName}</span>
             <Button variant="ghost" size="icon" onClick={signOut} aria-label="Sign out">
               <LogOut className="h-4 w-4" />
@@ -107,9 +113,17 @@ export function AppShell({
           </div>
         </div>
       </header>
-      <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
+      <main className="mx-auto max-w-6xl px-4 py-6 pb-24 sm:px-6 sm:py-8">
         <Outlet />
       </main>
+      <nav className="fixed inset-x-3 bottom-3 z-30 grid grid-cols-3 rounded-2xl border border-[var(--color-border)] bg-[var(--color-card)]/95 p-1 shadow-lg backdrop-blur sm:hidden" aria-label="Primary navigation">
+        {[
+          { to: "/", label: "Operations", icon: LayoutDashboard, end: true },
+          { to: "/clients", label: "Clients", icon: Users },
+          { to: "/work-queue", label: "Work queue", icon: ClipboardList },
+        ].map(({ to, label, icon: Icon, end }) => <NavLink key={to} to={to} end={end} className={({ isActive }) => cn("flex flex-col items-center gap-1 rounded-xl px-2 py-2 text-[10px] font-medium text-[var(--color-muted-foreground)]", isActive && "bg-[#14201c] text-white")}><Icon className="h-4 w-4" />{label}</NavLink>)}
+      </nav>
+      <WelcomeTour forceOpen={tourOpen} onClose={() => setTourOpen(false)} />
     </div>
   );
 }

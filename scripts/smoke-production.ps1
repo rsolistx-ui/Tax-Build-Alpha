@@ -24,7 +24,7 @@ if (-not $env:SMOKE_CLEANUP_TOKEN) {
   exit 1
 }
 
-function Invoke-CurlJson([string[]]$CurlArgs) {
+function Invoke-CurlJson([string[]]$CurlArgs, [int]$Attempt = 0) {
   $previousPreference = $ErrorActionPreference
   $ErrorActionPreference = "Continue"
   try {
@@ -46,6 +46,16 @@ function Invoke-CurlJson([string[]]$CurlArgs) {
   $statusCode = 0
   if (-not [int]::TryParse($statusText, [ref]$statusCode)) {
     throw "Could not parse HTTP status '$statusText'. Response: $body"
+  }
+
+  # A Cloudflare edge 502/503/504 is infrastructure-transient, not a passed
+  # application assertion. Retry a bounded number of times so the release
+  # proof is resilient without masking a persistent product failure.
+  if (($statusCode -eq 502 -or $statusCode -eq 503 -or $statusCode -eq 504) -and $Attempt -lt 3) {
+    $delaySeconds = [Math]::Pow(2, $Attempt + 1)
+    Write-Host "Transient HTTP $statusCode; retrying in $delaySeconds second(s) ($($Attempt + 1)/3)..." -ForegroundColor Yellow
+    Start-Sleep -Seconds $delaySeconds
+    return Invoke-CurlJson $CurlArgs ($Attempt + 1)
   }
 
   if ($exitCode -ne 0 -or $statusCode -ge 400) {
