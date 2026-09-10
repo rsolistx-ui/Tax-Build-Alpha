@@ -11,7 +11,8 @@ APP_ORIGIN = "https://folio-api.rsolistx.workers.dev"
 # Secrets:
 #   BETTER_AUTH_SECRET   Better Auth encryption/session secret
 #   DATABASE_URL        Neon pooled PostgreSQL connection string
-#   GEMINI_API_KEY      Optional fallback if Workers AI extraction fails
+#   GROQ_API_KEY        Optional Groq vision fallback if Workers AI extraction fails
+#   GEMINI_API_KEY      Optional Gemini fallback if Workers AI extraction fails
 
 # D1 is intentionally auth-only in the married architecture.
 # Existing app tables from the original alpha may remain but are no longer read.

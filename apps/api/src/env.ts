@@ -24,6 +24,8 @@ export type Env = {
   BETTER_AUTH_URL: string;
   APP_ORIGIN?: string;
   GEMINI_API_KEY?: string;
+  /** Optional Groq OpenAI-compatible vision fallback. Worker secret only. */
+  GROQ_API_KEY?: string;
   LLM_PROVIDER?: string;
   /** Case-insensitive email identifying the beta owner/operator. Set as a Worker secret, never hardcoded. */
   OWNER_EMAIL?: string;

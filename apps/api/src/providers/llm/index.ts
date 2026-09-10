@@ -1,5 +1,6 @@
 import type { Env } from "../../env";
 import { createGeminiProvider } from "./gemini";
+import { createGroqProvider } from "./groq";
 import { mockProvider } from "./mock";
 import { createWorkersAiProvider } from "./workers-ai";
 import type { LlmProvider } from "./types";
@@ -15,10 +16,15 @@ export function getLlmProvider(env: Env): LlmProvider {
     if (!env.GEMINI_API_KEY) throw new Error("LLM_PROVIDER=gemini requires GEMINI_API_KEY");
     return createGeminiProvider(env.GEMINI_API_KEY);
   }
+  if (mode === "groq") {
+    if (!env.GROQ_API_KEY) throw new Error("LLM_PROVIDER=groq requires GROQ_API_KEY");
+    return createGroqProvider(env.GROQ_API_KEY);
+  }
 
   if (mode === "workers-ai") {
     const providers: LlmProvider[] = [];
     if (env.AI) providers.push(createWorkersAiProvider(env.AI));
+    if (env.GROQ_API_KEY) providers.push(createGroqProvider(env.GROQ_API_KEY));
     if (env.GEMINI_API_KEY) providers.push(createGeminiProvider(env.GEMINI_API_KEY));
     if (providers.length === 0) {
       throw new Error("Workers AI binding is missing and no Gemini fallback is configured");

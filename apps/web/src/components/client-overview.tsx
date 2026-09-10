@@ -99,6 +99,16 @@ function Metric({ label, value, tone }: { label: string; value: string | number;
 }
 
 type TimelineEvent = { id: string; action: string; summary: string; actorUserId: string | null; createdAt: string };
+type AgentTask = {
+  id: string;
+  agent_name: string;
+  action_type: string;
+  autonomy: "autonomous" | "approval_required";
+  status: string;
+  confidence: number | null;
+  recommendation_json: Record<string, unknown>;
+  created_at: string;
+};
 
 export function ClientOverview({ clientId, onNavigate }: { clientId: string; onNavigate: (deepLink: string) => void }) {
   const [overview, setOverview] = useState<Overview | null>(null);
@@ -110,6 +120,8 @@ export function ClientOverview({ clientId, onNavigate }: { clientId: string; onN
   const [categories, setCategories] = useState<CategoryOption[]>([]);
   const [categorizeDrafts, setCategorizeDrafts] = useState<Record<string, string>>({});
   const [categorizingId, setCategorizingId] = useState<string | null>(null);
+  const [agentTasks, setAgentTasks] = useState<AgentTask[]>([]);
+  const [resolvingAgentTask, setResolvingAgentTask] = useState<string | null>(null);
 
   const { startDate, endDate } = useMemo(() => {
     if (preset === "custom") return { startDate: customStart, endDate: customEnd };
@@ -132,6 +144,27 @@ export function ClientOverview({ clientId, onNavigate }: { clientId: string; onN
       .then((data) => setCategories(data.categories))
       .catch(() => setCategories([]));
   }, [clientId]);
+
+  const refreshAgentTasks = () => api<{ tasks: AgentTask[] }>(`/api/clients/${clientId}/agent-tasks`)
+    .then((data) => setAgentTasks(Array.isArray(data?.tasks) ? data.tasks : []))
+    .catch(() => setAgentTasks([]));
+
+  useEffect(() => { void refreshAgentTasks(); }, [clientId]);
+
+  async function reviewAgentTask(task: AgentTask, action: "approve" | "dismiss") {
+    setResolvingAgentTask(task.id);
+    try {
+      await api(`/api/clients/${clientId}/agent-tasks/${task.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ action, note: action === "approve" ? "Professional reviewed the recommendation." : "Professional dismissed the recommendation." }),
+      });
+      await refreshAgentTasks();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to update the agent recommendation");
+    } finally {
+      setResolvingAgentTask(null);
+    }
+  }
 
   /**
    * The narrow, auditable correction path for uncategorized_receipt_evidence
@@ -239,6 +272,38 @@ export function ClientOverview({ clientId, onNavigate }: { clientId: string; onN
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardContent className="space-y-3 p-4">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <h3 className="text-sm font-semibold">Agent Desk</h3>
+              <p className="text-xs text-[var(--color-muted-foreground)]">Event-triggered work completed by Folio, plus recommendations requiring your review.</p>
+            </div>
+            <Badge>{agentTasks.filter((task) => task.status === "awaiting_approval").length} to review</Badge>
+          </div>
+          {agentTasks.length === 0 ? (
+            <p className="text-sm text-[var(--color-muted-foreground)]">No agent work has been triggered for this client yet.</p>
+          ) : (
+            <div className="divide-y divide-[var(--color-border)]">
+              {agentTasks.slice(0, 8).map((task) => {
+                const recommendation = Object.entries(task.recommendation_json ?? {}).filter(([key]) => key !== "reason").map(([key, value]) => `${key.replace(/([A-Z])/g, " $1")}: ${String(value)}`).join(" · ");
+                const waiting = task.status === "awaiting_approval";
+                return <div key={task.id} className="flex flex-wrap items-center justify-between gap-3 py-2 text-sm">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2"><Badge>{task.agent_name.replace(/_/g, " ")}</Badge><span className="font-medium">{task.action_type.replace(/_/g, " ")}</span></div>
+                    <p className="mt-1 truncate text-xs text-[var(--color-muted-foreground)]">{recommendation || "No additional recommendation."}{task.confidence !== null ? ` · ${Math.round(task.confidence * 100)}% confidence` : ""}</p>
+                  </div>
+                  {waiting ? <div className="flex gap-2">
+                    <Button size="sm" variant="secondary" disabled={resolvingAgentTask === task.id} onClick={() => void reviewAgentTask(task, "dismiss")}>Dismiss</Button>
+                    <Button size="sm" disabled={resolvingAgentTask === task.id} onClick={() => void reviewAgentTask(task, "approve")}>Review recommendation</Button>
+                  </div> : <span className="text-xs text-[var(--color-muted-foreground)]">{task.status.replace(/_/g, " ")}</span>}
+                </div>;
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardContent className="space-y-2 p-4">
