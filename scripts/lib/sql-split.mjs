@@ -9,9 +9,17 @@ export function splitSqlStatements(text) {
   let i = 0;
   let dollarTag = null;
   let inSingleQuote = false;
+  let inLineComment = false;
 
   while (i < text.length) {
     const ch = text[i];
+
+    if (inLineComment) {
+      current += ch;
+      if (ch === "\n") inLineComment = false;
+      i += 1;
+      continue;
+    }
 
     if (dollarTag) {
       if (text.startsWith(dollarTag, i)) {
@@ -28,6 +36,13 @@ export function splitSqlStatements(text) {
     if (inSingleQuote) {
       current += ch;
       if (ch === "'") {
+        // PostgreSQL escapes a quote inside a literal by doubling it. Do
+        // not terminate the literal on the first quote of that pair.
+        if (text[i + 1] === "'") {
+          current += "'";
+          i += 2;
+          continue;
+        }
         inSingleQuote = false;
       }
       i += 1;
@@ -38,6 +53,16 @@ export function splitSqlStatements(text) {
       inSingleQuote = true;
       current += ch;
       i += 1;
+      continue;
+    }
+
+    // Migration prose regularly contains apostrophes.  Treat it as a SQL
+    // comment before considering quote or delimiter syntax so comments can
+    // never corrupt statement boundaries.
+    if (ch === "-" && text[i + 1] === "-") {
+      current += "--";
+      i += 2;
+      inLineComment = true;
       continue;
     }
 

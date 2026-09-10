@@ -118,6 +118,18 @@ const checks = [
     query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'work_audit_events'`,
   },
   {
+    label: "agent_tasks table (event-driven supervisor, migration 0013)",
+    query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'agent_tasks'`,
+  },
+  {
+    label: "agent task source/agent idempotency guard (migration 0013)",
+    query: `SELECT 1 FROM pg_constraint WHERE conname = 'uq_agent_tasks_source_agent'`,
+  },
+  {
+    label: "agent tasks tenant-safe client relationship (migration 0013)",
+    query: `SELECT 1 FROM pg_constraint WHERE conname = 'fk_agent_tasks_client_same_firm'`,
+  },
+  {
     label: "uq_clients_id_firm unique constraint (tenant-safety anchor for clients) (migration 0012)",
     query: `SELECT 1 FROM pg_constraint WHERE conname = 'uq_clients_id_firm'`,
   },

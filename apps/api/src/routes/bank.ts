@@ -18,6 +18,7 @@ import {
   suggestReceiptMatch,
   type ReceiptMatchCandidate,
 } from "../services/bank-reconciliation";
+import { delegateBankImportAgent } from "../services/agent-supervisor";
 
 export const bankRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 bankRoutes.use("*", requireSession);
@@ -328,6 +329,19 @@ bankRoutes.post("/:clientId/bank-transactions/import", async (c) => {
       },
     ],
   );
+  try {
+    await delegateBankImportAgent(db, {
+      firmId: client.firm_id,
+      clientId: client.id,
+      importBatchId,
+      insertedCount,
+      duplicateCount,
+    });
+  } catch (error) {
+    // The import and its audit event are committed; return their durable
+    // result and retain an actionable Worker log for the optional hand-off.
+    console.error(`agent supervisor delegation failed for bank import ${importBatchId}:`, error);
+  }
 
   return c.json({
     importBatchId,

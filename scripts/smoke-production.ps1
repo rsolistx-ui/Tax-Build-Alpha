@@ -529,7 +529,10 @@ try {
     "-b", $cookieJar,
     "$BaseUrl/api/clients/$clientId/bank-transactions/$missingTransactionId/audit"
   )
-  $uploadedAudit = @($missingAudit.events) | Where-Object { $_.action -eq "bank_receipt_uploaded" } | Select-Object -First 1
+  # Receipt intake records this as a pending-review linkage.  That is the
+  # intentional safety boundary: upload evidence may be automated, but it
+  # cannot become an accounting match until a professional files it.
+  $uploadedAudit = @($missingAudit.events) | Where-Object { $_.action -eq "bank_receipt_linked_pending_review" } | Select-Object -First 1
   $resolvedAudit = @($missingAudit.events) | Where-Object { $_.action -eq "bank_match_confirmed" } | Select-Object -Last 1
   if (-not $uploadedAudit -or -not $resolvedAudit -or $resolvedAudit.receipt_id -ne $exceptionReceiptId) {
     throw "Missing receipt workflow did not preserve the expected upload and confirmation audit history."

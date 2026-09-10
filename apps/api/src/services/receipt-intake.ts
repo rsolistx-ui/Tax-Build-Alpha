@@ -5,6 +5,7 @@ import { getLlmProvider, type ReceiptBusinessContext, type ReceiptExtraction } f
 import { validateReceipt } from "../services/receipt-validation";
 import type { ClientRow } from "../services/clients";
 import { MAX_UPLOAD_BYTES } from "../services/documents";
+import { delegateReceiptAgents } from "./agent-supervisor";
 
 export type ReceiptIngestResult =
   | { ok: true; receiptId: string; jobId: string; bankTransactionId: string | null }
@@ -165,6 +166,22 @@ export async function ingestReceiptForClient(
     }
 
     await db.transaction(statements);
+    try {
+      await delegateReceiptAgents(db, {
+        firmId: client.firm_id,
+        clientId: client.id,
+        receiptId,
+        confidence: extraction.confidence,
+        merchant: extraction.merchant,
+        category: extraction.category,
+        total: extraction.total,
+        validationStatus: validation.status,
+      });
+    } catch (error) {
+      // Evidence intake succeeded before this optional hand-off. Do not mark
+      // source evidence failed because the supervisor queue is unavailable.
+      console.error(`agent supervisor delegation failed for receipt ${receiptId}:`, error);
+    }
     return { ok: true, receiptId, jobId, bankTransactionId };
   } catch (error) {
     const requestId = crypto.randomUUID();
