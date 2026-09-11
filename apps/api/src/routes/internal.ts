@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
+import { handleReminderCron } from "../services/reminders";
 import { createDb } from "../db";
 import type { Env } from "../env";
 
@@ -113,4 +114,16 @@ internalRoutes.post("/smoke-cleanup", async (c) => {
     clientCount: clientIds.length,
     r2ObjectsRemoved: r2Keys.length,
   });
+});
+
+/**
+ * Daily reminder cron: runs at 09:00 UTC (configured in wrangler.toml).
+ * Scans every firm for client_requests in 'requested' or 'viewed' status
+ * whose next_reminder_at has arrived, posts a system reminder message,
+ * and exponentially backs off the next reminder (5d → 10d → 20d → 40d, capped at 30d).
+ */
+internalRoutes.get("/reminders", async (c) => {
+  if (!requireInternalToken(c)) return c.json({ error: "Not found" }, 404);
+  const result = await handleReminderCron(c.env);
+  return c.json(result);
 });
