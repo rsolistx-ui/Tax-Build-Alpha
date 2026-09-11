@@ -8,6 +8,7 @@ import { ClientWorkspacePage } from "@/pages/client-workspace";
 import { BetaAdminPage } from "@/pages/beta-admin";
 import { DocumentReviewPage } from "@/pages/document-review";
 import { WorkQueuePage } from "@/pages/work-queue";
+import { AgentDeskPage } from "@/pages/agent-desk";
 import { PortalPage } from "@/pages/portal";
 
 export default function App() {
@@ -24,6 +25,7 @@ export default function App() {
           <Route path="/beta-admin" element={<BetaAdminPage />} />
           <Route path="/documents/review" element={<DocumentReviewPage />} />
           <Route path="/work-queue" element={<WorkQueuePage />} />
+          <Route path="/agent-desk" element={<AgentDeskPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

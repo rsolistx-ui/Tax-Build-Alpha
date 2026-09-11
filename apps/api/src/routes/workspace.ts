@@ -736,6 +736,8 @@ function describeTimelineEvent(action: string): string {
     receipt_extracted: "Receipt evidence extracted",
     receipt_filed: "Receipt filed",
     receipt_review_edited: "Receipt review corrected",
+    receipt_category_applied: "Receipt category applied from agent approval",
+    agent_recommendation_reviewed: "Agent recommendation reviewed",
   };
   return labels[action] ?? action.replace(/_/g, " ");
 }

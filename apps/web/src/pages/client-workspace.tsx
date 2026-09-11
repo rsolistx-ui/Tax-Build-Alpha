@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
+  Camera,
   ExternalLink,
   Folder,
+  Image,
   Inbox,
   Landmark,
   LineChart,
@@ -18,6 +20,7 @@ import {
   LayoutDashboard,
   ClipboardList,
   FileStack,
+  Bot,
 } from "lucide-react";
 import { api, apiUrl } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
@@ -38,6 +41,8 @@ import { TaxReadinessPanel } from "@/components/tax-readiness-panel";
 import { DocumentsPanel } from "@/components/documents-panel";
 import { EngagementsPanel } from "@/components/engagements-panel";
 import { RequestsPanel } from "@/components/requests-panel";
+import { AgentPanel } from "@/components/agent-panel";
+import { convertHeicToJpeg, createCaptureInput, type CaptureSource } from "@/lib/image-utils";
 
 type Category = {
   id: string;
@@ -94,11 +99,11 @@ type BatchFile = {
   error?: string;
 };
 
-type Tab = "overview" | "folders" | "upload" | "review" | "bank" | "pnl" | "tax-readiness" | "documents" | "engagements" | "requests" | "export";
+type Tab = "overview" | "folders" | "upload" | "review" | "bank" | "pnl" | "tax-readiness" | "documents" | "engagements" | "requests" | "export" | "agent";
 
 
 
-const VALID_TABS: Tab[] = ["overview", "folders", "upload", "review", "bank", "pnl", "tax-readiness", "documents", "engagements", "requests", "export"];
+const VALID_TABS: Tab[] = ["overview", "folders", "upload", "review", "bank", "pnl", "tax-readiness", "documents", "engagements", "requests", "export", "agent"];
 
 export function ClientWorkspacePage() {
   const { clientId = "" } = useParams();
@@ -129,6 +134,30 @@ export function ClientWorkspacePage() {
   const [error, setError] = useState<string | null>(null);
   const [batch, setBatch] = useState<BatchFile[]>([]);
   const [batchRunning, setBatchRunning] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  function openCaptureInput(source: CaptureSource) {
+    const input = createCaptureInput(source, "image/*,application/pdf");
+    input.multiple = true;
+    input.onchange = async (e: Event) => {
+      const target = e.target as HTMLInputElement;
+      const files = target.files;
+      if (files?.length) {
+        // Convert HEIC to JPEG on the client before adding to batch
+        const convertedFiles: File[] = [];
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+          const converted = await convertHeicToJpeg(file);
+          convertedFiles.push(converted);
+        }
+        // Create a temporary FileList-like object
+        const dataTransfer = new DataTransfer();
+        convertedFiles.forEach((f) => dataTransfer.items.add(f));
+        addFilesToBatch(dataTransfer.files);
+      }
+    };
+    input.click();
+  }
 
   useEffect(() => {
     if (searchParams.get("tab") || searchParams.get("focus")) {
@@ -307,6 +336,7 @@ export function ClientWorkspacePage() {
       { id: "documents" as const, label: "Documents", icon: FileStack },
       { id: "engagements" as const, label: "Engagements", icon: ClipboardList },
       { id: "requests" as const, label: "Requests", icon: Inbox },
+      { id: "agent" as const, label: "Agent", icon: Bot },
       { id: "export" as const, label: "Export", icon: FileDown },
     ],
     [review.length],
@@ -391,6 +421,8 @@ export function ClientWorkspacePage() {
       {tab === "engagements" ? <EngagementsPanel clientId={clientId} focusEngagementId={focusId} /> : null}
 
       {tab === "requests" ? <RequestsPanel clientId={clientId} focusRequestId={focusId} /> : null}
+
+      {tab === "agent" ? <AgentPanel clientId={clientId} /> : null}
 
       {tab === "folders" ? (
         <div className="grid gap-4 lg:grid-cols-[240px_1fr]">
@@ -499,17 +531,56 @@ export function ClientWorkspacePage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                onClick={() => void openCaptureInput("file")}
+                className="flex items-center gap-2"
+              >
+                <Upload className="h-3.5 w-3.5" />
+                Choose files
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => void openCaptureInput("camera")}
+                className="flex items-center gap-2"
+              >
+                <Camera className="h-3.5 w-3.5" />
+                Take photo
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => void openCaptureInput("library")}
+                className="flex items-center gap-2"
+              >
+                <Image className="h-3.5 w-3.5" />
+                Photo library
+              </Button>
+            </div>
+
             <label className="flex cursor-pointer flex-col items-center justify-center rounded-[var(--radius-lg)] border border-dashed border-[var(--color-border)] bg-[var(--color-muted)]/40 px-6 py-12 text-center hover:bg-[var(--color-muted)]/70">
               <Upload className="mb-3 h-6 w-6 text-[var(--color-muted-foreground)]" />
               <span className="text-sm font-medium">Click or drop receipt files</span>
               <span className="mt-1 text-xs text-[var(--color-muted-foreground)]">PNG, JPG, WEBP, PDF · select as many as you like</span>
               <input
                 type="file"
+                ref={fileInputRef}
                 className="hidden"
                 multiple
                 accept="image/*,application/pdf"
-                onChange={(e) => {
-                  addFilesToBatch(e.target.files);
+                onChange={async (e: React.ChangeEvent<HTMLInputElement>) => {
+                  const files = e.target.files;
+                  if (files?.length) {
+                    const convertedFiles: File[] = [];
+                    for (let i = 0; i < files.length; i++) {
+                      const file = files[i];
+                      const converted = await convertHeicToJpeg(file);
+                      convertedFiles.push(converted);
+                    }
+                    const dataTransfer = new DataTransfer();
+                    convertedFiles.forEach((f) => dataTransfer.items.add(f));
+                    addFilesToBatch(dataTransfer.files);
+                  }
                   e.target.value = "";
                 }}
               />

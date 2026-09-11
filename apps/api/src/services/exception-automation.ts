@@ -1,5 +1,6 @@
 import type { Db, DbStatement } from "../db";
 import { newId } from "../lib/id";
+import { requestDraftAgentTaskStatement } from "./agent-supervisor";
 import { workAuditEventStatement } from "./work-audit";
 import { workItemInsertStatement } from "./work-items";
 import { getClientRequest, type ClientRequestRow } from "./client-requests";
@@ -72,6 +73,14 @@ async function prepareDraftRequest(
       action: "request_drafted",
       actorUserId,
       afterJson: { requestType, title, sourceType: "bank_exception" },
+    }),
+    requestDraftAgentTaskStatement({
+      firmId,
+      clientId: transaction.client_id,
+      requestId,
+      requestType,
+      title,
+      relatedBankTransactionId: transaction.id,
     }),
   ];
 

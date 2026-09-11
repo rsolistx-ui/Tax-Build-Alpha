@@ -1714,6 +1714,18 @@ try {
   $posRequestId = [string]$posDraft.request.id
   if (-not $posRequestId -or $posDraft.request.status -ne "draft") { throw "Exception-to-request preparation did not create a draft request." }
 
+  Write-Host "Verifying the practice coordinator recorded its autonomous request-draft recommendation for the prepared request..."
+  $posDraftAgentTasks = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/agent-tasks")
+  $posDraftAgentTask = @($posDraftAgentTasks.tasks) | Where-Object { $_.source_id -eq $posRequestId -and $_.agent_name -eq "practice_coordinator" -and $_.action_type -eq "request_draft" } | Select-Object -First 1
+  if (-not $posDraftAgentTask -or $posDraftAgentTask.status -ne "completed" -or $posDraftAgentTask.autonomy -ne "autonomous") {
+    throw "Preparing the exception request did not record the practice coordinator's autonomous request-draft work."
+  }
+
+  Write-Host "Verifying the firm-wide agent desk surfaces the pending approvals across clients..."
+  $firmAgentDesk = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/agent-tasks")
+  $firmDeskPending = @($firmAgentDesk.tasks) | Where-Object { $_.client_id -eq $clientId -and $_.status -eq "awaiting_approval" } | Select-Object -First 1
+  if (-not $firmDeskPending) { throw "Firm-wide agent desk did not surface a pending approval for the Practice OS client." }
+
   Write-Host "Verifying the exception-request idempotency slot is race-safe: repeating the same preparation call returns the SAME request, not a duplicate..."
   $posDraftAgain = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-H", "Content-Type: application/json", "--data-binary", "@$posPreparePayloadPath", "$BaseUrl/api/clients/$clientId/requests/prepare-missing-receipt")
   Remove-TempFile $posPreparePayloadPath

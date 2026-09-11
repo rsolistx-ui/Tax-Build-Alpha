@@ -1,5 +1,5 @@
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
-import { Building2, ClipboardList, LayoutDashboard, LogOut, Map, ShieldCheck, Users } from "lucide-react";
+import { Bot, Building2, ClipboardList, LayoutDashboard, LogOut, Map, ShieldCheck, Users } from "lucide-react";
 import { useEffect, useState } from "react";
 import { authClient } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
@@ -80,6 +80,20 @@ export function AppShell({
                   Work Queue
                 </span>
               </NavLink>
+              <NavLink
+                to="/agent-desk"
+                className={({ isActive }) =>
+                  cn(
+                    "rounded-md px-3 py-1.5 text-sm text-[var(--color-muted-foreground)] hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)]",
+                    isActive && "bg-[var(--color-muted)] text-[var(--color-foreground)]",
+                  )
+                }
+              >
+                <span className="inline-flex items-center gap-1.5">
+                  <Bot className="h-3.5 w-3.5" />
+                  Agent Desk
+                </span>
+              </NavLink>
               {isOwner ? (
                 <NavLink
                   to="/beta-admin"
@@ -116,11 +130,12 @@ export function AppShell({
       <main className="mx-auto max-w-6xl px-4 py-6 pb-24 sm:px-6 sm:py-8">
         <Outlet />
       </main>
-      <nav className="fixed inset-x-3 bottom-3 z-30 grid grid-cols-3 rounded-2xl border border-[var(--color-border)] bg-[var(--color-card)]/95 p-1 shadow-lg backdrop-blur sm:hidden" aria-label="Primary navigation">
+      <nav className="fixed inset-x-3 bottom-3 z-30 grid grid-cols-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-card)]/95 p-1 shadow-lg backdrop-blur sm:hidden" aria-label="Primary navigation">
         {[
           { to: "/", label: "Operations", icon: LayoutDashboard, end: true },
           { to: "/clients", label: "Clients", icon: Users },
           { to: "/work-queue", label: "Work queue", icon: ClipboardList },
+          { to: "/agent-desk", label: "Agent desk", icon: Bot },
         ].map(({ to, label, icon: Icon, end }) => <NavLink key={to} to={to} end={end} className={({ isActive }) => cn("flex flex-col items-center gap-1 rounded-xl px-2 py-2 text-[10px] font-medium text-[var(--color-muted-foreground)]", isActive && "bg-[#14201c] text-white")}><Icon className="h-4 w-4" />{label}</NavLink>)}
       </nav>
       <WelcomeTour forceOpen={tourOpen} onClose={() => setTourOpen(false)} />

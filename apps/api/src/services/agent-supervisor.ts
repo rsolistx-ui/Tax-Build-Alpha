@@ -1,4 +1,4 @@
-import type { Db } from "../db";
+import type { Db, DbStatement } from "../db";
 import { newId } from "../lib/id";
 
 export const AGENT_POLICY = {
@@ -9,7 +9,7 @@ export const AGENT_POLICY = {
 type AgentTaskInput = {
   firmId: string;
   clientId: string;
-  sourceType: "receipt" | "bank_import";
+  sourceType: "receipt" | "bank_import" | "client_request";
   sourceId: string;
   agentName: "intake_specialist" | "reconciliation_specialist" | "practice_coordinator";
   actionType: string;
@@ -19,28 +19,67 @@ type AgentTaskInput = {
 };
 
 /**
- * The supervisor's durable hand-off.  It is invoked only by meaningful
- * events (uploads/imports), is idempotent, and never executes an action that
- * Folio's policy reserves for the professional.  This lets the UI show real
- * work completed and real work awaiting approval without pretending that an
- * unattended model made an accounting or tax decision.
+ * The supervisor's durable hand-off.  Tasks are created only from meaningful
+ * events (uploads, imports, prepared client requests), are idempotent, and
+ * never execute an action that Folio's policy reserves for the professional.
+ * This lets the UI show real work completed and real work awaiting approval
+ * without pretending that an unattended model made an accounting or tax
+ * decision.
  */
-export async function delegateAgentTask(db: Db, input: AgentTaskInput): Promise<void> {
+export function agentTaskInsertStatement(input: AgentTaskInput): DbStatement {
   const status = input.autonomy === "autonomous" ? "completed" : "awaiting_approval";
-  await db.query(
-    `INSERT INTO agent_tasks
+  return {
+    query: `INSERT INTO agent_tasks
       (id, firm_id, client_id, source_type, source_id, agent_name, action_type, autonomy,
        status, confidence, recommendation_json, policy_json, resolved_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb,
        CASE WHEN $9 = 'completed' THEN NOW() ELSE NULL END)
      ON CONFLICT (client_id, source_type, source_id, agent_name) DO NOTHING`,
-    [
+    params: [
       newId("agt"), input.firmId, input.clientId, input.sourceType, input.sourceId,
       input.agentName, input.actionType, input.autonomy, status, input.confidence ?? null,
       input.recommendation,
       { ...AGENT_POLICY, humanApprovalRequired: input.autonomy === "approval_required" },
     ],
-  );
+  };
+}
+
+export async function delegateAgentTask(db: Db, input: AgentTaskInput): Promise<void> {
+  const statement = agentTaskInsertStatement(input);
+  await db.query(statement.query, statement.params);
+}
+
+/**
+ * The practice coordinator's autonomous request-draft step.  The draft is
+ * prepared from the bank exception without a human; the resulting request is
+ * still a draft that a professional must approve before it is sent to the
+ * client, so the professional gate is preserved downstream.
+ */
+export function requestDraftAgentTaskStatement(input: {
+  firmId: string;
+  clientId: string;
+  requestId: string;
+  requestType: string;
+  title: string;
+  relatedBankTransactionId: string;
+}): DbStatement {
+  return agentTaskInsertStatement({
+    firmId: input.firmId,
+    clientId: input.clientId,
+    sourceType: "client_request",
+    sourceId: input.requestId,
+    agentName: "practice_coordinator",
+    actionType: "request_draft",
+    autonomy: "autonomous",
+    confidence: null,
+    recommendation: {
+      requestType: input.requestType,
+      title: input.title,
+      relatedBankTransactionId: input.relatedBankTransactionId,
+      status: "draft",
+      reason: "Prepared automatically from a bank exception; the professional approves the request before it goes to the client.",
+    },
+  });
 }
 
 export async function delegateReceiptAgents(
@@ -59,7 +98,7 @@ export async function delegateReceiptAgents(
     delegateAgentTask(db, {
       ...input, sourceType: "receipt", sourceId: input.receiptId, agentName: "practice_coordinator",
       actionType: "categorization_review", autonomy: "approval_required", confidence: input.confidence,
-      recommendation: { category: input.category, reason: "AI extraction and client correction memory; professional approval required." },
+      recommendation: { category: input.category, merchant: input.merchant, reason: "AI extraction and client correction memory; professional approval required." },
     }),
   ]);
 }

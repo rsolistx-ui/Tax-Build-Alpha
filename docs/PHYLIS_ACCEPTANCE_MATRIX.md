@@ -60,8 +60,10 @@ Status: THIS_MILESTONE.
 ## 8. Repetitive merchant categorization
 
 Original pain point: re-categorizing the same recurring merchants repeatedly.
-Folio replacement workflow: not addressed this milestone; requires merchant-memory intelligence work per Section 10.
-Status: PLANNED.
+Folio replacement workflow: merchant-category corrections are stored per-client; future extractions from the same normalized merchant automatically inherit the remembered category. Agent approval of a categorization recommendation writes the rule.
+Status: THIS_MILESTONE.
+Evidence of implementation: `correction_rules` table, `applyCorrectionMemory` in `receipt-intake.ts:229`, `correctionRuleStatement` in `receipts.ts:413`, agent approval writes rule in `agent-supervisor.ts:76`, `GET /api/clients/:id/correction-rules` and the Merchant memory panel in `agent-panel.tsx`.
+Remaining gaps: explicit "Folio remembered X for this merchant" confirmation inline in the receipt review flow.
 
 ## 9. P&L creation
 

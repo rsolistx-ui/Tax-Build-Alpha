@@ -50,6 +50,9 @@ describe("prepareMissingReceiptRequest full atomicity", () => {
     expect(statements.some((s) => s.query.includes("INSERT INTO work_items"))).toBe(true);
     expect(statements.some((s) => s.query.includes("INSERT INTO client_requests"))).toBe(true);
     expect(statements.filter((s) => s.query.includes("INSERT INTO work_audit_events"))).toHaveLength(2);
+    expect(statements.some((s) => s.query.includes("INSERT INTO agent_tasks") && String(s.params?.[6]) === "request_draft")).toBe(true);
+    expect(statements.find((s) => String(s.params?.[6]) === "request_draft")?.params?.[7]).toBe("autonomous");
+    expect(statements.find((s) => String(s.params?.[6]) === "request_draft")?.params?.[8]).toBe("completed");
   });
 
   it("on a unique-constraint conflict, returns the existing active request and performs no additional writes (no orphan work item, no permanently-failed retry)", async () => {

@@ -83,6 +83,7 @@ type OperationsCommandCenter = {
   professionalReviewCount: number;
   blockedCount: number;
   oldestPendingRequestDays: number | null;
+  awaitingAgentApprovalCount?: number;
 };
 
 type DashboardData = {
@@ -179,6 +180,12 @@ function PracticeOsStrip({ counts }: { counts: OperationsCommandCenter }) {
       value: counts.oldestPendingRequestDays === null ? "none" : `${counts.oldestPendingRequestDays}d`,
       href: "/work-queue",
       tone: counts.oldestPendingRequestDays !== null && counts.oldestPendingRequestDays > 7 ? "warn" : undefined,
+    },
+    {
+      label: "Agent approvals",
+      value: counts.awaitingAgentApprovalCount ?? 0,
+      href: "/agent-desk",
+      tone: (counts.awaitingAgentApprovalCount ?? 0) > 0 ? "warn" : undefined,
     },
   ];
   return (

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { convertHeicToJpeg, createCaptureInput, type CaptureSource } from "@/lib/image-utils";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 const SESSION_KEY = "folio_portal_token";
@@ -77,6 +78,27 @@ export function PortalPage() {
   const [reply, setReply] = useState("");
   const [uploading, setUploading] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+
+  function openCaptureInput(source: CaptureSource) {
+    const input = createCaptureInput(source, "image/*,application/pdf");
+    input.multiple = true;
+    input.onchange = async (e: Event) => {
+      const target = e.target as HTMLInputElement;
+      const files = target.files;
+      if (files?.length) {
+        const convertedFiles: File[] = [];
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+          const converted = await convertHeicToJpeg(file);
+          convertedFiles.push(converted);
+        }
+        const dataTransfer = new DataTransfer();
+        convertedFiles.forEach((f) => dataTransfer.items.add(f));
+        uploadEvidence(dataTransfer.files);
+      }
+    };
+    input.click();
+  }
 
   useEffect(() => {
     const token = resolvePortalToken();
@@ -178,8 +200,9 @@ export function PortalPage() {
     setUploading(true);
     try {
       for (const file of Array.from(files)) {
+        const converted = await convertHeicToJpeg(file);
         const form = new FormData();
-        form.append("file", file);
+        form.append("file", converted);
         await portalApi(tokenRef.current, `/api/portal/requests/${selected.id}/evidence`, { method: "POST", body: form });
       }
       await openRequest(selected);
@@ -226,16 +249,38 @@ export function PortalPage() {
             {selected.due_at ? <p className="mt-1 text-xs text-[var(--color-muted-foreground)]">Due {new Date(selected.due_at).toLocaleDateString()}</p> : null}
           </div>
           {selected.status !== "satisfied" && selected.status !== "cancelled" ? (
-            <label>
-              <input ref={fileInput} type="file" className="hidden" onChange={(e) => void uploadEvidence(e.target.files)} />
-              <button
-                className="w-full rounded-md border border-[var(--color-border)] py-2 text-sm font-medium"
-                onClick={() => fileInput.current?.click()}
-                disabled={uploading}
-              >
-                {uploading ? "Uploading..." : "Upload evidence"}
-              </button>
-            </label>
+            <div className="space-y-2">
+              <div className="flex flex-wrap gap-2">
+                <button
+                  className="flex items-center gap-2 rounded-md border border-[var(--color-border)] px-3 py-1.5 text-sm font-medium bg-transparent"
+                  onClick={() => void openCaptureInput("file")}
+                >
+                  Choose files
+                </button>
+                <button
+                  className="flex items-center gap-2 rounded-md border border-[var(--color-border)] px-3 py-1.5 text-sm font-medium bg-transparent"
+                  onClick={() => void openCaptureInput("camera")}
+                >
+                  Take photo
+                </button>
+                <button
+                  className="flex items-center gap-2 rounded-md border border-[var(--color-border)] px-3 py-1.5 text-sm font-medium bg-transparent"
+                  onClick={() => void openCaptureInput("library")}
+                >
+                  Photo library
+                </button>
+              </div>
+              <label>
+                <input ref={fileInput} type="file" className="hidden" onChange={(e: React.ChangeEvent<HTMLInputElement>) => void uploadEvidence(e.target.files)} />
+                <button
+                  className="w-full rounded-md border border-[var(--color-border)] py-2 text-sm font-medium"
+                  onClick={() => fileInput.current?.click()}
+                  disabled={uploading}
+                >
+                  {uploading ? "Uploading..." : "Upload evidence"}
+                </button>
+              </label>
+            </div>
           ) : null}
           <div className="space-y-2">
             {messages.map((m) => (

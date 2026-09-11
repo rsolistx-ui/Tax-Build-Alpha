@@ -317,6 +317,10 @@ dashboardRoutes.get("/", async (c) => {
     `SELECT EXTRACT(DAY FROM NOW() - MIN(created_at))::int AS oldest_pending_days FROM client_requests WHERE firm_id = $1 AND status IN ('requested', 'viewed')`,
     [firm.id],
   );
+  const [agentApprovals] = await db.query<{ n: number }>(
+    `SELECT COUNT(*)::int AS n FROM agent_tasks WHERE firm_id = $1 AND status = 'awaiting_approval'`,
+    [firm.id],
+  );
 
   return c.json({
     summary: summarize(rows, sortedActions),
@@ -332,6 +336,7 @@ dashboardRoutes.get("/", async (c) => {
       professionalReviewCount: professionalReview?.n ?? 0,
       blockedCount: blockedWork?.n ?? 0,
       oldestPendingRequestDays: requestAging?.oldest_pending_days ?? null,
+      awaitingAgentApprovalCount: agentApprovals?.n ?? 0,
     },
   });
 });
