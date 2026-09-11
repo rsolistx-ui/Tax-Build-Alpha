@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, CheckCircle2, ExternalLink, FileText, Plus, Save, Trash2 } from "lucide-react";
+import { AlertTriangle, Brain, CheckCircle2, ExternalLink, FileText, Plus, Save, Trash2 } from "lucide-react";
 import { api, apiUrl } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -41,6 +41,7 @@ export type ReviewReceipt = {
   extracted_total: number | null;
   extracted_currency: string | null;
   extracted_category: string | null;
+  remembered_category?: string | null;
   confidence: number | null;
   provider: string | null;
   model: string | null;
@@ -266,6 +267,16 @@ export function ReceiptReview({
           <MoneyField label="Tip" value={draft.tip} onChange={(value) => setDraft({ ...draft, tip: value })} />
           <MoneyField label="Total" value={draft.total} onChange={(value) => setDraft({ ...draft, total: value })} />
         </div>
+
+        {selected.remembered_category && draft.category === selected.remembered_category ? (
+          <div className="flex items-start gap-2 rounded-md bg-emerald-50 p-2.5 text-xs text-emerald-900" data-testid="remembered-category-note">
+            <Brain className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>
+              Folio remembered {categories.find((c) => c.slug === selected.remembered_category)?.name ?? selected.remembered_category}
+              {" "}for this merchant from a prior approved review. Change the category here and Folio will learn the correction.
+            </span>
+          </div>
+        ) : null}
 
         <div className="space-y-2 border-t border-[var(--color-border)] pt-3">
           <div className="flex items-center justify-between">

@@ -122,7 +122,9 @@ export async function ingestReceiptForClient(
       filename: file.name,
       context,
     });
-    extraction = await applyCorrectionMemory(db, client.id, extraction);
+    const withMemory = await applyCorrectionMemory(db, client.id, extraction);
+    extraction = withMemory.extraction;
+    const rememberedCategory = withMemory.rememberedCategory;
     const validation = validateReceipt(extraction);
 
     const statements: DbStatement[] = [
@@ -132,12 +134,13 @@ export async function ingestReceiptForClient(
           extracted_subtotal = $3, extracted_tax = $4, extracted_tip = $5,
           extracted_total = $6, extracted_currency = $7, extracted_category = $8,
           confidence = $9, provider = $10, model = $11,
-          validation_status = $12, validation_json = $13::jsonb, updated_at = NOW()
+          validation_status = $12, validation_json = $13::jsonb,
+          remembered_category = $15, updated_at = NOW()
           WHERE id = $14`,
         params: [
           extraction.date, extraction.merchant, extraction.subtotal, extraction.tax, extraction.tip,
           extraction.total, extraction.currency, extraction.category, extraction.confidence,
-          llm.name, llm.model, validation.status, validation, receiptId,
+          llm.name, llm.model, validation.status, validation, receiptId, rememberedCategory,
         ],
       },
       ...lineItemStatements(receiptId, extraction),
@@ -226,8 +229,12 @@ async function loadBusinessContext(db: Db, client: ClientRow): Promise<ReceiptBu
   };
 }
 
-async function applyCorrectionMemory(db: Db, clientId: string, extraction: ReceiptExtraction): Promise<ReceiptExtraction> {
-  if (!extraction.merchant) return extraction;
+async function applyCorrectionMemory(
+  db: Db,
+  clientId: string,
+  extraction: ReceiptExtraction,
+): Promise<{ extraction: ReceiptExtraction; rememberedCategory: string | null }> {
+  if (!extraction.merchant) return { extraction, rememberedCategory: null };
   const [rule] = await db.query<{ output_json: { category?: string } | null }>(
     `SELECT output_json FROM correction_rules
      WHERE client_id = $1 AND rule_type = 'merchant_category' AND match_key = $2
@@ -235,11 +242,14 @@ async function applyCorrectionMemory(db: Db, clientId: string, extraction: Recei
     [clientId, normalizeMerchant(extraction.merchant)],
   );
   const remembered = rule?.output_json?.category;
-  if (!remembered) return extraction;
+  if (!remembered) return { extraction, rememberedCategory: null };
   return {
-    ...extraction,
-    category: remembered,
-    lineItems: extraction.lineItems.map((item) => ({ ...item, category: item.category ?? remembered })),
+    extraction: {
+      ...extraction,
+      category: remembered,
+      lineItems: extraction.lineItems.map((item) => ({ ...item, category: item.category ?? remembered })),
+    },
+    rememberedCategory: remembered,
   };
 }
 
