@@ -308,10 +308,8 @@ try {
   if (-not $merchantRule) { throw "Agent approval did not write a merchant-category correction rule for $($receiptAfterAgent.receipt.extracted_category)." }
 
   Write-Host "Verifying a second receipt from the same merchant inherits the remembered category..."
-  $secondReceiptBytes = [System.Text.Encoding]::UTF8.GetBytes("RECEIPT FILE 2")
-  $secondReceiptPath = Join-Path $env:TEMP "folio-smoke-receipt-2-$([guid]::NewGuid().ToString('N')).txt"
-  [System.IO.File]::WriteAllBytes($secondReceiptPath, $secondReceiptBytes)
-  $secondReceiptFile = Get-Item $secondReceiptPath
+  $secondReceiptPath = Join-Path $env:TEMP "folio-smoke-receipt-2-$([guid]::NewGuid().ToString('N')).png"
+  New-SampleReceiptPng $secondReceiptPath
   $secondUpload = Invoke-CurlJson @(
     "-c", $cookieJar, "-b", $cookieJar,
     "-F", "file=@`"$secondReceiptPath`"",

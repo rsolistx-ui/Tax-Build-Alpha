@@ -114,6 +114,14 @@ receiptRoutes.get("/:clientId/review", async (c) => {
   return c.json({ receipts: detailed.filter(Boolean) });
 });
 
+receiptRoutes.get("/:clientId/receipts/:receiptId", async (c) => {
+  const { db, client } = await authorizedClient(c);
+  if (!client) return c.json({ error: "Not found" }, 404);
+  const receipt = await getReceiptDetails(db, c.req.param("receiptId"), client.id);
+  if (!receipt) return c.json({ error: "Not found" }, 404);
+  return c.json({ receipt });
+});
+
 receiptRoutes.get("/:clientId/receipts/:receiptId/source", async (c) => {
   const { db, client } = await authorizedClient(c);
   if (!client) return c.json({ error: "Not found" }, 404);
