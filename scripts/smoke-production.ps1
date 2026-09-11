@@ -297,6 +297,38 @@ try {
     throw "Professional approval of the agent recommendation was not persisted."
   }
 
+  Write-Host "Verifying the agent approval applied the category to the receipt..."
+  $receiptAfterAgent = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/receipts/$receiptId")
+  if (-not $receiptAfterAgent.receipt.category_id) { throw "Agent approval did not set category_id on the receipt." }
+  $receiptCategoryId = $receiptAfterAgent.receipt.category_id
+
+  Write-Host "Verifying the agent approval wrote a merchant-category correction rule..."
+  $correctionRules = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/correction-rules")
+  $merchantRule = @($correctionRules.rules) | Where-Object { $_.rule_type -eq "merchant_category" -and $_.output_json.category -eq $receiptAfterAgent.receipt.extracted_category } | Select-Object -First 1
+  if (-not $merchantRule) { throw "Agent approval did not write a merchant-category correction rule for $($receiptAfterAgent.receipt.extracted_category)." }
+
+  Write-Host "Verifying a second receipt from the same merchant inherits the remembered category..."
+  $secondReceiptBytes = [System.Text.Encoding]::UTF8.GetBytes("RECEIPT FILE 2")
+  $secondReceiptPath = Join-Path $env:TEMP "folio-smoke-receipt-2-$([guid]::NewGuid().ToString('N')).txt"
+  [System.IO.File]::WriteAllBytes($secondReceiptPath, $secondReceiptBytes)
+  $secondReceiptFile = Get-Item $secondReceiptPath
+  $secondUpload = Invoke-CurlJson @(
+    "-c", $cookieJar, "-b", $cookieJar,
+    "-F", "file=@`"$secondReceiptPath`"",
+    "$BaseUrl/api/clients/$clientId/receipts"
+  )
+  Remove-TempFile $secondReceiptPath
+  $secondReceiptId = $secondUpload.receipt.id
+  $secondAgentTasks = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/agent-tasks")
+  $secondCategoryTask = @($secondAgentTasks.tasks) | Where-Object { $_.source_id -eq $secondReceiptId -and $_.agent_name -eq "practice_coordinator" } | Select-Object -First 1
+  if (-not $secondCategoryTask) {
+    throw "Second receipt did not create a categorization task."
+  }
+  $secondCategory = $secondCategoryTask.recommendation_json.category
+  if ($secondCategory -ne $receiptAfterAgent.receipt.extracted_category) {
+    throw "Second receipt's categorization recommendation ($secondCategory) did not match the remembered category ($($receiptAfterAgent.receipt.extracted_category))."
+  }
+
   Write-Host "Filing the validated receipt..."
   $approveBody = @{ confirmOverride = $false } | ConvertTo-Json -Compress
   $approvePayloadPath = New-JsonPayloadFile $approveBody

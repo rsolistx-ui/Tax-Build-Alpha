@@ -44,6 +44,103 @@ export function agentTaskInsertStatement(input: AgentTaskInput): DbStatement {
   };
 }
 
+/**
+ * Claim-statement for resolving a task.  The guarded UPDATE ... RETURNING is
+ * the single point of truth for "this task is still awaiting approval", so
+ * two simultaneous approvals cannot both win: only the request whose UPDATE
+ * matches a row proceeds to the side effects, and a concurrent loser sees an
+ * empty result and reports the task as already resolved.
+ */
+export function agentTaskResolveClaimStatement(input: {
+  taskId: string;
+  clientId: string;
+  firmId: string;
+  newStatus: "approved" | "dismissed";
+  actorUserId: string;
+  note: string | null;
+}): DbStatement {
+  return {
+    query: `UPDATE agent_tasks
+      SET status = $1,
+          approved_by_user_id = CASE WHEN $1 = 'approved' THEN $2 ELSE NULL END,
+          approved_at = CASE WHEN $1 = 'approved' THEN NOW() ELSE NULL END,
+          resolved_at = NOW(),
+          resolution_note = $3,
+          updated_at = NOW()
+      WHERE id = $4 AND client_id = $5 AND firm_id = $6 AND status = 'awaiting_approval'
+      RETURNING id`,
+    params: [input.newStatus, input.actorUserId, input.note, input.taskId, input.clientId, input.firmId],
+  };
+}
+
+export function agentResolveAuditStatement(input: {
+  clientId: string;
+  actorUserId: string;
+  task: { id: string; action_type: string; recommendation_json: Record<string, unknown> };
+  decision: "approve" | "dismiss";
+}): DbStatement {
+  return {
+    query: `INSERT INTO audit_events (id, client_id, actor_user_id, action, after_json)
+      VALUES ($1, $2, $3, 'agent_recommendation_reviewed', $4::jsonb)`,
+    params: [
+      newId("aud"),
+      input.clientId,
+      input.actorUserId,
+      { agentTaskId: input.task.id, decision: input.decision, actionType: input.task.action_type, recommendation: input.task.recommendation_json },
+    ],
+  };
+}
+
+/**
+ * The material side effects of approving a categorization_review for a
+ * receipt: apply the category to the receipt, audit the application, and
+ * teach merchant memory that this merchant maps to this category.  Pure
+ * statement builder - the route resolves the category id (a read) and then
+ * commits these statements atomically with the resolution audit.
+ */
+export function categorizationApprovalStatements(input: {
+  clientId: string;
+  actorUserId: string;
+  receiptId: string;
+  merchant: string | null;
+  categoryHint: string | null;
+  categoryId: string | null;
+}): DbStatement[] {
+  const merchant = input.merchant;
+  const categoryHint = input.categoryHint;
+  const statements: DbStatement[] = [];
+  if (!categoryHint || !input.categoryId) return statements;
+  statements.push(
+    {
+      query: `UPDATE receipts SET category_id = $1, updated_at = NOW() WHERE id = $2 AND client_id = $3`,
+      params: [input.categoryId, input.receiptId, input.clientId],
+    },
+    {
+      query: `INSERT INTO audit_events (id, client_id, receipt_id, actor_user_id, action, after_json)
+        VALUES ($1, $2, $3, $4, 'receipt_category_applied', $5::jsonb)`,
+      params: [newId("aud"), input.clientId, input.receiptId, input.actorUserId, { categoryId: input.categoryId, category: categoryHint, from: "agent_approval" }],
+    },
+  );
+  if (merchant) {
+    statements.push({
+      query: `INSERT INTO correction_rules
+        (id, client_id, rule_type, match_key, output_json, seen_count, last_applied_at)
+        VALUES ($1, $2, 'merchant_category', $3, $4::jsonb, 1, NOW())
+        ON CONFLICT (client_id, rule_type, match_key) DO UPDATE SET
+          output_json = EXCLUDED.output_json,
+          seen_count = correction_rules.seen_count + 1,
+          last_applied_at = NOW(),
+          updated_at = NOW()`,
+      params: [newId("rule"), input.clientId, normalizeMerchant(merchant), { category: categoryHint }],
+    });
+  }
+  return statements;
+}
+
+export function normalizeMerchant(merchant: string): string {
+  return merchant.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
 export async function delegateAgentTask(db: Db, input: AgentTaskInput): Promise<void> {
   const statement = agentTaskInsertStatement(input);
   await db.query(statement.query, statement.params);

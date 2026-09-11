@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 import type { Db, DbStatement } from "../db";
-import { delegateBankImportAgent, delegateReceiptAgents, requestDraftAgentTaskStatement, agentTaskInsertStatement } from "./agent-supervisor";
+import {
+  delegateBankImportAgent,
+  delegateReceiptAgents,
+  requestDraftAgentTaskStatement,
+  agentTaskInsertStatement,
+  agentTaskResolveClaimStatement,
+  agentResolveAuditStatement,
+  categorizationApprovalStatements,
+  normalizeMerchant,
+} from "./agent-supervisor";
 
 function fakeDb() {
   const calls: Array<{ sql: string; params: unknown[] }> = [];
@@ -58,48 +67,64 @@ describe("event-driven agent supervisor", () => {
     expect(params[10]).toMatchObject({ relatedBankTransactionId: "btx_1", status: "draft" });
   });
 
-  it("approval of categorization_review generates statements to apply category and write merchant memory", () => {
-    const task: {
-      id: string;
-      source_type: string;
-      source_id: string;
-      action_type: string;
-      recommendation_json: Record<string, unknown>;
-    } = {
+  it("approval of categorization_review generates statements via the real builder", () => {
+    const task = {
       id: "agt_1",
       source_type: "receipt",
       source_id: "rct_1",
       action_type: "categorization_review",
       recommendation_json: { category: "Supplies", merchant: "Office Depot" },
     };
-    const statements: DbStatement[] = [
-      {
-        query: `UPDATE agent_tasks SET status = $1, approved_by_user_id = CASE WHEN $1 = 'approved' THEN $2 ELSE NULL END, approved_at = CASE WHEN $1 = 'approved' THEN NOW() ELSE NULL END, resolved_at = NOW(), resolution_note = $3, updated_at = NOW() WHERE id = $4`,
-        params: ["approved", "user_1", null, "agt_1"],
-      },
-      {
-        query: `INSERT INTO audit_events (id, client_id, actor_user_id, action, after_json) VALUES ($1, $2, $3, 'agent_recommendation_reviewed', $4::jsonb)`,
-        params: ["aud_1", "client_1", "user_1", {}],
-      },
-      // The resolution route would add these on approval:
-      {
-        query: `UPDATE receipts SET category_id = $1, updated_at = NOW() WHERE id = $2 AND client_id = $3`,
-        params: ["cat_1", "rct_1", "client_1"],
-      },
-      {
-        query: `INSERT INTO audit_events (id, client_id, receipt_id, actor_user_id, action, after_json) VALUES ($1, $2, $3, $4, $5::jsonb)`,
-        params: ["aud_2", "client_1", "rct_1", "user_1", "receipt_category_applied", { categoryId: "cat_1", category: "Supplies", from: "agent_approval" }],
-      },
-      {
-        query: `INSERT INTO correction_rules (id, client_id, rule_type, match_key, output_json, seen_count, last_applied_at) VALUES ($1, $2, 'merchant_category', $3, $4::jsonb, 1, NOW()) ON CONFLICT (client_id, rule_type, match_key) DO UPDATE SET output_json = EXCLUDED.output_json, seen_count = correction_rules.seen_count + 1, last_applied_at = NOW(), updated_at = NOW()`,
-        params: ["rule_1", "client_1", "office depot", { category: "Supplies" }],
-      },
-    ];
-    expect(statements).toHaveLength(5);
-    expect(statements[2].query).toContain("UPDATE receipts SET category_id");
-    expect(statements[3].params?.[4]).toBe("receipt_category_applied");
-    expect(statements[4].query).toContain("correction_rules");
-    expect(statements[4].params).toContain("office depot");
-    expect(statements[4].params?.[3]).toEqual({ category: "Supplies" });
+    const claim = agentTaskResolveClaimStatement({
+      taskId: task.id,
+      clientId: "client_1",
+      firmId: "firm_1",
+      newStatus: "approved",
+      actorUserId: "user_1",
+      note: null,
+    });
+    expect(claim.query).toContain("UPDATE agent_tasks");
+    expect(claim.query).toContain("WHERE id = $4 AND client_id = $5 AND firm_id = $6 AND status = 'awaiting_approval'");
+    expect(claim.params).toEqual(["approved", "user_1", null, "agt_1", "client_1", "firm_1"]);
+
+    const audit = agentResolveAuditStatement({
+      clientId: "client_1",
+      actorUserId: "user_1",
+      decision: "approve",
+      task,
+    });
+    expect(audit.query).toContain("INSERT INTO audit_events");
+    expect(audit.params?.[3]).toMatchObject({ agentTaskId: "agt_1", decision: "approve", actionType: "categorization_review" });
+
+    const side = categorizationApprovalStatements({
+      clientId: "client_1",
+      actorUserId: "user_1",
+      receiptId: "rct_1",
+      merchant: "Office Depot",
+      categoryHint: "Supplies",
+      categoryId: "cat_1",
+    });
+    expect(side).toHaveLength(3);
+    expect(side[0].query).toContain("UPDATE receipts SET category_id");
+    expect(side[0].params).toEqual(["cat_1", "rct_1", "client_1"]);
+    expect(side[1].params).toHaveLength(5);
+    expect(side[1].params?.[4]).toEqual({ categoryId: "cat_1", category: "Supplies", from: "agent_approval" });
+    expect(side[2].query).toContain("correction_rules");
+    expect(side[2].params).toContain("office depot");
+    expect(side[2].params?.[3]).toEqual({ category: "Supplies" });
+
+    // Dismiss produces no side effects
+    const dismissClaim = agentTaskResolveClaimStatement({
+      taskId: task.id,
+      clientId: "client_1",
+      firmId: "firm_1",
+      newStatus: "dismissed",
+      actorUserId: "user_1",
+      note: "dismissed",
+    });
+    // The params array still contains the actorUserId; the SQL CASE makes it NULL when status != 'approved'
+    expect(dismissClaim.params?.[0]).toBe("dismissed");
+    expect(dismissClaim.params?.[1]).toBe("user_1");
+    expect(dismissClaim.query).toContain("CASE WHEN $1 = 'approved' THEN $2 ELSE NULL END");
   });
 });
