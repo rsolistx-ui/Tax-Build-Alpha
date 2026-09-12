@@ -23,6 +23,7 @@ import { workQueueRoutes } from "./routes/work-queue";
 import { clientRequestRoutes } from "./routes/client-requests";
 import { portalRoutes } from "./routes/portal";
 import { agentSupervisorRoutes, agentDeskRoutes } from "./routes/agent-supervisor";
+import { taxAdjustmentRoutes } from "./routes/tax-adjustment";
 
 const app = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 
@@ -127,6 +128,7 @@ app.route("/api/work-queue", workQueueRoutes);
 app.route("/api/portal", portalRoutes);
 app.route("/api/agent-tasks", agentDeskRoutes);
 app.route("/api/clients", agentSupervisorRoutes);
+app.route("/api/clients", taxAdjustmentRoutes);
 
 app.notFound((c) => c.json({ error: "Not found" }, 404));
 app.onError((err, c) => {

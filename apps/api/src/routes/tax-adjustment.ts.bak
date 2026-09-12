@@ -1,0 +1,295 @@
+import { Hono } from "hono";
+import { z } from "zod";
+import { createDb } from "../db";
+import type { Env } from "../env";
+import type { AuthedVars } from "../middleware/session";
+import { requireSession } from "../middleware/session";
+import { requireActiveBeta } from "../middleware/beta";
+import { ensureFirm } from "../services/firm";
+import { getClient } from "../services/clients";
+import { getEngagement } from "../services/engagements";
+import { newId } from "../lib/id";
+import {
+  createTaxAdjustmentJournal,
+  addTaxAdjustmentJournalLines,
+  postTaxAdjustmentJournal,
+  createM1Reconciliation,
+  addM1ReconciliationLine,
+  finalizeM1Reconciliation,
+  TaxAdjustmentJournal,
+  TaxAdjustmentJournalLine,
+  M1Reconciliation,
+  M1ReconciliationLine,
+} from "../services/tax-adjustment";
+import type { Db } from "../db";
+
+export const taxAdjustmentRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
+taxAdjustmentRoutes.use("*", requireSession);
+taxAdjustmentRoutes.use("*", requireActiveBeta);
+
+// Create tax adjustment journal
+taxAdjustmentRoutes.post("/:clientId/tax-adjustments", async (c) => {
+  const db = createDb(c.env);
+  const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
+  const client = await getClient(db, c.req.param("clientId"), firm.id);
+  if (!client) return c.json({ error: "Client not found" }, 404);
+
+  const body = z.object({
+    engagementId: z.string().optional(),
+    taxYear: z.number().int().min(2000).max(2100),
+    periodEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    adjustmentType: z.enum(["book_to_tax", "permanent_diff", "temporary_diff", "reclassification", "carryforward", "rate_change", "state_mod", "other"]),
+    sourceType: z.enum(["manual", "import", "auto_depreciation", "auto_accrual", "auto_reserve", "carryforward_calc"]).default("manual"),
+    sourceId: z.string().optional(),
+    memo: z.string().optional(),
+  }).parse(await c.req.json());
+
+  const journal = await createTaxAdjustmentJournal(db, {
+    firmId: firm.id,
+    clientId: client.id,
+    engagementId: body.engagementId,
+    taxYear: body.taxYear,
+    periodEnd: body.periodEnd,
+    adjustmentType: body.adjustmentType,
+    sourceType: body.sourceType,
+    sourceId: body.sourceId,
+    memo: body.memo,
+  });
+
+  return c.json({ journal }, 201);
+});
+
+// Get tax adjustment journal
+taxAdjustmentRoutes.get("/:clientId/tax-adjustments/:journalId", async (c) => {
+  const db = createDb(c.env);
+  const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
+  const client = await getClient(db, c.req.param("clientId"), firm.id);
+  if (!client) return c.json({ error: "Client not found" }, 404);
+
+  const journalId = c.req.param("journalId");
+  const db2 = createDb(c.env);
+  const [journal] = await db2.query<any>(
+    `SELECT * FROM tax_adjustment_journals WHERE id = $1 AND client_id = $2 AND firm_id = $3`,
+    [c.req.param("journalId"), client.id, firm.id],
+  );
+  if (!journal) return c.json({ error: "Not found" }, 404);
+
+  const lines = await db2.query<any>(
+    `SELECT * FROM tax_adjustment_journal_lines WHERE journal_id = $1 ORDER BY created_at`,
+    [journalId],
+  );
+
+  return c.json({ journal: { ...journal, lines } });
+});
+
+// List tax adjustment journals
+taxAdjustmentRoutes.get("/:clientId/tax-adjustments", async (c) => {
+  const db = createDb(c.env);
+  const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
+  const client = await getClient(db, c.req.param("clientId"), firm.id);
+  if (!client) return c.json({ error: "Client not found" }, 404);
+
+  const query = z.object({
+    taxYear: z.number().int().optional(),
+    status: z.enum(["draft", "posted", "reversed"]).optional(),
+    adjustmentType: z.string().optional(),
+    limit: z.number().int().positive().max(200).default(100),
+    offset: z.number().int().nonnegative().default(0),
+  }).parse(c.req.query());
+
+  let sql = `SELECT * FROM tax_adjustment_journals WHERE firm_id = $1 AND client_id = $2`;
+  const params: any[] = [firm.id, client.id];
+  let idx = 3;
+
+  if (query.taxYear) { sql += ` AND tax_year = $${idx++}`; params.push(query.taxYear); }
+  if (query.status) { sql += ` AND status = $${idx++}`; params.push(query.status); }
+  if (query.adjustmentType) { sql += ` AND adjustment_type = $${idx++}`; params.push(query.adjustmentType); }
+
+  sql += ` ORDER BY created_at DESC LIMIT $${idx++} OFFSET $${idx++}`;
+  params.push(query.limit, query.offset);
+
+  const journals = await db.query<any>(sql, params);
+
+  // Get lines for each journal
+  for (const journal of journals) {
+    const lines = await db.query<any>(
+      `SELECT * FROM tax_adjustment_journal_lines WHERE journal_id = $1 ORDER BY created_at`,
+      [journal.id],
+    );
+    journal.lines = lines;
+  }
+
+  return c.json({ journals });
+});
+
+// Add lines to tax adjustment journal
+taxAdjustmentRoutes.post("/:clientId/tax-adjustments/:journalId/lines", async (c) => {
+  const db = createDb(c.env);
+  const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
+  const client = await getClient(db, c.req.param("clientId"), firm.id);
+  if (!client) return c.json({ error: "Client not found" }, 404);
+
+  const body = z.object({
+    lines: z.array(z.object({
+      accountId: z.string(),
+      taxLineId: z.string().optional(),
+      description: z.string().optional(),
+      debit: z.number().nonnegative().default(0),
+      credit: z.number().nonnegative().default(0),
+      currency: z.string().length(3).default("USD"),
+      exchangeRate: z.number().positive().default(1),
+      isTaxOnly: z.boolean().default(false),
+    })).min(1),
+  }).parse(await c.req.json());
+
+  const journalId = c.req.param("journalId");
+  const [journal] = await db.query<any>(
+    `SELECT * FROM tax_adjustment_journals WHERE id = $1 AND client_id = $2 AND firm_id = $3 AND status = 'draft'`,
+    [c.req.param("journalId"), client.id, firm.id],
+  );
+  if (!journal) return c.json({ error: "Journal not found or not in draft status" }, 404);
+
+  const lines = await addTaxAdjustmentJournalLines(db, journalId, body.lines.map(l => ({
+    account_id: l.accountId,
+    tax_line_id: l.taxLineId ?? null,
+    description: l.description ?? null,
+    debit: l.debit,
+    credit: l.credit,
+    currency: l.currency ?? "USD",
+    exchange_rate: l.exchangeRate ?? 1,
+    is_tax_only: l.isTaxOnly ?? false,
+  }));
+  return c.json({ lines });
+});
+
+// Post tax adjustment journal
+taxAdjustmentRoutes.post("/:clientId/tax-adjustments/:journalId/post", async (c) => {
+  const db = createDb(c.env);
+  const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
+  const client = await getClient(db, c.req.param("clientId"), firm.id);
+  if (!client) return c.json({ error: "Client not found" }, 404);
+
+  const journalId = c.req.param("journalId");
+  const [journal] = await db.query<any>(
+    `SELECT * FROM tax_adjustment_journals WHERE id = $1 AND client_id = $2 AND firm_id = $3 AND status = 'draft'`,
+    [journalId, client.id, firm.id],
+  );
+  if (!journal) return c.json({ error: "Journal not found or not in draft status" }, 404);
+
+  const postedJournal = await postTaxAdjustmentJournal(db, journalId, c.get("userId"));
+  return c.json({ journal: postedJournal });
+});
+
+// Reverse tax adjustment journal
+taxAdjustmentRoutes.post("/:clientId/tax-adjustments/:journalId/reverse", async (c) => {
+  const db = createDb(c.env);
+  const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
+  const client = await getClient(db, c.req.param("clientId"), firm.id);
+  if (!client) return c.json({ error: "Client not found" }, 404);
+
+  const body = z.object({ memo: z.string().optional() }).parse(await c.req.json());
+  const journalId = c.req.param("journalId");
+
+  const [original] = await db.query<any>(
+    `SELECT * FROM tax_adjustment_journals WHERE id = $1 AND client_id = $2 AND firm_id = $3 AND status = 'posted'`,
+    [journalId, client.id, firm.id],
+  );
+  if (!original) return c.json({ error: "Journal not found or not posted" }, 404);
+
+  // This would need a reverseTaxAdjustmentJournal function in the service
+  // For now, return not implemented
+  return c.json({ error: "Not yet implemented" }, 501);
+});
+
+// M-1 Reconciliation routes
+taxAdjustmentRoutes.post("/:clientId/m1-reconciliation", async (c) => {
+  const db = createDb(c.env);
+  const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
+  const client = await getClient(db, c.req.param("clientId"), firm.id);
+  if (!client) return c.json({ error: "Client not found" }, 404);
+
+  const body = z.object({
+    taxYear: z.number().int().min(2000).max(2100),
+  }).parse(await c.req.json());
+
+  const reconciliation = await createM1Reconciliation(db, {
+    firmId: firm.id,
+    clientId: client.id,
+    taxYear: body.taxYear,
+  });
+
+  return c.json({ reconciliation }, 201);
+});
+
+taxAdjustmentRoutes.get("/:clientId/m1-reconciliation/:reconciliationId", async (c) => {
+  const db = createDb(c.env);
+  const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
+  const client = await getClient(db, c.req.param("clientId"), firm.id);
+  if (!client) return c.json({ error: "Client not found" }, 404);
+
+  const reconciliationId = c.req.param("reconciliationId");
+  const [reconciliation] = await db.query<any>(
+    `SELECT * FROM m1_reconciliations WHERE id = $1 AND client_id = $2 AND firm_id = $3`,
+    [reconciliationId, client.id, firm.id],
+  );
+  if (!reconciliation) return c.json({ error: "Not found" }, 404);
+
+  const lines = await db.query<any>(
+    `SELECT * FROM m1_reconciliation_lines WHERE reconciliation_id = $1 ORDER BY sort_order`,
+    [reconciliationId],
+  );
+
+  return c.json({ reconciliation: { ...reconciliation, lines } });
+});
+
+taxAdjustmentRoutes.post("/:clientId/m1-reconciliation/:reconciliationId/lines", async (c) => {
+  const db = createDb(c.env);
+  const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
+  const client = await getClient(db, c.req.param("clientId"), firm.id);
+  if (!client) return c.json({ error: "Client not found" }, 404);
+
+  const body = z.object({
+    lineCode: z.string(),
+    lineLabel: z.string(),
+    lineCategory: z.enum(["book_income", "federal_tax", "excess_capital_loss", "taxable_income_not_book", "book_expense_not_deduct", "income_not_taxable", "deductible_not_book", "other"]),
+    amount: z.number(),
+    sourceJournalId: z.string().optional(),
+    sortOrder: z.number().int().default(0),
+    notes: z.string().optional(),
+  }).parse(await c.req.json());
+
+  const reconciliationId = c.req.param("reconciliationId");
+  const [reconciliation] = await db.query<any>(
+    `SELECT * FROM m1_reconciliations WHERE id = $1 AND client_id = $2 AND firm_id = $3`,
+    [reconciliationId, client.id, firm.id],
+  );
+  if (!reconciliation) return c.json({ error: "Not found" }, 404);
+
+  const line = await addM1ReconciliationLine(db, reconciliationId, {
+    line_code: body.lineCode,
+    line_label: body.lineLabel,
+    line_category: body.lineCategory,
+    amount: body.amount,
+    source_journal_id: body.sourceJournalId ?? null,
+    sort_order: body.sortOrder ?? 0,
+    notes: body.notes ?? null,
+  });
+  return c.json({ line });
+});
+
+taxAdjustmentRoutes.post("/:clientId/m1-reconciliation/:reconciliationId/finalize", async (c) => {
+  const db = createDb(c.env);
+  const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
+  const client = await getClient(db, c.req.param("clientId"), firm.id);
+  if (!client) return c.json({ error: "Client not found" }, 404);
+
+  const reconciliationId = c.req.param("reconciliationId");
+  const [reconciliation] = await db.query<any>(
+    `SELECT * FROM m1_reconciliations WHERE id = $1 AND client_id = $2 AND firm_id = $3 AND status = 'draft'`,
+    [reconciliationId, client.id, firm.id],
+  );
+  if (!reconciliation) return c.json({ error: "Reconciliation not found or not in draft status" }, 404);
+
+  const finalized = await finalizeM1Reconciliation(db, reconciliationId, c.get("userId"));
+  return c.json({ reconciliation: finalized });
+});
