@@ -31,4 +31,14 @@ export type Env = {
   OWNER_EMAIL?: string;
   /** Shared secret required by the internal smoke-cleanup endpoint. Never exposed to any client. */
   SMOKE_CLEANUP_TOKEN?: string;
+  /** Optional Teller bank connectivity. Worker secret only. */
+  TELLER_CLIENT_ID?: string;
+  TELLER_CLIENT_SECRET?: string;
+  TELLER_ENVIRONMENT?: 'sandbox' | 'production';
+  TELLER_WEBHOOK_SECRET?: string;
+  /** Optional Plaid bank connectivity. Worker secret only. */
+  PLAID_CLIENT_ID?: string;
+  PLAID_CLIENT_SECRET?: string;
+  PLAID_ENVIRONMENT?: 'sandbox' | 'development' | 'production';
+  PLAID_WEBHOOK_SECRET?: string;
 };
