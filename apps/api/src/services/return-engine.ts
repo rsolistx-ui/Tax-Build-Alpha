@@ -9,8 +9,8 @@ export async function createReturn(db: Db, firmId: string, clientId: string, tax
   return row;
 }
 
-export async function submitReturn(db: Db, returnId: string) {
-  const [r] = await db.query<any>(`SELECT * FROM tax_returns WHERE id=$1`, [returnId]);
+export async function submitReturn(db: Db, firmId: string, clientId: string, returnId: string) {
+  const [r] = await db.query<any>(`SELECT * FROM tax_returns WHERE id=$1 AND firm_id=$2 AND client_id=$3`, [returnId, firmId, clientId]);
   if (!r) throw new Error("Return not found");
   if (r.status !== "draft") throw new Error("Only draft returns can be submitted");
   await db.query(`UPDATE tax_returns SET status='transmitted', updated_at=NOW() WHERE id=$1`, [returnId]);

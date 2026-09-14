@@ -22,7 +22,7 @@ returnEngineRoutes.post("/:clientId/returns", async (c) => {
 returnEngineRoutes.post("/:clientId/returns/:returnId/submit", async (c) => {
   const db = createDb(c.env); const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
   const client = await getClient(db, c.req.param("clientId"), firm.id); if (!client) return c.json({ error: "Client not found" }, 404);
-  try { return c.json({ return: await submitReturn(db, c.req.param("returnId")) }); } catch (e: any) { return c.json({ error: e.message }, 400); }
+  try { return c.json({ return: await submitReturn(db, firm.id, client.id, c.req.param("returnId")) }); } catch (e: any) { return c.json({ error: e.message }, 400); }
 });
 returnEngineRoutes.get("/:clientId/returns", async (c) => {
   const db = createDb(c.env); const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));

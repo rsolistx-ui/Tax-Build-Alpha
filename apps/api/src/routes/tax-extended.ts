@@ -32,7 +32,7 @@ taxExtendedRoutes.post("/:clientId/carryforwards/:cfId/utilize", async (c) => {
   const db = createDb(c.env); const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
   const client = await getClient(db, c.req.param("clientId"), firm.id); if (!client) return c.json({ error: "Client not found" }, 404);
   const body = z.object({ taxYearUsed: z.number().int(), amountUsed: z.number().positive(), returnType: z.string() }).parse(await c.req.json());
-  await utilizeCarryforward(db, c.req.param("cfId"), body.taxYearUsed, body.amountUsed, body.returnType);
+  await utilizeCarryforward(db, firm.id, client.id, c.req.param("cfId"), body.taxYearUsed, body.amountUsed, body.returnType);
   return c.json({ ok: true });
 });
 
@@ -63,6 +63,8 @@ taxExtendedRoutes.post("/:clientId/m3/:reconId/lines", async (c) => {
   const db = createDb(c.env); const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
   const client = await getClient(db, c.req.param("clientId"), firm.id); if (!client) return c.json({ error: "Client not found" }, 404);
   const body = z.object({ part: z.enum(["I","II","III"]), lineCode: z.string(), lineLabel: z.string(), lineCategory: z.string(), perBooks: z.number(), temporaryDiff: z.number(), permanentDiff: z.number(), otherDiff: z.number(), sortOrder: z.number().optional(), notes: z.string().optional() }).parse(await c.req.json());
+  const [recon] = await db.query<any>(`SELECT id FROM m3_reconciliations WHERE id=$1 AND firm_id=$2 AND client_id=$3`, [c.req.param("reconId"), firm.id, client.id]);
+  if (!recon) return c.json({ error: "M-3 reconciliation not found" }, 404);
   return c.json({ line: await addM3Line(db, c.req.param("reconId"), body) }, 201);
 });
 

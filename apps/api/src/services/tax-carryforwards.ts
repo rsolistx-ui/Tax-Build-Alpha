@@ -15,14 +15,16 @@ export async function createCarryforward(db: Db, firmId: string, clientId: strin
   return row;
 }
 
-export async function utilizeCarryforward(db: Db, carryforwardId: string, taxYearUsed: number, amountUsed: number, returnType: string): Promise<void> {
-  const [cf] = await db.query<any>(`SELECT * FROM tax_carryforwards WHERE id=$1`, [carryforwardId]);
+export async function utilizeCarryforward(db: Db, firmId: string, clientId: string, carryforwardId: string, taxYearUsed: number, amountUsed: number, returnType: string): Promise<void> {
+  const [cf] = await db.query<any>(`SELECT * FROM tax_carryforwards WHERE id=$1 AND firm_id=$2 AND client_id=$3`, [carryforwardId, firmId, clientId]);
   if (!cf) throw new Error("Carryforward not found");
   if (Number(cf.remaining_amount) < amountUsed) throw new Error("Insufficient remaining amount");
   const id = newId("tcfu");
-  await db.query(`INSERT INTO tax_carryforward_utilization (id,carryforward_id,tax_year_used,amount_used,return_type) VALUES ($1,$2,$3,$4,$5)`, [id, carryforwardId, taxYearUsed, amountUsed, returnType]);
   const newRemaining = Number(cf.remaining_amount) - amountUsed;
   const newUsed = Number(cf.used_amount) + amountUsed;
   const status = newRemaining <= 0.005 ? "fully_used" : "active";
-  await db.query(`UPDATE tax_carryforwards SET remaining_amount=$1, used_amount=$2, status=$3, updated_at=NOW() WHERE id=$4`, [newRemaining, newUsed, status, carryforwardId]);
+  await db.transaction([
+    { query: `INSERT INTO tax_carryforward_utilization (id,carryforward_id,tax_year_used,amount_used,return_type) VALUES ($1,$2,$3,$4,$5)`, params: [id, carryforwardId, taxYearUsed, amountUsed, returnType] },
+    { query: `UPDATE tax_carryforwards SET remaining_amount=$1, used_amount=$2, status=$3, updated_at=NOW() WHERE id=$4 AND remaining_amount=$5`, params: [newRemaining, newUsed, status, carryforwardId, cf.remaining_amount] },
+  ]);
 }

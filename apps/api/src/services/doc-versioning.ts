@@ -6,11 +6,19 @@ export async function listVersions(db: Db, documentId: string) {
 }
 
 export async function createVersion(db: Db, firmId: string, documentId: string, r2Key: string, userId: string) {
-  const rows = await db.query<any>(`SELECT max(version) as m FROM document_versions WHERE document_id=$1`, [documentId]);
-  const version = Number(rows[0]?.m ?? 0) + 1;
-  const id = newId("docv");
-  const [row] = await db.query<any>(`INSERT INTO document_versions (id,firm_id,document_id,version,r2_key,created_by_user_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`, [id, firmId, documentId, version, r2Key, userId]);
-  return row;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const rows = await db.query<any>(`SELECT max(version) as m FROM document_versions WHERE document_id=$1`, [documentId]);
+    const version = Number(rows[0]?.m ?? 0) + 1;
+    const id = newId("docv");
+    try {
+      const [row] = await db.query<any>(`INSERT INTO document_versions (id,firm_id,document_id,version,r2_key,created_by_user_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`, [id, firmId, documentId, version, r2Key, userId]);
+      return row;
+    } catch (e: any) {
+      if (String(e.message).includes("duplicate") || String(e.message).includes("unique")) continue;
+      throw e;
+    }
+  }
+  throw new Error("Version conflict, retry");
 }
 
 export async function listSignatureRequests(db: Db, firmId: string, clientId: string) {

@@ -28,6 +28,8 @@ import { taxWorkpaperRoutes } from "./routes/tax-workpapers";
 import { taxOrganizerRoutes } from "./routes/tax-organizer";
 import { taxExtendedRoutes } from "./routes/tax-extended";
 import { docVersioningRoutes } from "./routes/doc-versioning";
+import { taxWorkbenchRoutes } from "./routes/tax-workbench";
+import { returnEngineRoutes } from "./routes/return-engine";
 
 const app = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 
@@ -137,9 +139,7 @@ app.route("/api/clients", taxWorkpaperRoutes);
 app.route("/api/clients", taxOrganizerRoutes);
 app.route("/api/clients", taxExtendedRoutes);
 app.route("/api/clients", docVersioningRoutes);
-import { taxWorkbenchRoutes } from "./routes/tax-workbench";
 app.route("/api/clients", taxWorkbenchRoutes);
-import { returnEngineRoutes } from "./routes/return-engine";
 app.route("/api/clients", returnEngineRoutes);
 
 app.notFound((c) => c.json({ error: "Not found" }, 404));
