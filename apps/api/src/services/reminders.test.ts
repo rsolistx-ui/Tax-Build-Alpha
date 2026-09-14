@@ -23,7 +23,7 @@ function fakeDb(rows: Record<string, unknown[][]>) {
     },
     async transaction<T>(statements: DbStatement[]): Promise<T[][]> {
       for (const s of statements) {
-        calls.push({ sql: s.query, params: s.params });
+        calls.push({ sql: s.query, params: s.params ?? [] });
       }
       return [] as T[][];
     },

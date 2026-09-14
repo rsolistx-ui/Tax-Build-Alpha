@@ -12,6 +12,7 @@ import {
   Settings,
   Upload,
   FileDown,
+  FileSpreadsheet,
   AlertTriangle,
   CheckCircle2,
   XCircle,
@@ -42,6 +43,7 @@ import { DocumentsPanel } from "@/components/documents-panel";
 import { EngagementsPanel } from "@/components/engagements-panel";
 import { RequestsPanel } from "@/components/requests-panel";
 import { AgentPanel } from "@/components/agent-panel";
+import { TaxWorkpaper } from "@/components/tax-workpaper";
 import { convertHeicToJpeg, createCaptureInput, type CaptureSource } from "@/lib/image-utils";
 
 type Category = {
@@ -99,11 +101,11 @@ type BatchFile = {
   error?: string;
 };
 
-type Tab = "overview" | "folders" | "upload" | "review" | "bank" | "pnl" | "tax-readiness" | "documents" | "engagements" | "requests" | "export" | "agent";
+type Tab = "overview" | "folders" | "upload" | "review" | "bank" | "pnl" | "tax-readiness" | "workpaper" | "documents" | "engagements" | "requests" | "export" | "agent";
 
 
 
-const VALID_TABS: Tab[] = ["overview", "folders", "upload", "review", "bank", "pnl", "tax-readiness", "documents", "engagements", "requests", "export", "agent"];
+const VALID_TABS: Tab[] = ["overview", "folders", "upload", "review", "bank", "pnl", "tax-readiness", "workpaper", "documents", "engagements", "requests", "export", "agent"];
 
 export function ClientWorkspacePage() {
   const { clientId = "" } = useParams();
@@ -333,6 +335,7 @@ export function ClientWorkspacePage() {
       { id: "bank" as const, label: "Bank", icon: Landmark },
       { id: "pnl" as const, label: "P&L", icon: LineChart },
       { id: "tax-readiness" as const, label: "Tax readiness", icon: ClipboardList },
+      { id: "workpaper" as const, label: "Workpaper", icon: FileSpreadsheet },
       { id: "documents" as const, label: "Documents", icon: FileStack },
       { id: "engagements" as const, label: "Engagements", icon: ClipboardList },
       { id: "requests" as const, label: "Requests", icon: Inbox },
@@ -414,6 +417,10 @@ export function ClientWorkspacePage() {
 
       {tab === "tax-readiness" ? (
         <TaxReadinessPanel clientId={clientId} taxYear={pinnedTaxYear ?? profile?.tax_year ?? null} />
+      ) : null}
+
+      {tab === "workpaper" ? (
+        <TaxWorkpaper clientId={clientId} taxYear={pinnedTaxYear ?? profile?.tax_year ?? new Date().getFullYear()} />
       ) : null}
 
       {tab === "documents" ? <DocumentsPanel clientId={clientId} /> : null}
