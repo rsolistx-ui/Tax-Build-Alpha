@@ -20,6 +20,8 @@ const testEnv: Env = {
   BETTER_AUTH_SECRET: "test-secret-at-least-32-chars-long!!",
   BETTER_AUTH_URL: "https://folio-api.rsolistx.workers.dev",
   OWNER_EMAIL: "owner@example.com",
+  VAPID_PUBLIC_KEY: "test-public-key",
+  VAPID_PRIVATE_KEY: "test-private-key",
 };
 
 const FIRM_ROW = { id: "firm_1", name: "Test Firm", owner_user_id: "user_1" };

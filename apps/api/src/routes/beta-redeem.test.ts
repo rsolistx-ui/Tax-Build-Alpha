@@ -19,6 +19,8 @@ const testEnv: Env = {
   RECEIPTS: {} as unknown as Env["RECEIPTS"],
   BETTER_AUTH_SECRET: "test-secret-at-least-32-chars-long!!",
   BETTER_AUTH_URL: "https://folio-api.rsolistx.workers.dev",
+  VAPID_PUBLIC_KEY: "test-public-key",
+  VAPID_PRIVATE_KEY: "test-private-key",
 };
 
 const PENDING_INVITATION = {
