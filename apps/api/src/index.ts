@@ -41,7 +41,7 @@ app.use(
       return allowed.has(origin) ? origin : c.env.APP_ORIGIN || "http://localhost:5173";
     },
     allowHeaders: ["Content-Type", "Authorization"],
-    allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+     allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     credentials: true,
   }),
 );

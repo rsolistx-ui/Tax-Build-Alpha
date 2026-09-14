@@ -297,6 +297,7 @@ export async function reverseTaxAdjustmentJournal(
   const [journal] = await db.query<any>(`SELECT * FROM tax_adjustment_journals WHERE id = $1`, [journalId]);
   if (!journal) throw new Error("Journal not found");
   if (journal.status !== "posted") throw new Error("Only posted journals can be reversed");
+  if (journal.reversed_journal_id) throw new Error("Journal already reversed");
 
   const lines = await db.query<any>(`SELECT * FROM tax_adjustment_journal_lines WHERE journal_id = $1`, [journalId]);
   const totalDebit = lines.reduce((sum: number, l: any) => sum + Number(l.debit), 0);
@@ -305,22 +306,14 @@ export async function reverseTaxAdjustmentJournal(
 
   const newId2 = newId("taj");
   const now = new Date().toISOString();
-  await db.query(
-    `INSERT INTO tax_adjustment_journals (id, firm_id, client_id, engagement_id, tax_year, period_end, adjustment_type, source_type, source_id, memo, status, created_at, updated_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,'manual',NULL,$8,'draft',$9,$10)`,
-    [newId2, journal.firm_id, journal.client_id, journal.engagement_id, journal.tax_year, journal.period_end, journal.adjustment_type, `Reversal of ${journal.id}`, now, now]
-  );
-
-  for (const l of lines) {
-    await db.query(
-      `INSERT INTO tax_adjustment_journal_lines (id, journal_id, account_id, tax_line_id, description, debit, credit, currency, exchange_rate, is_tax_only)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-      [newId("tajl"), newId2, l.account_id, l.tax_line_id, l.description ? `Reversal: ${l.description}` : "Reversal", l.credit, l.debit, l.currency, l.exchange_rate, l.is_tax_only]
-    );
-  }
+  const statements: any[] = [
+    { query: `INSERT INTO tax_adjustment_journals (id, firm_id, client_id, engagement_id, tax_year, period_end, adjustment_type, source_type, source_id, memo, status, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,'manual',NULL,$8,'draft',$9,$10)`, params: [newId2, journal.firm_id, journal.client_id, journal.engagement_id, journal.tax_year, journal.period_end, journal.adjustment_type, `Reversal of ${journal.id}`, now, now] },
+    ...lines.map((l: any) => ({ query: `INSERT INTO tax_adjustment_journal_lines (id, journal_id, account_id, tax_line_id, description, debit, credit, currency, exchange_rate, is_tax_only) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, params: [newId("tajl"), newId2, l.account_id, l.tax_line_id, l.description ? `Reversal: ${l.description}` : "Reversal", l.credit, l.debit, l.currency, l.exchange_rate, l.is_tax_only] })),
+  ];
+  await db.transaction(statements);
 
   const reversal = await postTaxAdjustmentJournal(db, newId2, actorUserId);
-  await db.query(`UPDATE tax_adjustment_journals SET reversed_journal_id = $1, updated_at = NOW() WHERE id = $2`, [reversal.id, journalId]);
+  await db.query(`UPDATE tax_adjustment_journals SET reversed_journal_id = $1, status='reversed', updated_at = NOW() WHERE id = $2`, [reversal.id, journalId]);
   return reversal;
 }
 

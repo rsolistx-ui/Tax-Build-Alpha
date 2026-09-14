@@ -11,11 +11,11 @@ export async function getTaxWorkpaper(db: Db, firmId: string, clientId: string, 
 export async function upsertTaxWorkpaper(db: Db, firmId: string, clientId: string, taxYear: number, data: any, name?: string): Promise<TaxWorkpaper> {
   const existing = await getTaxWorkpaper(db, firmId, clientId, taxYear);
   if (existing) {
-    const [row] = await db.query<any>(`UPDATE tax_workpapers SET data=$1, name=COALESCE($2,name), updated_at=NOW() WHERE id=$3 RETURNING *`, [JSON.stringify(data), name ?? null, existing.id]);
+    const [row] = await db.query<any>(`UPDATE tax_workpapers SET data=$1::jsonb, name=COALESCE($2,name), updated_at=NOW() WHERE id=$3 RETURNING *`, [JSON.stringify(data), name ?? null, existing.id]);
     return mapRow(row);
   }
   const id = newId("twp");
-  const [row] = await db.query<any>(`INSERT INTO tax_workpapers (id,firm_id,client_id,tax_year,name,data) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`, [id, firmId, clientId, taxYear, name ?? "Workpaper", JSON.stringify(data)]);
+  const [row] = await db.query<any>(`INSERT INTO tax_workpapers (id,firm_id,client_id,tax_year,name,data) VALUES ($1,$2,$3,$4,$5,$6::jsonb) RETURNING *`, [id, firmId, clientId, taxYear, name ?? "Workpaper", JSON.stringify(data)]);
   return mapRow(row);
 }
 
