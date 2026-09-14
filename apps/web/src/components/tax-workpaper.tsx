@@ -63,14 +63,23 @@ export function TaxWorkpaper({ clientId, taxYear }: { clientId: string; taxYear:
   const [showFunctionPicker, setShowFunctionPicker] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     const defaultNames = ['1040', 'SchC', 'SchD', 'SchE', 'M1', 'State'];
-    const storageKey = `workpaper-${clientId}-${taxYear}`;
 
-    let savedData: Record<string, any> | null = null;
-    const raw = localStorage.getItem(storageKey);
-    if (raw) {
-      try { savedData = JSON.parse(raw); } catch { /* ignore corrupted data */ }
-    }
+    async function load() {
+      let savedData: Record<string, any> | null = null;
+      try {
+        const res = await fetch(`/api/clients/${clientId}/tax-workpaper/${taxYear}`, { credentials: 'include' });
+        if (res.ok) {
+          const j = await res.json() as { workpaper?: { data?: Record<string, any> } | null };
+          if (j.workpaper?.data) savedData = j.workpaper.data as Record<string, any>;
+        }
+      } catch { /* offline */ }
+      if (!savedData) {
+        const raw = localStorage.getItem(`workpaper-${clientId}-${taxYear}`);
+        if (raw) { try { savedData = JSON.parse(raw); } catch { /* ignore */ } }
+      }
+      if (cancelled) return;
 
     const sheetNames = savedData ? Object.keys(savedData).filter(name => name !== 'activeSheet') : defaultNames;
 
@@ -110,28 +119,21 @@ export function TaxWorkpaper({ clientId, taxYear }: { clientId: string; taxYear:
       newSheets.set(name, { ...sheet, cells: refreshed });
     });
 
-    setSheets(newSheets);
-    const active = savedData?.activeSheet;
-    if (typeof active === 'string' && sheetNames.includes(active)) setActiveSheet(active);
-
-    return () => {
-      hfRef.current?.destroy();
-      hfRef.current = null;
-    };
+      setSheets(newSheets);
+      const active = savedData?.activeSheet;
+      if (typeof active === 'string' && sheetNames.includes(active)) setActiveSheet(active);
+    }
+    load();
+    return () => { cancelled = true; hfRef.current?.destroy(); hfRef.current = null; };
   }, [clientId, taxYear]);
 
-  const persistSheets = useCallback((newSheets: Map<string, WorkpaperSheet>, active: string) => {
-    try {
-      const serializable: Record<string, any> = { activeSheet: active };
-      newSheets.forEach((sheet, name) => {
-        serializable[name] = {
-          cells: Object.fromEntries(sheet.cells.entries()),
-          rows: sheet.rows,
-          cols: sheet.cols,
-        };
-      });
-      localStorage.setItem(`workpaper-${clientId}-${taxYear}`, JSON.stringify(serializable));
-    } catch { /* storage full or unavailable */ }
+  const persistSheets = useCallback(async (newSheets: Map<string, WorkpaperSheet>, active: string) => {
+    const serializable: Record<string, any> = { activeSheet: active };
+    newSheets.forEach((sheet, name) => {
+      serializable[name] = { cells: Object.fromEntries(sheet.cells.entries()), rows: sheet.rows, cols: sheet.cols };
+    });
+    localStorage.setItem(`workpaper-${clientId}-${taxYear}`, JSON.stringify(serializable));
+    try { await fetch(`/api/clients/${clientId}/tax-workpaper/${taxYear}`, { method: 'PUT', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ data: serializable }) }); } catch { /* offline */ }
   }, [clientId, taxYear]);
 
   const evaluateCell = useCallback(async (sheetName: string, ck: string, value: string) => {

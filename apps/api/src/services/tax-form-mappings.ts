@@ -128,7 +128,7 @@ export async function seedDefaultTaxFormMappings(
     );
     if (existing.length > 0) continue;
 
-    await createTaxFormMapping(db, "firm_id_placeholder", "client_id_placeholder", {
+    await createTaxFormMapping(db, firmId, clientId, {
       taxForm,
       taxYear,
       formLineCode: entry.formLineCode,
@@ -217,10 +217,10 @@ function getDefaultTaxFormTemplates(taxForm: string, taxYear: number): Array<{
       { formLineCode: "1120S_15", formLineLabel: "Depletion", sortOrder: 15 },
       { formLineCode: "1120S_16", formLineLabel: "Advertising", sortOrder: 15 },
       { formLineCode: "1120S_17", formLineLabel: "Pension, profit-sharing plans", sortOrder: 16 },
-      { formLineCode: "1120S_18", formLineLabel: "Employee benefit programs", sortOrder: 16 },
-      { formLineCode: "1120S_18", formLineLabel: "Other deductions", sortOrder: 17 },
-      { formLineCode: "1120S_19", formLineLabel: "Total deductions", sortOrder: 18 },
-      { formLineCode: "1120S_20", formLineLabel: "Ordinary business income (loss)", sortOrder: 19 },
+      { formLineCode: "1120S_18", formLineLabel: "Employee benefit programs", sortOrder: 17 },
+      { formLineCode: "1120S_19", formLineLabel: "Other deductions", sortOrder: 18 },
+      { formLineCode: "1120S_20", formLineLabel: "Total deductions", sortOrder: 19 },
+      { formLineCode: "1120S_21", formLineLabel: "Ordinary business income (loss)", sortOrder: 20 },
     ],
     "1065": [
       { formLineCode: "1065_1", formLineLabel: "Gross receipts or sales", sortOrder: 1 },
@@ -235,14 +235,14 @@ function getDefaultTaxFormTemplates(taxForm: string, taxYear: number): Array<{
       { formLineCode: "1065_10", formLineLabel: "Bad debts", sortOrder: 10 },
       { formLineCode: "1065_11", formLineLabel: "Rents", sortOrder: 11 },
       { formLineCode: "1065_12", formLineLabel: "Taxes and licenses", sortOrder: 12 },
-      { formLineCode: "1065_13", formLineLabel: "Interest", sortOrder: 12 },
-      { formLineCode: "1065_14", formLineLabel: "Depreciation", sortOrder: 13 },
-      { formLineCode: "1065_15", formLineLabel: "Depletion", sortOrder: 13 },
-      { formLineCode: "1065_16", formLineLabel: "Retirement plans", sortOrder: 14 },
-      { formLineCode: "1065_17", formLineLabel: "Employee benefit programs", sortOrder: 14 },
-      { formLineCode: "1065_18", formLineLabel: "Other deductions", sortOrder: 15 },
-      { formLineCode: "1065_19", formLineLabel: "Total deductions", sortOrder: 16 },
-      { formLineCode: "1065_20", formLineLabel: "Ordinary business income (loss)", sortOrder: 17 },
+      { formLineCode: "1065_13", formLineLabel: "Interest", sortOrder: 13 },
+      { formLineCode: "1065_14", formLineLabel: "Depreciation", sortOrder: 14 },
+      { formLineCode: "1065_15", formLineLabel: "Depletion", sortOrder: 15 },
+      { formLineCode: "1065_16", formLineLabel: "Retirement plans", sortOrder: 16 },
+      { formLineCode: "1065_17", formLineLabel: "Employee benefit programs", sortOrder: 17 },
+      { formLineCode: "1065_18", formLineLabel: "Other deductions", sortOrder: 18 },
+      { formLineCode: "1065_19", formLineLabel: "Total deductions", sortOrder: 19 },
+      { formLineCode: "1065_20", formLineLabel: "Ordinary business income (loss)", sortOrder: 20 },
     ],
     "state_CA": [
       { formLineCode: "CA_1", formLineLabel: "Federal taxable income", sortOrder: 1 },

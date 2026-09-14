@@ -12,6 +12,7 @@ import {
   createTaxAdjustmentJournal,
   addTaxAdjustmentJournalLines,
   postTaxAdjustmentJournal,
+  reverseTaxAdjustmentJournal,
   createM1Reconciliation,
   addM1ReconciliationLine,
   finalizeM1Reconciliation,
@@ -180,9 +181,17 @@ taxAdjustmentRoutes.post("/:clientId/tax-adjustments/:journalId/post", async (c)
   return c.json({ journal: postedJournal });
 });
 
-// Reverse tax adjustment journal (stub)
 taxAdjustmentRoutes.post("/:clientId/tax-adjustments/:journalId/reverse", async (c) => {
-  return c.json({ error: "Not yet implemented" }, 501);
+  const db = createDb(c.env);
+  const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
+  const client = await getClient(db, c.req.param("clientId"), firm.id);
+  if (!client) return c.json({ error: "Client not found" }, 404);
+  const journalId = c.req.param("journalId");
+  const [journal] = await db.query<any>(`SELECT * FROM tax_adjustment_journals WHERE id=$1 AND client_id=$2 AND firm_id=$3`, [journalId, client.id, firm.id]);
+  if (!journal) return c.json({ error: "Not found" }, 404);
+  if (journal.status !== "posted") return c.json({ error: "Only posted journals can be reversed" }, 400);
+  const reversal = await reverseTaxAdjustmentJournal(db, journalId, c.get("userId"));
+  return c.json({ journal: reversal });
 });
 
 // M-1 Reconciliation routes

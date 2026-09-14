@@ -24,6 +24,8 @@ import { clientRequestRoutes } from "./routes/client-requests";
 import { portalRoutes } from "./routes/portal";
 import { agentSupervisorRoutes, agentDeskRoutes } from "./routes/agent-supervisor";
 import { taxAdjustmentRoutes } from "./routes/tax-adjustment";
+import { taxWorkpaperRoutes } from "./routes/tax-workpapers";
+import { taxOrganizerRoutes } from "./routes/tax-organizer";
 
 const app = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 
@@ -129,6 +131,8 @@ app.route("/api/portal", portalRoutes);
 app.route("/api/agent-tasks", agentDeskRoutes);
 app.route("/api/clients", agentSupervisorRoutes);
 app.route("/api/clients", taxAdjustmentRoutes);
+app.route("/api/clients", taxWorkpaperRoutes);
+app.route("/api/clients", taxOrganizerRoutes);
 
 app.notFound((c) => c.json({ error: "Not found" }, 404));
 app.onError((err, c) => {
