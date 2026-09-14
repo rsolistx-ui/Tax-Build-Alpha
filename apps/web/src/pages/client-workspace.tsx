@@ -44,6 +44,7 @@ import { EngagementsPanel } from "@/components/engagements-panel";
 import { RequestsPanel } from "@/components/requests-panel";
 import { AgentPanel } from "@/components/agent-panel";
 import { TaxWorkpaper } from "@/components/tax-workpaper";
+import { CarryforwardPanel, StateModsPanel, M3Panel, PriorYearPanel, ExtensionsPanel, OrganizerPanel, DiagnosticsPanel } from "@/components/tax-extended-panels";
 import { convertHeicToJpeg, createCaptureInput, type CaptureSource } from "@/lib/image-utils";
 
 type Category = {
@@ -420,7 +421,18 @@ export function ClientWorkspacePage() {
       ) : null}
 
       {tab === "workpaper" ? (
-        <TaxWorkpaper clientId={clientId} taxYear={pinnedTaxYear ?? profile?.tax_year ?? new Date().getFullYear()} />
+        <div className="space-y-4">
+          <TaxWorkpaper clientId={clientId} taxYear={pinnedTaxYear ?? profile?.tax_year ?? new Date().getFullYear()} />
+          <div className="grid gap-4 md:grid-cols-2">
+            <CarryforwardPanel clientId={clientId} />
+            <ExtensionsPanel clientId={clientId} />
+            <StateModsPanel clientId={clientId} taxYear={pinnedTaxYear ?? profile?.tax_year ?? new Date().getFullYear()} />
+            <M3Panel clientId={clientId} taxYear={pinnedTaxYear ?? profile?.tax_year ?? new Date().getFullYear()} />
+            <PriorYearPanel clientId={clientId} taxYear={pinnedTaxYear ?? profile?.tax_year ?? new Date().getFullYear()} />
+            <OrganizerPanel clientId={clientId} taxForm={profile?.entity_type === "c_corp" ? "1120" : profile?.entity_type === "s_corp" ? "1120S" : profile?.entity_type === "partnership" ? "1065" : "1040"} />
+            <DiagnosticsPanel clientId={clientId} taxYear={pinnedTaxYear ?? profile?.tax_year ?? new Date().getFullYear()} />
+          </div>
+        </div>
       ) : null}
 
       {tab === "documents" ? <DocumentsPanel clientId={clientId} /> : null}

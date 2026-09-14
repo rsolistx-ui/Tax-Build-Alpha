@@ -28,3 +28,9 @@ export const ORGANIZER_CHECKLIST: Record<string, Array<{ code: string; label: st
 export function getOrganizerChecklist(taxForm: string) {
   return ORGANIZER_CHECKLIST[taxForm] ?? [];
 }
+
+export function getOrganizerPrefill(taxForm: string, priorYearData: Record<string, any> | null) {
+  const checklist = getOrganizerChecklist(taxForm);
+  if (!priorYearData) return checklist.map(c => ({ ...c, prefilled: false }));
+  return checklist.map(c => ({ ...c, prefilled: Boolean(priorYearData[c.code]) }));
+}
