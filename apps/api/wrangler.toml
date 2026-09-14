@@ -19,7 +19,7 @@ APP_ORIGIN = "https://folio-api.rsolistx.workers.dev"
 [[d1_databases]]
 binding = "AUTH_DB"
 database_name = "folio-db"
-database_id = "e6893c3a-8ea4-4242-96b2-8b18adc543af"
+database_id = "e6893c3a-8ea4-4242-96b2-8b18adc543af 23ba4caf-0257-4580-b667-0563ed9c923c"
 migrations_dir = "../../migrations"
 
 [[r2_buckets]]
