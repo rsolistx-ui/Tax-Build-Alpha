@@ -1,9 +1,4 @@
-// Folio PWA service worker: installability only. This worker never caches
-// anything beyond a fixed, explicit list of static app-shell assets. It
-// never intercepts /api/* requests, receipt sources, bank data, P&L
-// responses, authentication responses, or any other financial or session
-// data - those always go straight to the network, uncached, unmodified.
-const CACHE_NAME = "folio-shell-v2";
+const CACHE_NAME = "folio-shell-v3";
 const APP_SHELL = [
   "/manifest.webmanifest",
   "/icons/icon-192.png",
@@ -29,6 +24,33 @@ self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
   if (url.pathname.startsWith("/api/")) return;
   if (!APP_SHELL.includes(url.pathname)) return;
-
   event.respondWith(caches.match(event.request).then((cached) => cached || fetch(event.request)));
+});
+
+self.addEventListener("push", (event) => {
+  const data = event.data ? event.data.json().catch(() => ({ title: event.data.text() })) : Promise.resolve({ title: "Folio", body: "" });
+  event.waitUntil(
+    Promise.resolve(data).then((d) =>
+      self.registration.showNotification(d.title || "Folio", {
+        body: d.body || "",
+        icon: "/icons/icon-192.png",
+        badge: "/icons/icon-192.png",
+        data: d,
+      }),
+    ),
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const url = event.notification.data?.url || "/";
+  event.waitUntil(clients.openWindow(url));
+});
+
+self.addEventListener("sync", (event) => {
+  if (event.tag === "folio-offline-queue") {
+    event.waitUntil(
+      clients.matchAll().then((cs) => cs.forEach((c) => c.postMessage({ type: "folio-sync" }))),
+    );
+  }
 });

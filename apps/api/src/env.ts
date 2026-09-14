@@ -31,6 +31,9 @@ export type Env = {
   OWNER_EMAIL?: string;
   /** Shared secret required by the internal smoke-cleanup endpoint. Never exposed to any client. */
   SMOKE_CLEANUP_TOKEN?: string;
+  /** Push notifications (Web Push + VAPID). Never hardcoded; set as Worker secrets. */
+  VAPID_PUBLIC_KEY: string;
+  VAPID_PRIVATE_KEY: string;
   /** Optional Teller bank connectivity. Worker secret only. */
   TELLER_CLIENT_ID?: string;
   TELLER_CLIENT_SECRET?: string;

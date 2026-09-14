@@ -141,6 +141,8 @@ app.route("/api/clients", taxExtendedRoutes);
 app.route("/api/clients", docVersioningRoutes);
 app.route("/api/clients", taxWorkbenchRoutes);
 app.route("/api/clients", returnEngineRoutes);
+import { pushRoutes } from "./routes/push";
+app.route("/api/push", pushRoutes);
 
 app.notFound((c) => c.json({ error: "Not found" }, 404));
 app.onError((err, c) => {

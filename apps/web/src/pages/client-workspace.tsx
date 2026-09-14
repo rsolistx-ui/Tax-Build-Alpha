@@ -45,7 +45,10 @@ import { RequestsPanel } from "@/components/requests-panel";
 import { AgentPanel } from "@/components/agent-panel";
 import { TaxWorkpaper } from "@/components/tax-workpaper";
 import { CarryforwardPanel, StateModsPanel, M3Panel, PriorYearPanel, ExtensionsPanel, OrganizerPanel, DiagnosticsPanel } from "@/components/tax-extended-panels";
-import { convertHeicToJpeg, createCaptureInput, type CaptureSource } from "@/lib/image-utils";
+import { convertHeicToJpeg, createCaptureInput } from "@/lib/image-utils";
+import { enqueueReceipt, drainQueue, registerSyncListener, queueCount } from "@/lib/offline-queue";
+import { subscribePush, unsubscribePush } from "@/lib/push";
+import { Bell, Wifi } from "lucide-react";
 
 type Category = {
   id: string;
@@ -137,30 +140,9 @@ export function ClientWorkspacePage() {
   const [error, setError] = useState<string | null>(null);
   const [batch, setBatch] = useState<BatchFile[]>([]);
   const [batchRunning, setBatchRunning] = useState(false);
+  const [queueCountState, setQueueCountState] = useState<number>(0);
+  const [pushSubscribed, setPushSubscribed] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  function openCaptureInput(source: CaptureSource) {
-    const input = createCaptureInput(source, "image/*,application/pdf");
-    input.multiple = true;
-    input.onchange = async (e: Event) => {
-      const target = e.target as HTMLInputElement;
-      const files = target.files;
-      if (files?.length) {
-        // Convert HEIC to JPEG on the client before adding to batch
-        const convertedFiles: File[] = [];
-        for (let i = 0; i < files.length; i++) {
-          const file = files[i];
-          const converted = await convertHeicToJpeg(file);
-          convertedFiles.push(converted);
-        }
-        // Create a temporary FileList-like object
-        const dataTransfer = new DataTransfer();
-        convertedFiles.forEach((f) => dataTransfer.items.add(f));
-        addFilesToBatch(dataTransfer.files);
-      }
-    };
-    input.click();
-  }
 
   useEffect(() => {
     if (searchParams.get("tab") || searchParams.get("focus")) {
@@ -192,6 +174,22 @@ export function ClientWorkspacePage() {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientId]);
+
+  useEffect(() => {
+    void queueCount().then(setQueueCountState);
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = registerSyncListener(async (clientId: string, file: File) => {
+      const form = new FormData();
+      form.append("file", file);
+      try { await api(`/api/clients/${clientId}/receipts`, { method: "POST", body: form }); } catch { throw new Error("upload failed"); }
+    });
+    void subscribePush().then((sub) => setPushSubscribed(!!sub)).catch(() => {});
+    return () => {
+      if (typeof unsubscribe === "function") unsubscribe();
+    };
+  }, []);
 
   async function saveProfile(next: Record<string, unknown>) {
     try {
@@ -285,6 +283,7 @@ export function ClientWorkspacePage() {
     } catch (e) {
       const errorMessage = e instanceof Error ? e.message : "Upload failed";
       setBatch((current) => current.map((b) => (b.id === item.id ? { ...b, status: "failed", error: errorMessage } : b)));
+      void enqueueReceipt(clientId, item.file).catch(() => {});
     }
   }
 
@@ -550,60 +549,144 @@ export function ClientWorkspacePage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap items-center gap-3">
               <Button
-                variant="outline"
-                onClick={() => void openCaptureInput("file")}
-                className="flex items-center gap-2"
+                variant="ghost"
+                size="sm"
+                onClick={async () => {
+                  if (pushSubscribed) {
+                    await unsubscribePush();
+                    setPushSubscribed(false);
+                  } else {
+                    const sub = await subscribePush();
+                    setPushSubscribed(!!sub);
+                  }
+                }}
               >
-                <Upload className="h-3.5 w-3.5" />
-                Choose files
+                <Bell className="h-3.5 w-3.5" /> {pushSubscribed ? "Push on" : "Push notifications"}
               </Button>
               <Button
-                variant="outline"
-                onClick={() => void openCaptureInput("camera")}
-                className="flex items-center gap-2"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  void drainQueue(async (c: string, f: File) => {
+                    const form = new FormData();
+                    form.append("file", f);
+                    await api(`/api/clients/${c}/receipts`, { method: "POST", body: form });
+                  });
+                }}
               >
-                <Camera className="h-3.5 w-3.5" />
-                Take photo
+                <Wifi className="h-3.5 w-3.5" /> Sync offline queue
               </Button>
-              <Button
-                variant="outline"
-                onClick={() => void openCaptureInput("library")}
-                className="flex items-center gap-2"
-              >
-                <Image className="h-3.5 w-3.5" />
-                Photo library
-              </Button>
+              {queueCountState > 0 ? <span className="text-sm text-muted-foreground">{queueCountState} file{queueCountState !== 1 ? "s" : ""} queued offline</span> : null}
             </div>
 
-            <label className="flex cursor-pointer flex-col items-center justify-center rounded-[var(--radius-lg)] border border-dashed border-[var(--color-border)] bg-[var(--color-muted)]/40 px-6 py-12 text-center hover:bg-[var(--color-muted)]/70">
-              <Upload className="mb-3 h-6 w-6 text-[var(--color-muted-foreground)]" />
-              <span className="text-sm font-medium">Click or drop receipt files</span>
-              <span className="mt-1 text-xs text-[var(--color-muted-foreground)]">PNG, JPG, WEBP, PDF · select as many as you like</span>
-              <input
-                type="file"
-                ref={fileInputRef}
-                className="hidden"
-                multiple
-                accept="image/*,application/pdf"
-                onChange={async (e: React.ChangeEvent<HTMLInputElement>) => {
-                  const files = e.target.files;
-                  if (files?.length) {
-                    const convertedFiles: File[] = [];
-                    for (let i = 0; i < files.length; i++) {
-                      const file = files[i];
-                      const converted = await convertHeicToJpeg(file);
-                      convertedFiles.push(converted);
-                    }
-                    const dataTransfer = new DataTransfer();
-                    convertedFiles.forEach((f) => dataTransfer.items.add(f));
-                    addFilesToBatch(dataTransfer.files);
-                  }
-                  e.target.value = "";
-                }}
-              />
-            </label>
+            <div className="flex flex-wrap gap-2">
+               <Button
+                 variant="outline"
+                 onClick={async () => {
+                   const input = createCaptureInput("camera", "image/*,application/pdf");
+                   input.multiple = true;
+                   input.onchange = async (e: Event) => {
+                     const target = e.target as HTMLInputElement;
+                     const files = target.files;
+                     if (files?.length) {
+                       const convertedFiles: File[] = [];
+                       for (let i = 0; i < files.length; i++) {
+                         const file = files[i];
+                         const converted = await convertHeicToJpeg(file);
+                         convertedFiles.push(converted);
+                       }
+                       for (const f of convertedFiles) {
+                         const online = navigator.onLine;
+                         if (online) {
+                           const form = new FormData(); form.append("file", f);
+                           try { await api(`/api/clients/${clientId}/receipts`, { method: "POST", body: form }); } catch { await enqueueReceipt(clientId, f); }
+                         } else { await enqueueReceipt(clientId, f); }
+                       }
+                       setBatch((current) => [...current, ...convertedFiles.map((f, i) => ({ id: `cam-${i}-${Date.now()}`, file: f, status: "pending" as const }))]);
+                       setQueueCountState((q) => q + convertedFiles.length);
+                     }
+                   };
+                   input.click();
+                 }}
+                 className="flex items-center gap-2"
+               >
+                 <Camera className="h-3.5 w-3.5" />
+                 Take photo
+               </Button>
+<Button
+                 variant="outline"
+                 onClick={async () => {
+                   const input = createCaptureInput("library", "image/*,application/pdf");
+                   input.multiple = true;
+                   input.onchange = async (e: Event) => {
+                     const target = e.target as HTMLInputElement;
+                     const files = target.files;
+                     if (files?.length) {
+                       const convertedFiles: File[] = [];
+                       for (let i = 0; i < files.length; i++) {
+                         const file = files[i];
+                         const converted = await convertHeicToJpeg(file);
+                         convertedFiles.push(converted);
+                       }
+                       for (const f of convertedFiles) {
+                         const online = navigator.onLine;
+                         if (online) {
+                           const form = new FormData(); form.append("file", f);
+                           try { await api(`/api/clients/${clientId}/receipts`, { method: "POST", body: form }); } catch { await enqueueReceipt(clientId, f); }
+                         } else { await enqueueReceipt(clientId, f); }
+                       }
+                       const dataTransfer = new DataTransfer();
+                       convertedFiles.forEach((f) => dataTransfer.items.add(f));
+                       addFilesToBatch(dataTransfer.files);
+                       setQueueCountState((q) => q + convertedFiles.length);
+                     }
+                   };
+                   input.click();
+                 }}
+                 className="flex items-center gap-2"
+               >
+                 <Image className="h-3.5 w-3.5" />
+                 Photo library
+               </Button>
+             </div>
+
+             <label className="flex cursor-pointer flex-col items-center justify-center rounded-[var(--radius-lg)] border border-dashed border-[var(--color-border)] bg-[var(--color-muted)]/40 px-6 py-12 text-center hover:bg-[var(--color-muted)]/70">
+               <Upload className="mb-3 h-6 w-6 text-[var(--color-muted-foreground)]" />
+               <span className="text-sm font-medium">Click or drop receipt files</span>
+               <span className="mt-1 text-xs text-[var(--color-muted-foreground)]">PNG, JPG, WEBP, PDF · select as many as you like</span>
+               <input
+                 type="file"
+                 ref={fileInputRef}
+                 className="hidden"
+                 multiple
+                 accept="image/*,application/pdf"
+                 onChange={async (e: React.ChangeEvent<HTMLInputElement>) => {
+                   const files = e.target.files;
+                   if (files?.length) {
+                     const convertedFiles: File[] = [];
+                     for (let i = 0; i < files.length; i++) {
+                       const file = files[i];
+                       const converted = await convertHeicToJpeg(file);
+                       convertedFiles.push(converted);
+                     }
+                     for (const f of convertedFiles) {
+                       const online = navigator.onLine;
+                       if (online) {
+                         const form = new FormData(); form.append("file", f);
+                         try { await api(`/api/clients/${clientId}/receipts`, { method: "POST", body: form }); } catch { await enqueueReceipt(clientId, f); }
+                       } else { await enqueueReceipt(clientId, f); }
+                     }
+                     const dataTransfer = new DataTransfer();
+                     convertedFiles.forEach((f) => dataTransfer.items.add(f));
+                     addFilesToBatch(dataTransfer.files);
+                     setQueueCountState((q) => q + convertedFiles.length);
+                   }
+                   e.target.value = "";
+                 }}
+               />
+             </label>
 
             {batch.length > 0 ? (
               <div className="space-y-3">
