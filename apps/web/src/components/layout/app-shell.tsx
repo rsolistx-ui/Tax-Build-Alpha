@@ -5,6 +5,7 @@ import { authClient } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { shouldShowWelcomeTour, WelcomeTour } from "@/components/welcome-tour";
+import { PwaInstallBanner } from "@/components/pwa-install-banner";
 
 export function AppShell({
   firmName,
@@ -127,6 +128,7 @@ export function AppShell({
           </div>
         </div>
       </header>
+      <div className="pt-3"><PwaInstallBanner /></div>
       <main className="mx-auto max-w-6xl px-4 py-6 pb-24 sm:px-6 sm:py-8">
         <Outlet />
       </main>

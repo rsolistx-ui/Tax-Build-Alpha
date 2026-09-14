@@ -3,7 +3,7 @@
 // never intercepts /api/* requests, receipt sources, bank data, P&L
 // responses, authentication responses, or any other financial or session
 // data - those always go straight to the network, uncached, unmodified.
-const CACHE_NAME = "folio-shell-v1";
+const CACHE_NAME = "folio-shell-v2";
 const APP_SHELL = [
   "/manifest.webmanifest",
   "/icons/icon-192.png",

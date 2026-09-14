@@ -9,9 +9,13 @@ createRoot(document.getElementById("root")!).render(
   </StrictMode>,
 );
 
-// Installability only. See public/sw.js for the strict no-financial-data-cached policy.
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    void navigator.serviceWorker.register("/sw.js");
+    void navigator.serviceWorker.register("/sw.js").then((reg) => {
+      reg.addEventListener("updatefound", () => {
+        const sw = reg.installing;
+        if (sw) sw.addEventListener("statechange", () => { if (sw.state === "installed" && navigator.serviceWorker.controller) void reg.update(); });
+      });
+    });
   });
 }

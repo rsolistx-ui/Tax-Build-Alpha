@@ -544,9 +544,9 @@ export function ClientWorkspacePage() {
       {tab === "upload" ? (
         <Card>
           <CardHeader>
-            <CardTitle>Upload tray</CardTitle>
+            <CardTitle className="flex items-center gap-2">Upload tray <span className="rounded bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800">PWA ready — works on iOS and Android</span></CardTitle>
             <CardDescription>
-              Select a whole box of receipts at once. Photos go through Workers AI extraction; PDFs are converted first. One bad file never blocks the rest.
+              Take a photo or pick from library on your phone. Works installed to home screen on both iOS and Android. Photos go through Workers AI extraction; PDFs are converted first. One bad file never blocks the rest.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">

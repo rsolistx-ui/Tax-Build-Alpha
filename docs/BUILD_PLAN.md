@@ -39,6 +39,13 @@ Phyllis (Wave/Excel/MyTAXPrepOffice, hotel/travel/food/supplies folders, 10+ hrs
 | **M7** | Tax Workbench (organizer taxonomy, source extraction reuse, prior-year compare, diagnostics review queue, preparation status). | Diagnostics must block ready_for_preparation; never silently auto-finalize (Section 10). |
 | **M8** | Regulated Return Engine — separate track, gated on M7 source quality. Federal/state calcs, schemas, MeF, ack/reject, ATS. | ATS + MeF + rejection resolution. Do not start casually. |
 
+## Mobile + desktop surface
+
+- **PWA** (`apps/web/public/manifest.webmanifest` + `sw.js`): installable on iOS and Android (`display: standalone`, `display_override`, `share_target`, `shortcuts`), beforeinstallprompt banner + iOS Share → Add to Home Screen hint, never caches `/api/*` or financial data — shipped `aaaa98e`, polished this commit.
+- **Tauri Windows beta** (`src-tauri/`): single-origin webview at `https://folio-api.rsolistx.workers.dev`, origin-locked navigation — shipped `aaaa98e` + polished `fb06e91`.
+- **Mobile capture** (`apps/web/src/lib/image-utils.ts` + `client-workspace` capture inputs, `heic2any`): camera/library/file with HEIC conversion — shipped `a602e39`.
+- **Not built:** native iOS/Android Capacitor wrapper, offline queue, push notifications, biometric auth — none in current docs/build plan.
+
 ## Deferred by design (not in paid alpha)
 
 Payroll, invoicing/AR, queue consumer bulk async, item-level ML beyond correction memory, QBO import-format hardcoding without a real input sheet. See FOLIO_PRODUCT_ROADMAP.md.
