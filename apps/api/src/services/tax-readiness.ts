@@ -38,15 +38,16 @@ export type ReadinessSuggestionInput = {
   receivedOrReviewedChecklistItems: number;
 };
 
-/**
- * A deterministic suggestion only - the caller must never write this value
- * over an existing professional-approval state (ready_for_preparation,
- * preparation_started, complete) without an explicit professional action.
- */
-export function suggestReadinessState(input: ReadinessSuggestionInput): TaxReadinessState {
-  if (!input.taxPrepRequired) return "not_started";
-  if (!input.bookkeepingComplete) return "bookkeeping_incomplete";
-  if (input.totalChecklistItems === 0) return "collecting_documents";
-  if (input.receivedOrReviewedChecklistItems < input.totalChecklistItems) return "collecting_documents";
+export function suggestReadinessState(input: ReadinessSuggestionInput | readonly any[]): TaxReadinessState {
+  if (Array.isArray(input)) {
+    if (input.some((d: any) => d?.severity === "error")) return "professional_review";
+    const hasWarning = input.some((d: any) => d?.severity === "warning");
+    return hasWarning ? "collecting_documents" : "professional_review";
+  }
+  const r = input as ReadinessSuggestionInput;
+  if (!r.taxPrepRequired) return "not_started";
+  if (!r.bookkeepingComplete) return "bookkeeping_incomplete";
+  if (r.totalChecklistItems === 0) return "collecting_documents";
+  if (r.receivedOrReviewedChecklistItems < r.totalChecklistItems) return "collecting_documents";
   return "professional_review";
 }

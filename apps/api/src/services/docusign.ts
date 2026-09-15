@@ -498,15 +498,22 @@ export class DocuSignEnvelopeStore {
     await this.db.query(
       `INSERT INTO docusign_envelopes (id, firm_id, client_id, engagement_id, envelope_id, template_id, status, subject, recipients, custom_fields, created_at, sent_at, completed_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), $11, $12)`,
-      [newId("dse"), record.firmId, record.clientId ?? null, record.engagementId ?? null,
+      [id, record.firmId, record.clientId ?? null, record.engagementId ?? null,
        record.envelopeId, record.templateId ?? null, record.status, record.subject,
        JSON.stringify(record.recipients), JSON.stringify(record.customFields ?? {}),
        record.sentAt?.toISOString() ?? null, record.completedAt?.toISOString() ?? null],
     );
-    const [row] = await this.db.query<any>(`SELECT * FROM docusign_envelopes WHERE id = $1`, [newId("dse")]);
-    // Note: newId will generate a different ID, so we need to fix this
-    // For now, return the constructed record
-    return { ...record, id: 'temp', createdAt: new Date() };
+    const [row] = await this.db.query<any>(`SELECT * FROM docusign_envelopes WHERE id = $1`, [id]);
+    if (!row) throw new Error(`Failed to persist envelope ${id}`);
+    return {
+      id: row.id, firmId: row.firm_id, clientId: row.client_id ?? undefined,
+      engagementId: row.engagement_id ?? undefined, envelopeId: row.envelope_id,
+      templateId: row.template_id ?? undefined, status: row.status, subject: row.subject,
+      recipients: typeof row.recipients === "string" ? JSON.parse(row.recipients) : row.recipients,
+      customFields: typeof row.custom_fields === "string" ? JSON.parse(row.custom_fields) : (row.custom_fields ?? {}),
+      createdAt: new Date(row.created_at), sentAt: row.sent_at ? new Date(row.sent_at) : undefined,
+      completedAt: row.completed_at ? new Date(row.completed_at) : undefined,
+    };
   }
 
   async getEnvelope(envelopeId: string): Promise<any> {
@@ -530,21 +537,42 @@ export class DocuSignEnvelopeStore {
   }
 }
 
+export interface DocuSignWebhookRecord {
+  envelopeId: string;
+  event: string;
+  envelopeStatus: string;
+  timestamp: Date;
+}
+
+export async function storeWebhookEvent(db: Db, envelopeId: string, event: string, raw: any): Promise<void> {
+  await db.query(
+    `INSERT INTO docusign_webhook_events (id, envelope_id, event, envelope_status, payload)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [newId("dsw"), envelopeId, event, raw?.envelopeStatus ?? raw?.status ?? "unknown", JSON.stringify(raw)],
+  );
+}
+
 export class DocuSignWebhookHandler {
   private client: DocuSignClient;
   private envelopeStore: DocuSignEnvelopeStore;
+  private db: Db;
 
-  constructor(client: DocuSignClient, envelopeStore: DocuSignEnvelopeStore) {
+  constructor(db: Db, client: DocuSignClient, envelopeStore: DocuSignEnvelopeStore) {
+    this.db = db;
     this.client = client;
     this.envelopeStore = envelopeStore;
   }
 
   async handleWebhook(event: any): Promise<void> {
-    // event structure: { event: 'envelope-completed', envelopeId, envelopeStatus, documents, recipients, customFields }
-    const envelopeId = event.envelopeId;
+    const envelopeId = event.envelopeId ?? event.envelope_id;
     if (!envelopeId) return;
-
-    const envelope = await this.client.getEnvelope(envelopeId);
-    await this.envelopeStore.updateEnvelopeStatus(envelopeId, envelope.status, envelope.completedAt);
+    const status = event.envelopeStatus ?? event.status ?? "unknown";
+    await storeWebhookEvent(this.db, envelopeId, event.event ?? "webhook", event);
+    try {
+      const envelope = await this.client.getEnvelope(envelopeId);
+      await this.envelopeStore.updateEnvelopeStatus(envelopeId, envelope.status, envelope.completedAt);
+    } catch {
+      await this.envelopeStore.updateEnvelopeStatus(envelopeId, status, status === "completed" ? new Date() : undefined);
+    }
   }
 }

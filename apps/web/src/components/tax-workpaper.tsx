@@ -4,8 +4,9 @@ import { TAX_FUNCTIONS, TaxFunctionRegistry } from '@/lib/tax-functions';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Save, Download, Upload, RefreshCw, Calculator, FileSpreadsheet, FileText } from 'lucide-react';
+import { Save, Download, Upload, RefreshCw, Calculator, FileSpreadsheet, FileText, Link2, ShieldCheck, AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { api, apiUrl } from '@/lib/api';
 
 interface WorkpaperCell {
   row: number;
@@ -50,9 +51,12 @@ function hfAddress(cellKey: string) {
   return { col: parsed.col, row: parsed.row, sheet: 0 };
 }
 
+type TraceabilitySnapshot = { pnlByCategory: any[]; missingEvidence: any[]; bankUnmapped: any[] };
 export function TaxWorkpaper({ clientId, taxYear }: { clientId: string; taxYear: number }) {
   const hfRef = useRef<ReturnType<typeof HyperFormula.buildFromSheets> | null>(null);
   const [sheets, setSheets] = useState<Map<string, WorkpaperSheet>>(new Map());
+  const [traceability, setTraceability] = useState<TraceabilitySnapshot | null>(null);
+  const [traceLoading, setTraceLoading] = useState(false);
   const [activeSheet, setActiveSheet] = useState<string>('1040');
   const [selectedCell, setSelectedCell] = useState<string | null>(null);
   const [formulaBar, setFormulaBar] = useState<string>('');
@@ -536,6 +540,32 @@ export function TaxWorkpaper({ clientId, taxYear }: { clientId: string; taxYear:
           </div>
         </div>
 
+        <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-t border-[var(--color-border)] bg-[var(--color-card)] text-xs">
+          <button type="button" onClick={async () => {
+            setTraceLoading(true);
+            try { const d = await api<TraceabilitySnapshot>(`/api/clients/${clientId}/tax-workpaper/${taxYear}/traceability`); setTraceability(d); } catch {} finally { setTraceLoading(false); }
+          }} className="inline-flex items-center gap-1 rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-2.5 py-1 text-xs font-medium hover:bg-[var(--color-muted)]">
+            <Link2 className="h-3 w-3" /> Check evidence {traceLoading ? "(loading...)" : ""}
+          </button>
+          {traceability && (
+            <span className="inline-flex items-center gap-1 text-xs text-[var(--color-muted-foreground)]">
+              <ShieldCheck className="h-3 w-3 text-emerald-600" />{traceability.missingEvidence.length} orphan receipt(s) · {traceability.bankUnmapped.length} unmapped bank txn(s)
+            </span>
+          )}
+        </div>
+        {traceability && traceability.missingEvidence.length > 0 && (
+          <div className="mx-2 mb-2 rounded-md border border-amber-300 bg-amber-50 p-2 text-xs">
+            <div className="flex items-center gap-1 font-medium text-amber-900"><AlertCircle className="h-3.5 w-3.5" /> Orphan receipts — not yet on the workpaper</div>
+            <ul className="mt-1 max-h-40 overflow-auto divide-y divide-amber-200">
+              {traceability.missingEvidence.map((r: any) => (
+                <li key={r.id} className="flex items-center gap-2 py-1">
+                  <span className="flex-1 truncate text-amber-900">{r.merchant ?? "—"} — {r.receipt_date ?? "no date"}</span>
+                  <a href={apiUrl(`/api/receipts/${r.id}/file`)} target="_blank" rel="noreferrer" className="text-[11px] underline">source</a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         <div className="flex items-center justify-between px-3 py-1.5 border-t border-[var(--color-border)] bg-[var(--color-card)] text-xs text-[var(--color-muted-foreground)]">
           <div className="flex items-center gap-4">
             <span>Ready</span>

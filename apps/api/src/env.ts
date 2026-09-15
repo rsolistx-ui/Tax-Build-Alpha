@@ -44,4 +44,11 @@ export type Env = {
   PLAID_CLIENT_SECRET?: string;
   PLAID_ENVIRONMENT?: 'sandbox' | 'development' | 'production';
   PLAID_WEBHOOK_SECRET?: string;
+  /** DocuSign integration (optional, gated). Worker secrets only. */
+  DOCUSIGN_CLIENT_ID?: string;
+  DOCUSIGN_CLIENT_SECRET?: string;
+  DOCUSIGN_ACCOUNT_ID?: string;
+  DOCUSIGN_BASE_URL?: string;
+  DOCUSIGN_AUTH_SERVER?: string;
+  DOCUSIGN_REDIRECT_URI?: string;
 };
