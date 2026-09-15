@@ -23,6 +23,7 @@ import { workQueueRoutes } from "./routes/work-queue";
 import { clientRequestRoutes } from "./routes/client-requests";
 import { portalRoutes } from "./routes/portal";
 import { agentSupervisorRoutes, agentDeskRoutes } from "./routes/agent-supervisor";
+import { agentSchedulerRoutes } from "./routes/agent-scheduler";
 import { taxAdjustmentRoutes } from "./routes/tax-adjustment";
 import { taxWorkpaperRoutes } from "./routes/tax-workpapers";
 import { taxOrganizerRoutes } from "./routes/tax-organizer";
@@ -142,6 +143,9 @@ app.route("/api/clients", docVersioningRoutes);
 app.route("/api/clients", taxWorkbenchRoutes);
 app.route("/api/clients", returnEngineRoutes);
 import { pushRoutes } from "./routes/push";
+import { feedbackRoutes } from "./routes/feedback";
+app.route("/api/agent-schedule", agentSchedulerRoutes);
+app.route("/api/feedback", feedbackRoutes);
 app.route("/api/push", pushRoutes);
 
 app.notFound((c) => c.json({ error: "Not found" }, 404));

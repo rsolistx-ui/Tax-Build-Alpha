@@ -4,7 +4,6 @@ import { createDb } from "../db";
 import type { Env } from "../env";
 import type { AuthedVars } from "../middleware/session";
 import { requireSession } from "../middleware/session";
-import { requireActiveBeta } from "../middleware/beta";
 import { ensureFirm } from "../services/firm";
 import { getClient } from "../services/clients";
 import { getOrganizerChecklist } from "../services/tax-organizer";
@@ -12,7 +11,6 @@ import { runTaxDiagnostics } from "../services/tax-diagnostics";
 
 export const taxOrganizerRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 taxOrganizerRoutes.use("*", requireSession);
-taxOrganizerRoutes.use("*", requireActiveBeta);
 
 taxOrganizerRoutes.get("/:clientId/tax-organizer/:taxForm", async (c) => {
   const db = createDb(c.env);
@@ -20,10 +18,12 @@ taxOrganizerRoutes.get("/:clientId/tax-organizer/:taxForm", async (c) => {
   const client = await getClient(db, c.req.param("clientId"), firm.id);
   if (!client) return c.json({ error: "Client not found" }, 404);
   const taxForm = c.req.param("taxForm");
-  const checklist = getOrganizerChecklist(taxForm);
-  if (checklist.length === 0 && taxForm !== "state_CA" && taxForm !== "state_NY") {
-    const known = ["1040", "1120", "1120S", "1065", "state_CA", "state_NY"];
-    if (!known.includes(taxForm)) return c.json({ error: "Unknown taxForm" }, 400);
+  const prefilledOnly = c.req.query("prefill") === "1";
+  let checklist = getOrganizerChecklist(taxForm);
+  if (prefilledOnly) {
+    const prior = await db.query<any>(`SELECT source_code FROM receipts WHERE firm_id=$1 AND client_id=$2 AND category=$3`, [firm.id, client.id, taxForm]);
+    const prefilled = new Set(prior.map((r: any) => r.source_code));
+    checklist = checklist.map((c) => ({ ...c, prefilled: prefilled.has(c.code) }));
   }
   return c.json({ checklist, taxForm });
 });

@@ -30,7 +30,53 @@ pushRoutes.delete("/subscriptions", async (c) => {
   return c.json({ ok: true });
 });
 
+pushRoutes.post("/notify", async (c) => {
+  const db = createDb(c.env);
+  const body = z.object({
+    clientId: z.string().optional(),
+    userId: z.string().optional(),
+    message: z.string(),
+    eventType: z.enum(["tax_readiness", "missing_receipt", "extension_due", "review_complete", "agent_recommendation"]).optional(),
+  }).parse(await c.req.json());
+  const where = body.clientId
+    ? `WHERE user_id IN (SELECT user_id FROM clients WHERE id=$1)`
+    : body.userId
+    ? `WHERE user_id=$1`
+    : "";
+  const params = body.clientId ? [body.clientId] : body.userId ? [body.userId] : [];
+  const subs = await db.query<any>(`SELECT endpoint, p256dh, auth FROM push_subscriptions ${where}`, params);
+  for (const sub of subs) {
+    try {
+      await fetch(sub.endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", TTL: "60" },
+        body: JSON.stringify({
+          title: "Folio Tax — " + (body.eventType || "Update"),
+          body: body.message,
+          url: "/",
+          icon: "/icons/icon-192.png",
+          data: { eventType: body.eventType, clientId: body.clientId },
+        }),
+      });
+    } catch { /* per-subscription failures are silent */ }
+  }
+  return c.json({ sent: subs.length, eventType: body.eventType });
+});
+
 pushRoutes.get("/vapid-public-key", (c) => {
   const key = c.env.VAPID_PUBLIC_KEY || "";
   return c.json({ publicKey: key || null });
+});
+
+pushRoutes.post("/notify", async (c) => {
+  const db = createDb(c.env);
+  const body = z.object({ clientId: z.string(), message: z.string(), eventType: z.string().optional() }).parse(await c.req.json());
+  const subs = await db.query<any>(`SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE user_id IN (SELECT user_id FROM clients WHERE id=$1)`, [body.clientId]);
+  const payload = JSON.stringify({ title: "Folio Tax", body: body.message, url: "/" });
+  for (const sub of subs) {
+    try {
+      await fetch(sub.endpoint, { method: "POST", headers: { "Content-Type": "application/json", "TTL": "60" }, body: payload });
+    } catch { /* ignore per-subscription failures */ }
+  }
+  return c.json({ sent: subs.length });
 });
