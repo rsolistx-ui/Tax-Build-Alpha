@@ -6,6 +6,7 @@ import { validateReceipt } from "../services/receipt-validation";
 import type { ClientRow } from "../services/clients";
 import { MAX_UPLOAD_BYTES } from "../services/documents";
 import { delegateReceiptAgents } from "./agent-supervisor";
+import { AdminRulesService } from "./admin-rules";
 
 export type ReceiptIngestResult =
   | { ok: true; receiptId: string; jobId: string; bankTransactionId: string | null }
@@ -74,6 +75,8 @@ export async function ingestReceiptForClient(
     throw new HttpError(400, "Unsupported file type. Supported: PDF, PNG, JPG, JPEG, HEIC.");
   }
 
+  const documentClassification = classifyDocument(file);
+
   if (bankTransactionId) {
     const [bankTransaction] = await db.query<Record<string, unknown>>(
       `SELECT * FROM bank_transactions WHERE id = $1 AND client_id = $2`,
@@ -116,16 +119,38 @@ export async function ingestReceiptForClient(
   try {
     const llm = getLlmProvider(env);
     const context = await loadBusinessContext(db, client);
+    const isMultiPage = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
     let extraction = await llm.extractReceipt({
       bytes,
       contentType: file.type || "application/octet-stream",
       filename: file.name,
       context,
+      isMultiPage,
     });
     const withMemory = await applyCorrectionMemory(db, client.id, extraction);
     extraction = withMemory.extraction;
     const rememberedCategory = withMemory.rememberedCategory;
     const validation = validateReceipt(extraction);
+
+    let duplicateOfReceiptId: string | null = null;
+    let isPotentialDuplicate = false;
+
+    if (extraction.merchant && extraction.total != null && extraction.date) {
+      const [existingMatch] = await db.query<{ id: string; filename: string }>(
+        `SELECT id, filename FROM receipts
+         WHERE client_id = $1 AND id != $2
+           AND LOWER(extracted_merchant) = LOWER($3)
+           AND extracted_date = $4
+           AND ABS(extracted_total - $5) < 0.05
+           AND status != 'discarded'
+         LIMIT 1`,
+        [client.id, receiptId, extraction.merchant, extraction.date, extraction.total],
+      );
+      if (existingMatch) {
+        duplicateOfReceiptId = existingMatch.id;
+        isPotentialDuplicate = true;
+      }
+    }
 
     const statements: DbStatement[] = [
       {
@@ -135,12 +160,17 @@ export async function ingestReceiptForClient(
           extracted_total = $6, extracted_currency = $7, extracted_category = $8,
           confidence = $9, provider = $10, model = $11,
           validation_status = $12, validation_json = $13::jsonb,
-          remembered_category = $15, updated_at = NOW()
+          remembered_category = $15,
+          is_potential_duplicate = $16, duplicate_of_receipt_id = $17,
+          payment_method = $18, card_last4 = $19,
+          updated_at = NOW()
           WHERE id = $14`,
         params: [
           extraction.date, extraction.merchant, extraction.subtotal, extraction.tax, extraction.tip,
           extraction.total, extraction.currency, extraction.category, extraction.confidence,
           llm.name, llm.model, validation.status, validation, receiptId, rememberedCategory,
+          isPotentialDuplicate, duplicateOfReceiptId,
+          extraction.paymentMethod ?? null, extraction.cardLast4 ?? null,
         ],
       },
       ...lineItemStatements(receiptId, extraction),
@@ -152,6 +182,12 @@ export async function ingestReceiptForClient(
         query: `INSERT INTO audit_events (id, client_id, receipt_id, actor_user_id, action, after_json)
                 VALUES ($1, $2, $3, $4, 'receipt_extracted', $5::jsonb)`,
         params: [newId("aud"), client.id, receiptId, actorUserId, { extraction, validation }],
+      },
+      {
+        query: `INSERT INTO document_classifications
+          (id, client_id, receipt_id, document_type, confidence, classified_at)
+          VALUES ($1, $2, $3, $4, $5, NOW())`,
+        params: [newId("doc"), client.id, receiptId, documentClassification, 0.85],
       },
     ];
 
@@ -219,6 +255,9 @@ async function loadBusinessContext(db: Db, client: ClientRow): Promise<ReceiptBu
     `SELECT slug FROM categories WHERE client_id = $1 ORDER BY sort_order, LOWER(name)`,
     [client.id],
   );
+  const rulesService = new AdminRulesService(db);
+  const markdownRules = await rulesService.compileActiveRulesMarkdown(client.firm_id, client.id);
+
   return {
     clientName: client.name,
     entityType: (profile?.entity_type as string | null | undefined) ?? null,
@@ -226,6 +265,7 @@ async function loadBusinessContext(db: Db, client: ClientRow): Promise<ReceiptBu
     state: (profile?.state as string | null | undefined) ?? null,
     accountingBasis: (profile?.accounting_basis as string | null | undefined) ?? null,
     categories: categories.map((category) => category.slug),
+    markdownRules: markdownRules || undefined,
   };
 }
 
@@ -264,4 +304,19 @@ function lineItemStatements(receiptId: string, extraction: ReceiptExtraction): D
 
 function normalizeMerchant(merchant: string): string {
   return merchant.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+export function classifyDocument(file: File): "W-2" | "1099" | "return" | "statement" | "generic_receipt" {
+  const filename = file.name.toLowerCase();
+  const ext = filename.split(".").pop() || "";
+  const content = file.type.toLowerCase();
+
+  if (filename.includes("w2") || filename.includes("w-2")) return "W-2";
+  if (filename.includes("1099")) return "1099";
+  if (filename.includes("return") || filename.includes("tax_return")) return "return";
+  if (filename.includes("statement") || filename.includes("bank") || filename.includes("account")) return "statement";
+  if (ext === "pdf" && (content.includes("pdf") || content === "")) return "generic_receipt";
+  if (["png", "jpg", "jpeg", "heic"].includes(ext || "")) return "generic_receipt";
+
+  return "generic_receipt";
 }

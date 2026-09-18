@@ -35,6 +35,6 @@ taxOrganizerRoutes.get("/:clientId/tax-diagnostics/:taxYear", async (c) => {
   if (!client) return c.json({ error: "Client not found" }, 404);
   const parsed = z.coerce.number().int().min(2000).max(2100).safeParse(c.req.param("taxYear"));
   if (!parsed.success) return c.json({ error: "Invalid taxYear" }, 400);
-  const diags = await runTaxDiagnostics(db, client.id, firm.id, parsed.data);
+  const diags = await runTaxDiagnostics(db, client.id, parsed.data);
   return c.json({ diagnostics: diags });
 });

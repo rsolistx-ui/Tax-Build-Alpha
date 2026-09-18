@@ -21,6 +21,13 @@ const testEnv: Env = {
   BETTER_AUTH_URL: "https://folio-api.rsolistx.workers.dev",
   VAPID_PUBLIC_KEY: "test-public-key",
   VAPID_PRIVATE_KEY: "test-private-key",
+  OWNER_EMAIL: "owner@example.com",
+};
+
+const mockSession = {
+  userId: "user-1",
+  userEmail: "test@example.com",
+  userName: "Test User",
 };
 
 const PENDING_INVITATION = {

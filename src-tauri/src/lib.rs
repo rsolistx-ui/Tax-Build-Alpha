@@ -35,7 +35,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             let app_handle = app.handle().clone();
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::External(PRODUCTION_URL.parse().unwrap()))
+            let w = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(PRODUCTION_URL.parse().unwrap()))
                 .title("Folio Beta")
                 .inner_size(1280.0, 800.0)
                 .min_inner_size(960.0, 600.0)
@@ -47,6 +47,13 @@ pub fn run() {
                     false
                 })
                 .build()?;
+            let _ = w.eval(
+                "setInterval(()=>{ if(navigator.onLine) fetch('/api/push/sync/poll',{credentials:'include'}) \
+                 .then(r=>r.ok?r.json():null) \
+                 .then(d=>{ if(d && d.events && d.events.length) \
+                   document.dispatchEvent(new CustomEvent('folio-sync-poll',{detail:d.events})); }) \
+                 .catch(()=>{}); }, 30000);",
+            );
             Ok(())
         })
         .run(tauri::generate_context!())

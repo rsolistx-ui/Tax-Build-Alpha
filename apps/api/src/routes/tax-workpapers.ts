@@ -31,6 +31,11 @@ taxWorkpaperRoutes.put("/:clientId/tax-workpaper/:taxYear", async (c) => {
   if (!parsed.success) return c.json({ error: "Invalid taxYear" }, 400);
   const body = z.object({ data: z.any(), name: z.string().optional() }).parse(await c.req.json());
   const wp = await upsertTaxWorkpaper(db, firm.id, client.id, parsed.data, body.data, body.name);
+  try {
+    const { appendSyncEvent, firePushes } = await import("../services/sync");
+    await appendSyncEvent(db, firm.id, c.get("userId"), "workpaper", client.id, "update", { taxYear: parsed.data });
+    await firePushes(db, c.get("userId"), "Workpaper saved", `${client.id} ${parsed.data}`);
+  } catch {}
   return c.json({ workpaper: wp });
 });
 taxWorkpaperRoutes.get("/:clientId/tax-workpaper/:taxYear/traceability", async (c) => {

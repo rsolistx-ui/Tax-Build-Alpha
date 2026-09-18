@@ -110,8 +110,15 @@ type AgentTask = {
   created_at: string;
 };
 
+type ClientContact = { email: string | null; phone: string | null };
+
 export function ClientOverview({ clientId, onNavigate }: { clientId: string; onNavigate: (deepLink: string) => void }) {
   const [overview, setOverview] = useState<Overview | null>(null);
+  const [contact, setContact] = useState<ClientContact | null>(null);
+  const [editingContact, setEditingContact] = useState(false);
+  const [contactDraft, setContactDraft] = useState({ email: "", phone: "" });
+  const [savingContact, setSavingContact] = useState(false);
+  const [contactError, setContactError] = useState<string | null>(null);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [preset, setPreset] = useState<ReportingPeriodPreset>("current_month");
@@ -143,6 +150,37 @@ export function ClientOverview({ clientId, onNavigate }: { clientId: string; onN
       .then((data) => setCategories(data.categories))
       .catch(() => setCategories([]));
   }, [clientId]);
+
+  useEffect(() => {
+    setEditingContact(false);
+    setContactError(null);
+    api<{ client: ClientContact }>(`/api/clients/${clientId}`)
+      .then((data) => setContact({ email: data.client.email, phone: data.client.phone }))
+      .catch(() => setContact(null));
+  }, [clientId]);
+
+  function startEditingContact() {
+    setContactDraft({ email: contact?.email ?? "", phone: contact?.phone ?? "" });
+    setContactError(null);
+    setEditingContact(true);
+  }
+
+  async function saveContact() {
+    setSavingContact(true);
+    setContactError(null);
+    try {
+      const { client } = await api<{ client: ClientContact }>(`/api/clients/${clientId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ email: contactDraft.email || null, phone: contactDraft.phone || null }),
+      });
+      setContact({ email: client.email, phone: client.phone });
+      setEditingContact(false);
+    } catch (e) {
+      setContactError(e instanceof Error ? e.message : "Could not save contact info");
+    } finally {
+      setSavingContact(false);
+    }
+  }
 
   const refreshAgentTasks = () => api<{ tasks: AgentTask[] }>(`/api/clients/${clientId}/agent-tasks`)
     .then((data) => setAgentTasks(Array.isArray(data?.tasks) ? data.tasks : []))
@@ -182,6 +220,53 @@ export function ClientOverview({ clientId, onNavigate }: { clientId: string; onN
   return (
     <div className="space-y-4">
       <Card>
+        <CardContent className="flex flex-col gap-3 border-b border-[var(--color-border)] p-4 sm:flex-row sm:items-end sm:justify-between">
+          {editingContact ? (
+            <div className="flex flex-1 flex-wrap items-end gap-3">
+              <div className="flex flex-1 min-w-[200px] flex-col gap-1">
+                <label className="text-xs text-[var(--color-muted-foreground)]" htmlFor="contact-email">Email</label>
+                <input
+                  id="contact-email"
+                  type="email"
+                  className="h-9 rounded-md border border-[var(--color-border)] bg-transparent px-2 text-sm"
+                  value={contactDraft.email}
+                  onChange={(e) => setContactDraft((d) => ({ ...d, email: e.target.value }))}
+                  placeholder="client@example.com"
+                />
+              </div>
+              <div className="flex flex-1 min-w-[160px] flex-col gap-1">
+                <label className="text-xs text-[var(--color-muted-foreground)]" htmlFor="contact-phone">Phone</label>
+                <input
+                  id="contact-phone"
+                  type="tel"
+                  className="h-9 rounded-md border border-[var(--color-border)] bg-transparent px-2 text-sm"
+                  value={contactDraft.phone}
+                  onChange={(e) => setContactDraft((d) => ({ ...d, phone: e.target.value }))}
+                  placeholder="(555) 555-0100"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <Button size="sm" disabled={savingContact} onClick={saveContact}>
+                  {savingContact ? "Saving…" : "Save"}
+                </Button>
+                <Button size="sm" variant="secondary" disabled={savingContact} onClick={() => setEditingContact(false)}>
+                  Cancel
+                </Button>
+              </div>
+              {contactError ? <p className="w-full text-xs text-[var(--color-destructive)]">{contactError}</p> : null}
+            </div>
+          ) : (
+            <>
+              <div className="flex flex-wrap gap-6">
+                <Field label="Email" value={contact?.email || "Not set"} />
+                <Field label="Phone" value={contact?.phone || "Not set"} />
+              </div>
+              <Button size="sm" variant="secondary" onClick={startEditingContact}>
+                {contact?.email || contact?.phone ? "Edit contact info" : "Add contact info"}
+              </Button>
+            </>
+          )}
+        </CardContent>
         <CardContent className="grid gap-3 p-4 sm:grid-cols-3 lg:grid-cols-6">
           <Field label="Legal name" value={header.legalName || "Not set"} />
           <Field label="Entity type" value={header.entityType || "Not set"} />

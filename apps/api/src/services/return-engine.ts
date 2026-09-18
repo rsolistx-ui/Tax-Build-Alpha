@@ -7,7 +7,7 @@ export type ReturnStatus = "draft" | "transmitted" | "accepted" | "rejected" | "
 export async function createReturn(db: Db, firmId: string, clientId: string, taxYear: number, formType: string) {
   const wb = await db.query<any>(`SELECT readiness_state FROM client_profiles WHERE client_id=$1`, [clientId]);
   if (wb[0]?.readiness_state !== "ready_for_preparation" && wb[0]?.readiness_state !== "preparation_started") throw new Error("Workbench not ready — complete diagnostics and set readiness first (M7 gate)");
-  const diagnostics = await runTaxDiagnostics(db, clientId, firmId, taxYear);
+  const diagnostics = await runTaxDiagnostics(db, clientId, taxYear);
   if (diagnostics.some((d) => d.severity === "error")) throw new Error(`Diagnostics blocking: ${diagnostics.filter((d) => d.severity === "error").map((d) => d.code).join(", ")}`);
   const existing = await db.query<any>(`SELECT id FROM tax_returns WHERE firm_id=$1 AND client_id=$2 AND tax_year=$3 AND form_type=$4 AND status NOT IN ('voided')`, [firmId, clientId, taxYear, formType]);
   if (existing.length) throw new Error(`Return already exists for ${formType} ${taxYear} (${existing[0].status})`);

@@ -41,18 +41,18 @@ export async function drainQueue(upload: (clientId: string, file: File) => Promi
 export function registerSyncListener(upload: (clientId: string, file: File) => Promise<void>): () => void {
   const onlineHandler = () => void drainQueue(upload);
   window.addEventListener("online", onlineHandler);
-  let swHandler: ((e: MessageEvent) => void) | null = null;
-  if ("serviceWorker" in navigator) {
-    swHandler = (e) => {
-      if (e.data?.type === "folio-sync") void drainQueue(upload);
-    };
-    navigator.serviceWorker.addEventListener("message", swHandler);
-  }
+  const onPushMessage = (e: MessageEvent) => {
+    if (e.data?.type === "folio-sync" || (typeof e.data?.title === "string" && (e.data as any).title.includes("Sync"))) {
+      void drainQueue(upload);
+    }
+  };
+  if ("serviceWorker" in navigator) navigator.serviceWorker.addEventListener("message", onPushMessage);
+  const pollHandler = () => void drainQueue(upload);
+  window.addEventListener("folio-sync-poll", pollHandler as unknown as EventListener);
   return () => {
     window.removeEventListener("online", onlineHandler);
-    if (swHandler && "serviceWorker" in navigator) {
-      navigator.serviceWorker.removeEventListener("message", swHandler);
-    }
+    window.removeEventListener("folio-sync-poll", pollHandler as unknown as EventListener);
+    if ("serviceWorker" in navigator) navigator.serviceWorker.removeEventListener("message", onPushMessage);
   };
 }
 

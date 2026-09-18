@@ -1,8 +1,11 @@
 [package]
 name = "folio-beta"
 version = "0.1.0"
-description = "Folio Beta desktop client"
+description = "Evidence-first bookkeeping and tax workspace — desktop client (Tauri, no Electron)"
 edition = "2021"
+authors = ["TAX BUILD ALPHA"]
+license = "Proprietary"
+repository = "https://github.com/anomalyco/Tax-Build-Alpha"
 
 [lib]
 name = "folio_beta_lib"

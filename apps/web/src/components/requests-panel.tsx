@@ -3,6 +3,7 @@ import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { RequestThread } from "./request-thread";
 
 type ClientRequest = {
   id: string;
@@ -109,6 +110,8 @@ export function RequestsPanel({ clientId, focusRequestId }: { clientId: string; 
     }
   }
 
+  const [selectedRequest, setSelectedRequest] = useState<string | null>(null);
+
   return (
     <div className="space-y-4">
       <Card>
@@ -179,11 +182,16 @@ export function RequestsPanel({ clientId, focusRequestId }: { clientId: string; 
               ref={(el) => { rowRefs.current[req.id] = el; }}
               className={`flex flex-wrap items-center justify-between gap-2 p-3 text-sm ${req.id === focusRequestId ? "bg-[var(--color-primary)]/10 ring-1 ring-[var(--color-primary)]" : ""}`}
             >
-              <div>
-                <p className="font-medium">{req.title}</p>
-                <p className="text-xs text-[var(--color-muted-foreground)]">
-                  {label(req.request_type)}{req.due_at ? ` \u00b7 due ${new Date(req.due_at).toLocaleDateString()}` : ""}
-                </p>
+              <div className="flex items-start gap-2">
+                <Button size="sm" variant="ghost" onClick={() => setSelectedRequest(selectedRequest === req.id ? null : req.id)}>
+                  {selectedRequest === req.id ? "Hide messages" : "Show messages"}
+                </Button>
+                <div>
+                  <p className="font-medium">{req.title}</p>
+                  <p className="text-xs text-[var(--color-muted-foreground)]">
+                    {label(req.request_type)}{req.due_at ? ` \u00b7 due ${new Date(req.due_at).toLocaleDateString()}` : ""}
+                  </p>
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 <Badge>{label(req.status)}</Badge>
@@ -199,6 +207,9 @@ export function RequestsPanel({ clientId, focusRequestId }: { clientId: string; 
               </div>
             </div>
           ))}
+          {selectedRequest && (
+            <RequestThread requestId={selectedRequest} clientId={clientId} />
+          )}
         </div>
       )}
     </div>

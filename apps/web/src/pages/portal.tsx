@@ -54,12 +54,26 @@ function resolvePortalToken(): string | null {
   }
 }
 
+/**
+ * Auth failures (401/403) keep the generic "link may have expired" message
+ * on purpose - no detail to leak there. Every other failure (upload too
+ * large, unsupported file type, request already closed, etc.) surfaces the
+ * server's actual error text, since the previous blanket message made every
+ * upload failure look identical and gave the client no way to know what to
+ * fix.
+ */
 async function portalApi<T>(token: string, path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
   headers.set("Authorization", `Bearer ${token}`);
   if (!(init?.body instanceof FormData) && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
   const res = await fetch(`${API_BASE}${path}`, { ...init, headers });
-  if (!res.ok) throw new Error("Something went wrong. Your link may have expired or been revoked.");
+  if (!res.ok) {
+    if (res.status === 401 || res.status === 403) {
+      throw new Error("Something went wrong. Your link may have expired or been revoked.");
+    }
+    const body = await res.json().catch(() => null) as { error?: string } | null;
+    throw new Error(body?.error || "Something went wrong. Please try again.");
+  }
   return res.json() as Promise<T>;
 }
 
@@ -203,7 +217,12 @@ export function PortalPage() {
         const converted = await convertHeicToJpeg(file);
         const form = new FormData();
         form.append("file", converted);
-        await portalApi(tokenRef.current, `/api/portal/requests/${selected.id}/evidence`, { method: "POST", body: form });
+        try {
+          await portalApi(tokenRef.current, `/api/portal/requests/${selected.id}/evidence`, { method: "POST", body: form });
+        } catch (e) {
+          const reason = e instanceof Error ? e.message : "Could not upload your file";
+          throw new Error(`${file.name}: ${reason}`);
+        }
       }
       await openRequest(selected);
     } catch (e) {

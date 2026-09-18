@@ -18,7 +18,7 @@ taxWorkbenchRoutes.get("/:clientId/workbench/:taxYear", async (c) => {
   const client = await getClient(db, c.req.param("clientId"), firm.id); if (!client) return c.json({ error: "Client not found" }, 404);
   const taxYear = Number(c.req.param("taxYear"));
   const wb = await getWorkbench(db, client.id, taxYear);
-  const diagnostics = await runTaxDiagnostics(db, client.id, firm.id, taxYear);
+  const diagnostics = await runTaxDiagnostics(db, client.id, taxYear);
   const blocked = diagnostics.some((d: any) => d.severity === "error");
   void wb;
   const suggestion = suggestReadinessState(diagnostics as any);
@@ -40,7 +40,7 @@ taxWorkbenchRoutes.patch("/:clientId/workbench/:taxYear/readiness", async (c) =>
   const client = await getClient(db, c.req.param("clientId"), firm.id); if (!client) return c.json({ error: "Client not found" }, 404);
   const body = z.object({ state: z.enum(TAX_READINESS_STATES as any) }).parse(await c.req.json());
   const taxYear = Number(c.req.param("taxYear"));
-  const diagnostics = await runTaxDiagnostics(db, client.id, firm.id, taxYear);
+  const diagnostics = await runTaxDiagnostics(db, client.id, taxYear);
   const hasErrors = diagnostics.some(d => d.severity === "error");
   if (hasErrors && isProfessionalApprovalState(body.state as any)) return c.json({ error: "Diagnostics errors block readiness", diagnostics }, 400);
   return c.json(await updateReadiness(db, client.id, body.state, c.get("userId")));

@@ -18,6 +18,7 @@ import {
   BankSyncCursorService,
   BankFeedProvider,
 } from "../services/bank-feed";
+import { FolioNativeAccountingProvider } from "../services/folio-native-accounting";
 import type {
   BankConnection,
   BankAccount,
@@ -322,6 +323,58 @@ bankConnectivityRoutes.post("/connections/:connectionId/sync", async (c) => {
     } catch (error) {
       errors.push(`Account ${account.name}: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
+
+    // Create/update bank reconciliation for this account
+    try {
+      const accountingProvider = new FolioNativeAccountingProvider(db);
+      const periodEnd = new Date(); // Use current date as period end for now
+
+      // Get bank balance from provider
+      let bankBalance = 0;
+      try {
+        const balances = await provider.getBalance(connection.providerConnectionId, [account.providerAccountId]);
+        bankBalance = balances[0]?.current ?? 0;
+      } catch {
+        // Fallback: calculate from synced transactions
+        const txns = await new BankTransactionService(db).getTransactions(connection.id, { accountId: account.id, limit: 1000 });
+        bankBalance = txns.reduce((sum, t) => sum + t.amount, 0);
+      }
+
+      // Get ledger balance from accounting
+      const systemAccount = await accountingProvider.getSystemAccount(firm.id, 'cash_undeposited_funds');
+      let ledgerBalance = 0;
+      if (systemAccount) {
+        const tb = await accountingProvider.getTrialBalance(firm.id, connection.clientId ?? undefined, periodEnd);
+        const cashEntry = tb.find(e => e.accountId === systemAccount.id);
+        ledgerBalance = cashEntry?.netBalance ?? 0;
+      }
+
+      // Create/update reconciliation
+      const existingRec = await accountingProvider.getReconciliation(firm.id, connection.clientId ?? '', account.id, periodEnd);
+      if (existingRec) {
+        await accountingProvider.updateReconciliation(firm.id, existingRec.id, {
+          bankBalance,
+          ledgerBalance,
+          status: Math.abs(bankBalance - ledgerBalance) < 0.01 ? 'reconciled' : 'open',
+          reconciledAt: Math.abs(bankBalance - ledgerBalance) < 0.01 ? new Date() : undefined,
+          reconciledByUserId: Math.abs(bankBalance - ledgerBalance) < 0.01 ? c.get("userId") : undefined,
+        });
+      } else {
+        await accountingProvider.createReconciliation({
+          firmId: firm.id,
+          clientId: connection.clientId ?? '',
+          accountId: systemAccount?.id ?? account.id,
+          periodEnd,
+          bankBalance,
+          ledgerBalance,
+          status: Math.abs(bankBalance - ledgerBalance) < 0.01 ? 'reconciled' : 'open',
+          reconciledAt: Math.abs(bankBalance - ledgerBalance) < 0.01 ? new Date() : undefined,
+          reconciledByUserId: Math.abs(bankBalance - ledgerBalance) < 0.01 ? c.get("userId") : undefined,
+        });
+      }
+    } catch (recError) {
+      errors.push(`Account ${account.name} reconciliation: ${recError instanceof Error ? recError.message : 'Unknown error'}`);
+    }
   }
 
   await connectionService.updateConnection(connection.id, {
@@ -384,30 +437,6 @@ bankConnectivityRoutes.post("/webhooks/teller", async (c) => {
   const event = JSON.parse(body);
   // Handle Teller webhook events
   // event.type: 'transactions.updated', 'accounts.updated', 'account.deleted', 'enrollment.updated'
-  
-  return c.json({ ok: true });
-});
-
-bankConnectivityRoutes.post("/webhooks/plaid", async (c) => {
-  // Verify Plaid signature
-  const signature = c.req.header('Plaid-Signature');
-  const webhookSecret = c.env.PLAID_WEBHOOK_SECRET;
-  
-  if (!signature || !webhookSecret) {
-    return c.json({ error: "Unauthorized" }, 401);
-  }
-
-  const body = await c.req.text();
-  const crypto = await import('crypto');
-  const expected = crypto.createHmac('sha256', webhookSecret).update(body).digest('hex');
-  if (signature !== expected) {
-    return c.json({ error: "Invalid signature" }, 401);
-  }
-
-  const event = JSON.parse(body);
-  // Handle Plaid webhook events
-  // event.webhook_type: 'TRANSACTIONS', 'ITEMS', 'ACCOUNTS', etc.
-  // event.webhook_code: 'SYNC_UPDATES_AVAILABLE', 'NEW_TRANSACTIONS', 'REMOVED_TRANSACTIONS', etc.
   
   return c.json({ ok: true });
 });

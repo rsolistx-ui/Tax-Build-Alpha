@@ -28,6 +28,8 @@ export function normalizeExtraction(raw: Record<string, unknown>): ReceiptExtrac
   return {
     date: stringOrNull(raw.date),
     merchant: stringOrNull(raw.merchant),
+    paymentMethod: stringOrNull(raw.paymentMethod ?? raw.payment_method),
+    cardLast4: extractLast4(raw.cardLast4 ?? raw.card_last4 ?? raw.last4 ?? raw.card_number),
     subtotal: numberOrNull(raw.subtotal),
     tax: numberOrNull(raw.tax),
     tip: numberOrNull(raw.tip),
@@ -37,6 +39,14 @@ export function normalizeExtraction(raw: Record<string, unknown>): ReceiptExtrac
     confidence: clampConfidence(raw.confidence),
     lineItems: rawItems.map(normalizeLineItem).filter((item) => item.description || item.amount != null),
   };
+}
+
+function extractLast4(value: unknown): string | null {
+  if (!value) return null;
+  const str = String(value).trim();
+  const digits = str.replace(/\D/g, "");
+  if (digits.length >= 4) return digits.slice(-4);
+  return null;
 }
 
 function normalizeLineItem(value: unknown): ReceiptLineItem {

@@ -8,13 +8,15 @@ export type ClientRow = {
   name: string;
   legal_name: string | null;
   notes: string | null;
+  email: string | null;
+  phone: string | null;
   created_at: string;
   updated_at: string;
 };
 
 export async function listClients(db: Db, firmId: string): Promise<ClientRow[]> {
   return db.query<ClientRow>(
-    `SELECT id, firm_id, name, legal_name, notes, created_at, updated_at
+    `SELECT id, firm_id, name, legal_name, notes, email, phone, created_at, updated_at
      FROM clients WHERE firm_id = $1 ORDER BY LOWER(name)`,
     [firmId],
   );
@@ -31,13 +33,13 @@ export async function getClient(db: Db, clientId: string, firmId: string): Promi
 export async function createClient(
   db: Db,
   firmId: string,
-  input: { name: string; legal_name?: string; notes?: string },
+  input: { name: string; legal_name?: string; notes?: string; email?: string; phone?: string },
 ): Promise<ClientRow | undefined> {
   const id = newId("cli");
   const statements = [
     {
-      query: `INSERT INTO clients (id, firm_id, name, legal_name, notes) VALUES ($1, $2, $3, $4, $5)`,
-      params: [id, firmId, input.name, input.legal_name ?? null, input.notes ?? null],
+      query: `INSERT INTO clients (id, firm_id, name, legal_name, notes, email, phone) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      params: [id, firmId, input.name, input.legal_name ?? null, input.notes ?? null, input.email ?? null, input.phone ?? null],
     },
     ...DEFAULT_CATEGORIES.map((category) => ({
       query: `INSERT INTO categories (id, client_id, name, slug, is_default, sort_order)
@@ -58,7 +60,7 @@ export async function updateClient(
   db: Db,
   clientId: string,
   firmId: string,
-  input: { name?: string; legal_name?: string | null; notes?: string | null },
+  input: { name?: string; legal_name?: string | null; notes?: string | null; email?: string | null; phone?: string | null },
 ): Promise<ClientRow | undefined> {
   const current = await getClient(db, clientId, firmId);
   if (!current) return undefined;
@@ -66,12 +68,14 @@ export async function updateClient(
   const name = input.name ?? current.name;
   const legalName = input.legal_name !== undefined ? input.legal_name : current.legal_name;
   const notes = input.notes !== undefined ? input.notes : current.notes;
+  const email = input.email !== undefined ? input.email : current.email;
+  const phone = input.phone !== undefined ? input.phone : current.phone;
 
   await db.query(
     `UPDATE clients
-     SET name = $1, legal_name = $2, notes = $3, updated_at = NOW()
-     WHERE id = $4 AND firm_id = $5`,
-    [name, legalName, notes, clientId, firmId],
+     SET name = $1, legal_name = $2, notes = $3, email = $4, phone = $5, updated_at = NOW()
+     WHERE id = $6 AND firm_id = $7`,
+    [name, legalName, notes, email, phone, clientId, firmId],
   );
   return getClient(db, clientId, firmId);
 }

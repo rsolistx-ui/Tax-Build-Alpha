@@ -15,6 +15,10 @@
   },
   "bundle": {
     "active": true,
+    "publisher": "Tax Build Alpha",
+    "category": "Business",
+    "shortDescription": "Evidence-first bookkeeping and tax workspace",
+    "longDescription": "Folio Beta — evidence-first bookkeeping and tax workspace for firms. All data lives server-side; the EXE is a hardened WebView wrapper (Tauri/Rust, no Electron).",
     "targets": ["nsis", "msi"],
     "icon": [
       "icons/32x32.png",
@@ -24,7 +28,8 @@
     ],
     "windows": {
       "nsis": {
-        "installMode": "currentUser"
+        "installMode": "currentUser",
+        "displayLanguageSelector": false
       }
     }
   }

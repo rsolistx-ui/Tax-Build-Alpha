@@ -11,6 +11,7 @@ import {
   Plus,
   Search,
   Upload,
+  UploadCloud,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -19,6 +20,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { EmptyState } from "@/components/empty-state";
 import { cn } from "@/lib/utils";
+import { AccountingImportModal } from "@/components/accounting-import-modal";
 
 type Readiness = "ready" | "needs_review" | "missing_evidence" | "books_incomplete";
 
@@ -238,12 +240,21 @@ function SummaryStrip({ summary }: { summary: Summary }) {
   );
 }
 
-function QuickActions({ onPickClient }: { onPickClient: (destinationTab: string) => void }) {
+function QuickActions({
+  onPickClient,
+  onOpenWave,
+}: {
+  onPickClient: (destinationTab: string) => void;
+  onOpenWave?: () => void;
+}) {
   const navigate = useNavigate();
   return (
     <div className="flex flex-wrap gap-2">
       <Button size="sm" onClick={() => navigate("/clients?new=1")}>
         <Plus className="h-3.5 w-3.5" /> Add client
+      </Button>
+      <Button size="sm" variant="outline" onClick={onOpenWave}>
+        <UploadCloud className="h-3.5 w-3.5" /> Import Books CSV
       </Button>
       <Button size="sm" variant="secondary" onClick={() => onPickClient("upload")}>
         <Upload className="h-3.5 w-3.5" /> Upload receipts
@@ -309,6 +320,7 @@ export function DashboardPage() {
   const [filter, setFilter] = useState<Filter>("all");
   const [search, setSearch] = useState("");
   const [pickerTab, setPickerTab] = useState<string | null>(null);
+  const [waveModalOpen, setWaveModalOpen] = useState(false);
   const navigate = useNavigate();
 
   async function load() {
@@ -339,9 +351,12 @@ export function DashboardPage() {
   if (loading) {
     return (
       <div className="space-y-4">
-        <div className="h-10 animate-pulse rounded-[var(--radius-lg)] bg-[var(--color-muted)]" />
-        <div className="h-24 animate-pulse rounded-[var(--radius-lg)] bg-[var(--color-muted)]" />
-        <div className="h-64 animate-pulse rounded-[var(--radius-lg)] bg-[var(--color-muted)]" />
+        <div className="h-8 w-48 animate-pulse rounded bg-[var(--color-muted)]" />
+        <div className="grid gap-3 sm:grid-cols-4">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="h-24 animate-pulse rounded-[var(--radius-lg)] bg-[var(--color-muted)]" />
+          ))}
+        </div>
       </div>
     );
   }
@@ -357,9 +372,14 @@ export function DashboardPage() {
         title="No clients yet"
         description="Add your first client to start tracking receipts, bank activity, and reporting readiness in one place."
         action={
-          <Button onClick={() => navigate("/clients?new=1")}>
-            <Plus className="h-4 w-4" /> Add client
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={() => setWaveModalOpen(true)}>
+              <UploadCloud className="h-4 w-4" /> Import Books CSV
+            </Button>
+            <Button onClick={() => navigate("/clients?new=1")}>
+              <Plus className="h-4 w-4" /> Add client
+            </Button>
+          </div>
         }
       />
     );
@@ -376,7 +396,7 @@ export function DashboardPage() {
             Firm-wide workload across every client's books, evidence, and bank activity.
           </p>
         </div>
-        <QuickActions onPickClient={(tab) => setPickerTab(tab)} />
+        <QuickActions onPickClient={(tab) => setPickerTab(tab)} onOpenWave={() => setWaveModalOpen(true)} />
       </div>
 
       <SummaryStrip summary={data.summary} />
@@ -556,6 +576,12 @@ export function DashboardPage() {
           }}
         />
       ) : null}
+
+      <AccountingImportModal
+        isOpen={waveModalOpen}
+        onClose={() => setWaveModalOpen(false)}
+        onSuccess={() => void load()}
+      />
     </div>
   );
 }

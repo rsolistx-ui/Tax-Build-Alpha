@@ -51,7 +51,10 @@ import { CarryforwardPanel, StateModsPanel, M3Panel, PriorYearPanel, ExtensionsP
 import { convertHeicToJpeg, createCaptureInput } from "@/lib/image-utils";
 import { enqueueReceipt, drainQueue, registerSyncListener, queueCount } from "@/lib/offline-queue";
 import { subscribePush, unsubscribePush } from "@/lib/push";
-import { Bell, Wifi } from "lucide-react";
+import { Bell, Wifi, Sparkles, Smartphone, Mic } from "lucide-react";
+import { TaxBridgePanel } from "@/components/tax-bridge-panel";
+import { MagicMobileLinkModal } from "@/components/magic-mobile-link-modal";
+import { VoiceRuleDictationModal } from "@/components/voice-rule-dictation-modal";
 
 type Category = {
   id: string;
@@ -110,11 +113,11 @@ type BatchFile = {
   error?: string;
 };
 
-type Tab = "overview" | "folders" | "upload" | "review" | "bank" | "pnl" | "tax-readiness" | "workpaper" | "documents" | "engagements" | "requests" | "export" | "agent" | "analytics";
+type Tab = "overview" | "folders" | "upload" | "review" | "bank" | "pnl" | "tax-bridge" | "tax-readiness" | "workpaper" | "documents" | "engagements" | "requests" | "export" | "agent" | "analytics";
 
 
 
-const VALID_TABS: Tab[] = ["overview", "folders", "upload", "review", "bank", "pnl", "tax-readiness", "workpaper", "documents", "engagements", "requests", "export", "agent", "analytics"];
+const VALID_TABS: Tab[] = ["overview", "folders", "upload", "review", "bank", "pnl", "tax-bridge", "tax-readiness", "workpaper", "documents", "engagements", "requests", "export", "agent", "analytics"];
 
 export function ClientWorkspacePage() {
   const { clientId = "" } = useParams();
@@ -147,6 +150,8 @@ export function ClientWorkspacePage() {
   const [batchRunning, setBatchRunning] = useState(false);
   const [queueCountState, setQueueCountState] = useState<number>(0);
   const [pushSubscribed, setPushSubscribed] = useState(false);
+  const [mobileLinkOpen, setMobileLinkOpen] = useState(false);
+  const [teachAiOpen, setTeachAiOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -346,7 +351,7 @@ export function ClientWorkspacePage() {
       { id: "requests" as const, label: "Requests", icon: Inbox },
       { id: "agent" as const, label: "Agent", icon: Bot },
        { id: "analytics" as const, label: "Analytics", icon: BarChart3 },
-      { id: "overview" as const, label: "Overview", icon: LayoutDashboard },
+      { id: "tax-bridge" as const, label: "Tax Bridge & 1099", icon: Sparkles },
       { id: "export" as const, label: "Export", icon: FileDown },
     ],
     [review.length],
@@ -395,7 +400,25 @@ export function ClientWorkspacePage() {
                 <span>Basis: <strong>{profile?.accounting_basis || "Not set"}</strong></span>
                 <span>Currency: <strong>{profile?.default_currency || "USD"}</strong></span>
               </div>
-              <Button size="sm" variant="secondary" onClick={() => setEditingProfile(true)}>Edit</Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1.5 border-purple-200 text-purple-700 hover:bg-purple-50 dark:border-purple-800 dark:text-purple-400"
+                  onClick={() => setTeachAiOpen(true)}
+                >
+                  <Mic className="h-3.5 w-3.5" /> Teach AI Rule
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1.5 border-indigo-200 text-indigo-700 hover:bg-indigo-50 dark:border-indigo-800 dark:text-indigo-400"
+                  onClick={() => setMobileLinkOpen(true)}
+                >
+                  <Smartphone className="h-3.5 w-3.5" /> Magic Phone Upload
+                </Button>
+                <Button size="sm" variant="secondary" onClick={() => setEditingProfile(true)}>Edit</Button>
+              </div>
             </>
           )}
         </CardContent>
@@ -436,6 +459,10 @@ export function ClientWorkspacePage() {
             </div>
           </div>
         </>
+      ) : null}
+
+      {tab === "tax-bridge" ? (
+        <TaxBridgePanel clientId={clientId} />
       ) : null}
 
       {tab === "tax-readiness" ? (
@@ -636,6 +663,13 @@ export function ClientWorkspacePage() {
             </div>
 
             <div className="flex flex-wrap gap-2">
+               <Button
+                 variant="default"
+                 className="bg-indigo-600 hover:bg-indigo-700 text-white gap-2"
+                 onClick={() => setMobileLinkOpen(true)}
+               >
+                 <Smartphone className="h-4 w-4" /> Share Magic Phone Upload Link (QR)
+               </Button>
                <Button
                  variant="outline"
                  onClick={async () => {
@@ -896,6 +930,21 @@ export function ClientWorkspacePage() {
       ) : null}
 
       {tab === "export" ? <ExportCenter clientId={clientId} taxYear={profile?.tax_year ?? null} /> : null}
+
+      <MagicMobileLinkModal
+        clientId={clientId}
+        clientName={client?.name}
+        isOpen={mobileLinkOpen}
+        onClose={() => setMobileLinkOpen(false)}
+      />
+
+      <VoiceRuleDictationModal
+        isOpen={teachAiOpen}
+        onClose={() => setTeachAiOpen(false)}
+        defaultClientId={clientId}
+        defaultClientName={client?.name}
+        onRuleCreated={() => void load()}
+      />
     </div>
   );
 

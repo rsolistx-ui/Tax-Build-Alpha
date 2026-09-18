@@ -191,15 +191,17 @@ export class BankConnectionService {
   async createConnection(connection: Omit<BankConnection, 'id' | 'createdAt' | 'updatedAt'>): Promise<BankConnection> {
     const id = newId("bnk");
     const now = new Date();
+    const providerConnectionId = await encryptToken(connection.providerConnectionId, this.db);
     await this.db.query(
       `INSERT INTO bank_connections (id, firm_id, client_id, provider, provider_connection_id, institution_id, institution_name, institution_logo, status, last_sync_at, last_successful_sync_at, error_message, created_at, updated_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())`,
-      [id, connection.firmId, connection.clientId ?? null, connection.provider, connection.providerConnectionId,
+      [id, connection.firmId, connection.clientId ?? null, connection.provider, providerConnectionId,
        connection.institutionId, connection.institutionName, connection.institutionLogo ?? null,
        connection.status, connection.lastSyncAt?.toISOString() ?? null,
        connection.lastSuccessfulSyncAt?.toISOString() ?? null, connection.errorMessage ?? null],
     );
-    return { ...connection, id, createdAt: new Date(), updatedAt: new Date() };
+    const decrypted = await decryptToken(providerConnectionId, this.db);
+    return { ...connection, id, providerConnectionId: decrypted, createdAt: new Date(), updatedAt: new Date() };
   }
 
   async getConnection(id: string): Promise<BankConnection | null> {
@@ -215,7 +217,7 @@ export class BankConnectionService {
       `SELECT * FROM bank_connections WHERE firm_id = $1 ORDER BY created_at DESC`,
       [firmId],
     );
-    return rows.map(this.mapConnection);
+    return Promise.all(rows.map(async (row) => await this.mapConnection(row)));
   }
 
   async getConnectionsByClient(clientId: string): Promise<BankConnection[]> {
@@ -223,7 +225,7 @@ export class BankConnectionService {
       `SELECT * FROM bank_connections WHERE client_id = $1 ORDER BY created_at DESC`,
       [clientId],
     );
-    return rows.map(this.mapConnection);
+    return Promise.all(rows.map(async (row) => await this.mapConnection(row)));
   }
 
   async updateConnection(id: string, patch: Partial<BankConnection>): Promise<BankConnection | null> {
@@ -233,8 +235,12 @@ export class BankConnectionService {
     for (const [key, value] of Object.entries(patch)) {
       if (value !== undefined && key !== 'id' && key !== 'createdAt') {
         const col = key.replace(/([A-Z])/g, '_$1').toLowerCase();
+        let val = value;
+        if (key === 'providerConnectionId') {
+          val = await encryptToken(value as string, this.db);
+        }
         sets.push(`${col} = $${idx++}`);
-        params.push(value instanceof Date ? value.toISOString() : value);
+        params.push(val instanceof Date ? val.toISOString() : val);
       }
     }
     if (sets.length === 0) return this.getConnection(id);
@@ -250,13 +256,14 @@ export class BankConnectionService {
     await this.db.query(`DELETE FROM bank_connections WHERE id = $1`, [id]);
   }
 
-  private mapConnection(row: any): BankConnection {
+  private async mapConnection(row: any): Promise<BankConnection> {
+    const decryptedId = await decryptToken(row.provider_connection_id, this.db);
     return {
       id: row.id,
       firmId: row.firm_id,
       clientId: row.client_id,
       provider: row.provider,
-      providerConnectionId: row.provider_connection_id,
+      providerConnectionId: decryptedId,
       institutionId: row.institution_id,
       institutionName: row.institution_name,
       institutionLogo: row.institution_logo,
@@ -482,6 +489,48 @@ export class BankSyncCursorService {
       [newId("bsc"), cursor.connectionId, cursor.accountId, cursor.cursor, cursor.lastSyncAt.toISOString(),
        cursor.lastSuccessfulSyncAt?.toISOString() ?? null],
     );
+  }
+}
+
+async function getActiveEncryptionKey(
+  db: Db,
+): Promise<Buffer | null> {
+  const [row] = await db.query<{ key_data: string }>(
+    `SELECT key_data FROM encryption_key_versions WHERE is_active = TRUE LIMIT 1`,
+    [],
+  );
+  if (!row || !row.key_data) return null;
+  return Buffer.from(row.key_data, "base64");
+}
+
+async function encryptToken(token: string, db: Db): Promise<string> {
+  const key = await getActiveEncryptionKey(db);
+  if (!key) return token;
+  try {
+    const cryptoModule = await import("crypto");
+    const iv = cryptoModule.randomBytes(12);
+    const cipher = cryptoModule.createCipheriv("aes-256-cbc", key, iv);
+    let encrypted = cipher.update(token, "utf8", "base64");
+    encrypted += cipher.final("base64");
+    return `${iv.toString("base64")}.${encrypted}`;
+  } catch {
+    return token;
+  }
+}
+
+async function decryptToken(encrypted: string, db: Db): Promise<string> {
+  try {
+    const key = await getActiveEncryptionKey(db);
+    if (!key) return encrypted;
+    const cryptoModule = await import("crypto");
+    const [ivBase64, ciphertext] = encrypted.split(".");
+    const iv = Buffer.from(ivBase64, "base64");
+    const decipher = cryptoModule.createDecipheriv("aes-256-cbc", key, iv);
+    let decrypted = decipher.update(ciphertext, "base64", "utf8");
+    decrypted += decipher.final("utf8");
+    return decrypted;
+  } catch {
+    return encrypted;
   }
 }
 

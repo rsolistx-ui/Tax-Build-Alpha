@@ -15,7 +15,11 @@ returnEngineRoutes.post("/:clientId/returns", async (c) => {
   const db = createDb(c.env); const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
   const client = await getClient(db, c.req.param("clientId"), firm.id); if (!client) return c.json({ error: "Client not found" }, 404);
   const body = z.object({ taxYear: z.number().int(), formType: z.string().min(1) }).parse(await c.req.json());
-  try { return c.json({ return: await createReturn(db, firm.id, client.id, body.taxYear, body.formType) }, 201); } catch (e: any) { return c.json({ error: e.message }, 400); }
+  try {
+    const ret = await createReturn(db, firm.id, client.id, body.taxYear, body.formType) as any;
+    try { const { appendSyncEvent, firePushes } = await import("../services/sync"); await appendSyncEvent(db, firm.id, c.get("userId"), "tax_return", ret?.id ?? client.id, "create", { taxYear: body.taxYear, formType: body.formType }); await firePushes(db, c.get("userId"), "Tax return created", `${body.formType} ${body.taxYear}`); } catch {}
+    return c.json({ return: ret }, 201);
+  } catch (e: any) { return c.json({ error: e.message }, 400); }
 });
 returnEngineRoutes.post("/:clientId/returns/:returnId/submit", async (c) => {
   const db = createDb(c.env); const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));

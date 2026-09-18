@@ -44,6 +44,18 @@ export type Env = {
   PLAID_CLIENT_SECRET?: string;
   PLAID_ENVIRONMENT?: 'sandbox' | 'development' | 'production';
   PLAID_WEBHOOK_SECRET?: string;
+  /** Optional QuickBooks integration. Worker secrets only. */
+  QB_CLIENT_ID?: string;
+  QB_CLIENT_SECRET?: string;
+  QB_ENVIRONMENT?: 'sandbox' | 'production';
+  /** Optional Stripe integration. Worker secrets only. */
+  STRIPE_SECRET_KEY?: string;
+  STRIPE_PUBLISHABLE_KEY?: string;
+  STRIPE_WEBHOOK_SECRET?: string;
+  STRIPE_CONNECT_CLIENT_ID?: string;
+  /** Optional Google Calendar integration. Worker secrets only. */
+  GOOGLE_CLIENT_ID?: string;
+  GOOGLE_CLIENT_SECRET?: string;
   /** DocuSign integration (optional, gated). Worker secrets only. */
   DOCUSIGN_CLIENT_ID?: string;
   DOCUSIGN_CLIENT_SECRET?: string;
@@ -51,4 +63,8 @@ export type Env = {
   DOCUSIGN_BASE_URL?: string;
   DOCUSIGN_AUTH_SERVER?: string;
   DOCUSIGN_REDIRECT_URI?: string;
+  /** Tauri desktop bridge secret (signs sync payloads). Worker secret only. */
+  TAURI_SYNC_SECRET?: string;
+  /** Internal: sync event hooks (append-only table). Never exposed to clients. */
+  SYNC_TABLE_SECRET?: string;
 };

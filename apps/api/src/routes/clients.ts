@@ -15,12 +15,16 @@ const createSchema = z.object({
   name: z.string().min(1).max(200),
   legal_name: z.string().max(200).optional(),
   notes: z.string().max(2000).optional(),
+  email: z.string().email().max(320).optional(),
+  phone: z.string().max(40).optional(),
 });
 
 const updateSchema = z.object({
   name: z.string().min(1).max(200).optional(),
   legal_name: z.string().max(200).nullable().optional(),
   notes: z.string().max(2000).nullable().optional(),
+  email: z.string().email().max(320).nullable().optional(),
+  phone: z.string().max(40).nullable().optional(),
 });
 
 const profileSchema = z.object({
@@ -63,6 +67,11 @@ clientRoutes.post("/", async (c) => {
       "INSERT INTO audit_events (id, client_id, actor_user_id, action, after_json) VALUES ($1, $2, $3, 'client_created', $4::jsonb)",
       [newId("aud"), created.id, c.get("userId"), { name: created.name }],
     );
+    try {
+      const { appendSyncEvent, firePushes } = await import("../services/sync");
+      await appendSyncEvent(db, firm.id, c.get("userId"), "client", created.id, "create", { name: created.name });
+      await firePushes(db, c.get("userId"), "Client created", created.name);
+    } catch {}
   }
   return c.json({ client: created }, 201);
 });

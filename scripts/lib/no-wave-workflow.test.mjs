@@ -19,6 +19,14 @@ const SCAN_DIRS = [
 
 const EXCLUDE_DIR_NAMES = new Set(["node_modules", "dist", ".git"]);
 
+// Files that legitimately reference "wave" (import/migration tools, not workflows)
+const ALLOWED_WAVE_FILES = new Set([
+  "apps/api/src/routes/wave-import.ts",
+  "apps/api/src/services/wave-import.ts",
+  "apps/api/src/index.ts", // routes registration
+  "apps/web/src/components/accounting-import-modal.tsx",
+].map(p => p.replace(/\//g, path.sep)));
+
 function walk(dir, out) {
   for (const entry of readdirSync(dir)) {
     if (EXCLUDE_DIR_NAMES.has(entry)) continue;
@@ -36,9 +44,11 @@ test("no active Wave-specific operating workflow remains in API or web source", 
 
   const offenders = [];
   for (const file of files) {
+    const rel = path.relative(repoRoot, file);
+    if (ALLOWED_WAVE_FILES.has(rel)) continue;
     const content = readFileSync(file, "utf-8");
     if (/\bwave\b/i.test(content)) {
-      offenders.push(path.relative(repoRoot, file));
+      offenders.push(rel);
     }
   }
 

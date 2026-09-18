@@ -1,19 +1,21 @@
 import type { FormEvent } from "react";
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { Plus, Users } from "lucide-react";
+import { Plus, Users, UploadCloud } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/empty-state";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { AccountingImportModal } from "@/components/accounting-import-modal";
 
 type Client = {
   id: string;
   name: string;
   legal_name: string | null;
   notes: string | null;
+  email: string | null;
   created_at: string;
 };
 
@@ -24,7 +26,9 @@ export function ClientsPage() {
   const [searchParams] = useSearchParams();
   const [showForm, setShowForm] = useState(searchParams.get("new") === "1");
   const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
   const [saving, setSaving] = useState(false);
+  const [waveModalOpen, setWaveModalOpen] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -47,8 +51,9 @@ export function ClientsPage() {
     e.preventDefault();
     setSaving(true);
     try {
-      await api("/api/clients", { method: "POST", body: JSON.stringify({ name }) });
+      await api("/api/clients", { method: "POST", body: JSON.stringify({ name, email: email || undefined }) });
       setName("");
+      setEmail("");
       setShowForm(false);
       await load();
     } catch (err) {
@@ -67,10 +72,16 @@ export function ClientsPage() {
             Each client gets folders, receipts, review inbox, and P&amp;L.
           </p>
         </div>
-        <Button onClick={() => setShowForm((v) => !v)}>
-          <Plus className="h-4 w-4" />
-          New client
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => setWaveModalOpen(true)}>
+            <UploadCloud className="h-4 w-4" />
+            Import Books CSV
+          </Button>
+          <Button onClick={() => setShowForm((v) => !v)}>
+            <Plus className="h-4 w-4" />
+            New client
+          </Button>
+        </div>
       </div>
 
       {showForm ? (
@@ -85,6 +96,16 @@ export function ClientsPage() {
                   required
                   value={name}
                   onChange={(e) => setName(e.target.value)}
+                />
+              </div>
+              <div className="flex-1 space-y-2">
+                <Label htmlFor="client-email">Email</Label>
+                <Input
+                  id="client-email"
+                  type="email"
+                  placeholder="client@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
                 />
               </div>
               <Button type="submit" disabled={saving}>
@@ -140,6 +161,11 @@ export function ClientsPage() {
           ))}
         </div>
       )}
+      <AccountingImportModal
+        isOpen={waveModalOpen}
+        onClose={() => setWaveModalOpen(false)}
+        onSuccess={() => void load()}
+      />
     </div>
   );
 }

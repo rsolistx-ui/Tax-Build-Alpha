@@ -3,8 +3,8 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { PortalPage } from "@/pages/portal";
 
-function jsonResponse(body: unknown, ok = true) {
-  return Promise.resolve({ ok, json: () => Promise.resolve(body) } as Response);
+function jsonResponse(body: unknown, ok = true, status = ok ? 200 : 400) {
+  return Promise.resolve({ ok, status, json: () => Promise.resolve(body) } as Response);
 }
 
 const HOME = {
@@ -56,7 +56,7 @@ describe("PortalPage", () => {
 
   it("renders a safe error, not a crash, when the token is rejected (e.g. cross-client or revoked)", async () => {
     window.location.hash = "#token=bad";
-    vi.stubGlobal("fetch", vi.fn().mockImplementation(() => jsonResponse({ error: "Unauthorized" }, false)));
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(() => jsonResponse({ error: "Unauthorized" }, false, 401)));
 
     render(<MemoryRouter><PortalPage /></MemoryRouter>);
 
@@ -101,6 +101,32 @@ describe("PortalPage", () => {
     await waitFor(() => {
       expect(fetchMock.mock.calls.some((c) => (c[0] as string).includes("/messages"))).toBe(true);
     });
+
+    vi.unstubAllGlobals();
+  });
+  it("surfaces the server's real error message (with the failing filename) instead of a generic upload-failed string", async () => {
+    window.location.hash = "#token=abc123";
+    const requestDetail = { request: HOME.dueRequests[0], messages: [] };
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url.includes("/api/portal/home")) return jsonResponse(HOME);
+      if (url.includes("/api/portal/documents")) return jsonResponse({ documents: [] });
+      if (url.match(/\/requests\/creq_1$/)) return jsonResponse(requestDetail);
+      if (url.includes("/evidence")) {
+        return jsonResponse({ error: "Unsupported file type. Supported: PDF, PNG, JPG, JPEG, HEIC, DOCX, XLSX, CSV.", code: "UNSUPPORTED_FILE_TYPE" }, false, 415);
+      }
+      return jsonResponse({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { container } = render(<MemoryRouter><PortalPage /></MemoryRouter>);
+    fireEvent.click(await screen.findByText("Upload W-2"));
+    await screen.findByText("Choose files");
+
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const badFile = new File(["not a real doc"], "notes.exe", { type: "application/octet-stream" });
+    fireEvent.change(fileInput, { target: { files: [badFile] } });
+
+    expect(await screen.findByText(/notes\.exe: Unsupported file type\. Supported: PDF, PNG, JPG, JPEG, HEIC, DOCX, XLSX, CSV\./)).toBeInTheDocument();
 
     vi.unstubAllGlobals();
   });

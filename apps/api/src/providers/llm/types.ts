@@ -10,6 +10,8 @@ export type ReceiptLineItem = {
 export type ReceiptExtraction = {
   date: string | null;
   merchant: string | null;
+  paymentMethod?: string | null;
+  cardLast4?: string | null;
   subtotal: number | null;
   tax: number | null;
   tip: number | null;
@@ -27,15 +29,17 @@ export type ReceiptBusinessContext = {
   state?: string | null;
   accountingBasis?: string | null;
   categories?: string[];
+  markdownRules?: string;
 };
 
 export type LlmProvider = {
   name: string;
   model: string;
   extractReceipt(input: {
-    bytes: ArrayBuffer;
+    bytes: ArrayBuffer | ArrayBuffer[];
     contentType: string;
     filename: string;
     context?: ReceiptBusinessContext;
+    isMultiPage?: boolean;
   }): Promise<ReceiptExtraction>;
 };

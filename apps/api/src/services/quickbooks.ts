@@ -554,6 +554,10 @@ export class QuickBooksClient {
       })) }),
     });
   }
+
+  async disconnect(): Promise<void> {
+    await this.request<any>('/disconnect', { method: 'POST' });
+  }
 }
 
 export class QuickBooksTokenStore {

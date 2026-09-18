@@ -13,6 +13,7 @@ export function createGroqProvider(apiKey: string): LlmProvider {
       if (contentType === "application/pdf") {
         throw new Error("Groq image fallback does not accept PDF receipt evidence");
       }
+      const firstBytes = Array.isArray(bytes) ? bytes[0] : bytes;
       const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
         method: "POST",
         headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
@@ -24,7 +25,7 @@ export function createGroqProvider(apiKey: string): LlmProvider {
             { role: "system", content: "You extract accounting evidence from receipts. Return JSON only." },
             { role: "user", content: [
               { type: "text", text: receiptPrompt(filename, context) },
-              { type: "image_url", image_url: { url: `data:${contentType || "image/jpeg"};base64,${arrayBufferToBase64(bytes)}` } },
+              { type: "image_url", image_url: { url: `data:${contentType || "image/jpeg"};base64,${arrayBufferToBase64(firstBytes)}` } },
             ] },
           ],
         }),

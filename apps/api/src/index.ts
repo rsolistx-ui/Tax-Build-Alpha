@@ -13,6 +13,7 @@ import { requireSession, type AuthedVars } from "./middleware/session";
 import { requireActiveBeta } from "./middleware/beta";
 import { ensureFirm } from "./services/firm";
 import { betaRoutes } from "./routes/beta";
+import { adminRoutes } from "./routes/admin";
 import { internalRoutes } from "./routes/internal";
 import { reportRoutes } from "./routes/reports";
 import { dashboardRoutes } from "./routes/dashboard";
@@ -29,8 +30,24 @@ import { taxWorkpaperRoutes } from "./routes/tax-workpapers";
 import { taxOrganizerRoutes } from "./routes/tax-organizer";
 import { taxExtendedRoutes } from "./routes/tax-extended";
 import { docVersioningRoutes } from "./routes/doc-versioning";
+import { signedDocumentRoutes } from "./routes/signed-documents";
+import { engagementLetterRoutes } from "./routes/engagement-letters";
 import { taxWorkbenchRoutes } from "./routes/tax-workbench";
 import { returnEngineRoutes } from "./routes/return-engine";
+import { docuSignRoutes } from "./routes/docu-sign";
+import { gmailRoutes } from "./routes/gmail";
+import { billingRoutes } from "./routes/billing";
+import { deadlineCalendarRoutes } from "./routes/deadline-calendar";
+import { quickbooksRoutes } from "./routes/quickbooks";
+import { accountingRoutes } from "./routes/accounting";
+import { stripeRoutes } from "./routes/stripe";
+import { googleCalendarRoutes } from "./routes/google-calendar";
+import { waveImportRoutes } from "./routes/wave-import";
+import { estimatesRoutes } from "./routes/estimates";
+import { projectsRoutes } from "./routes/projects";
+import { adminRulesRoutes } from "./routes/admin-rules";
+import { taxRadarAdvisoryRoutes } from "./routes/tax-radar-advisory";
+import { featureRequestRoutes } from "./routes/feature-requests";
 
 const app = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 
@@ -106,6 +123,7 @@ app.post("/api/auth/sign-up/email", (c) =>
 app.on(["POST", "GET"], "/api/auth/*", (c) => createAuth(c.env).handler(c.req.raw));
 
 app.route("/api/beta", betaRoutes);
+app.route("/api/admin", adminRoutes);
 app.route("/api/internal", internalRoutes);
 
 app.get("/api/me", requireSession, requireActiveBeta, async (c) => {
@@ -129,6 +147,7 @@ app.route("/api/clients", reportRoutes);
 app.route("/api/dashboard", dashboardRoutes);
 app.route("/api/clients", workspaceRoutes);
 app.route("/api/documents", documentReviewRoutes);
+app.route("/api/signed-documents", signedDocumentRoutes);
 app.route("/api/clients", engagementRoutes);
 app.route("/api/clients", clientRequestRoutes);
 app.route("/api/work-queue", workQueueRoutes);
@@ -140,13 +159,28 @@ app.route("/api/clients", taxWorkpaperRoutes);
 app.route("/api/clients", taxOrganizerRoutes);
 app.route("/api/clients", taxExtendedRoutes);
 app.route("/api/clients", docVersioningRoutes);
+app.route("/api/clients", engagementLetterRoutes);
 app.route("/api/clients", taxWorkbenchRoutes);
 app.route("/api/clients", returnEngineRoutes);
 import { pushRoutes } from "./routes/push";
 import { feedbackRoutes } from "./routes/feedback";
+app.route("/api/docu-sign", docuSignRoutes);
+app.route("/api/gmail", gmailRoutes);
+app.route("/api/billing", billingRoutes);
+app.route("/api/calendar", deadlineCalendarRoutes);
+app.route("/api/quickbooks", quickbooksRoutes);
+app.route("/api/accounting", accountingRoutes);
+app.route("/api/stripe", stripeRoutes);
+app.route("/api/google-calendar", googleCalendarRoutes);
+app.route("/api/wave-import", waveImportRoutes);
+app.route("/api/estimates", estimatesRoutes);
+app.route("/api/projects", projectsRoutes);
 app.route("/api/agent-schedule", agentSchedulerRoutes);
 app.route("/api/feedback", feedbackRoutes);
 app.route("/api/push", pushRoutes);
+app.route("/api/admin/rules", adminRulesRoutes);
+app.route("/api/clients", taxRadarAdvisoryRoutes);
+app.route("/api/feature-requests", featureRequestRoutes);
 
 app.notFound((c) => c.json({ error: "Not found" }, 404));
 app.onError((err, c) => {

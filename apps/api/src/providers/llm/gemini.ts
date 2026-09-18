@@ -8,7 +8,8 @@ export function createGeminiProvider(apiKey: string): LlmProvider {
     name: "gemini",
     model: MODEL,
     async extractReceipt({ bytes, contentType, filename, context }): Promise<ReceiptExtraction> {
-      const b64 = arrayBufferToBase64(bytes);
+      const firstBytes = Array.isArray(bytes) ? bytes[0] : bytes;
+      const b64 = arrayBufferToBase64(firstBytes);
       const prompt = buildPrompt(filename, context);
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${apiKey}`;
       const res = await fetch(url, {

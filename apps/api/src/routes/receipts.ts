@@ -99,6 +99,12 @@ receiptRoutes.post("/:clientId/receipts", async (c) => {
   if (!result.ok) {
     return c.json({ receiptId: result.receiptId, jobId: result.jobId, error: result.error, code: "EXTRACTION_FAILED", requestId: result.requestId }, 500);
   }
+  try {
+    const { appendSyncEvent, firePushes } = await import("../services/sync");
+    const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
+    await appendSyncEvent(db, firm.id, c.get("userId"), "receipt", result.receiptId, "create", { clientId: client.id });
+    await firePushes(db, c.get("userId"), "New receipt uploaded", `Client ${client.id}`);
+  } catch {}
   return c.json({ receipt: await getReceiptDetails(db, result.receiptId, client.id), jobId: result.jobId, bankTransactionId: result.bankTransactionId }, 201);
 });
 
@@ -298,6 +304,12 @@ receiptRoutes.post("/:clientId/receipts/:receiptId/approve", async (c) => {
   }
 
   await db.transaction(statements);
+  try {
+    const { appendSyncEvent, firePushes } = await import("../services/sync");
+    const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
+    await appendSyncEvent(db, firm.id, c.get("userId"), "receipt", receiptId, "update", { clientId: client.id, action: "filed", resolvedBankTransactions: pendingBankTransactions.map((transaction) => String(transaction.id)) });
+    await firePushes(db, c.get("userId"), "Receipt filed", String(pendingBankTransactions.length ? `${pendingBankTransactions.length} bank transaction${pendingBankTransactions.length > 1 ? "s" : ""} resolved` : "Receipt filed"));
+  } catch {}
 
   return c.json({
     receipt: await getReceiptDetails(db, receiptId, client.id),
@@ -345,6 +357,12 @@ receiptRoutes.patch("/:clientId/receipts/:receiptId/category", async (c) => {
       params: [newId("aud"), client.id, receiptId, c.get("userId"), { categoryId: receipt.category_id }, { categoryId: body.categoryId }],
     },
   ]);
+  try {
+    const { appendSyncEvent, firePushes } = await import("../services/sync");
+    const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
+    await appendSyncEvent(db, firm.id, c.get("userId"), "receipt", receiptId, "update", { clientId: client.id, action: "category_corrected", categoryId: body.categoryId });
+    await firePushes(db, c.get("userId"), "Receipt updated", "Category corrected");
+  } catch {}
 
   return c.json({ receipt: await getReceiptDetails(db, receiptId, client.id) });
 });

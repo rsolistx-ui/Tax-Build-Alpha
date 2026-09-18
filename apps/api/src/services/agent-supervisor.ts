@@ -9,7 +9,7 @@ export const AGENT_POLICY = {
 type AgentTaskInput = {
   firmId: string;
   clientId: string;
-  sourceType: "receipt" | "bank_import" | "client_request";
+  sourceType: "receipt" | "bank_import" | "client_request" | "gmail_message" | "engagement_letter";
   sourceId: string;
   agentName: "intake_specialist" | "reconciliation_specialist" | "practice_coordinator";
   actionType: string;
@@ -200,6 +200,41 @@ export async function delegateReceiptAgents(
   ]);
 }
 
+/**
+ * Inbound-email triage: an email from a known client's address becomes a
+ * follow-up task on approval, never an autonomous reply or action. Idempotent
+ * on (clientId, gmailMessageId) via the same unique constraint every other
+ * agent task uses, so re-scanning the inbox never double-creates a task for
+ * a message already triaged.
+ */
+export function gmailTriageAgentTaskStatement(input: {
+  firmId: string;
+  clientId: string;
+  gmailMessageId: string;
+  gmailThreadId: string;
+  fromEmail: string;
+  subject: string;
+  snippet: string;
+}): DbStatement {
+  return agentTaskInsertStatement({
+    firmId: input.firmId,
+    clientId: input.clientId,
+    sourceType: "gmail_message",
+    sourceId: input.gmailMessageId,
+    agentName: "practice_coordinator",
+    actionType: "email_triage",
+    autonomy: "approval_required",
+    recommendation: {
+      gmailMessageId: input.gmailMessageId,
+      gmailThreadId: input.gmailThreadId,
+      fromEmail: input.fromEmail,
+      subject: input.subject,
+      snippet: input.snippet,
+      reason: "Matched to this client by their email address on file. Approving creates a follow-up task; nothing is sent or actioned automatically.",
+    },
+  });
+}
+
 export async function delegateBankImportAgent(db: Db, input: {
   firmId: string; clientId: string; importBatchId: string; insertedCount: number; duplicateCount: number;
 }): Promise<void> {
@@ -208,5 +243,34 @@ export async function delegateBankImportAgent(db: Db, input: {
     agentName: "reconciliation_specialist", actionType: "triage_bank_import",
     autonomy: "approval_required",
     recommendation: { insertedCount: input.insertedCount, duplicateCount: input.duplicateCount, reason: "Matches and dispositions are suggestions until approved." },
+  });
+}
+
+/**
+ * Engagement letter draft: when an engagement is ready, create an
+ * approval-required task for the professional to review the letter
+ * before it's sent to the client via DocuSign.
+ */
+export function engagementLetterDraftAgentTaskStatement(input: {
+  firmId: string;
+  clientId: string;
+  engagementId: string;
+  fee?: string | null;
+}): DbStatement {
+  return agentTaskInsertStatement({
+    firmId: input.firmId,
+    clientId: input.clientId,
+    sourceType: "engagement_letter",
+    sourceId: input.engagementId,
+    agentName: "practice_coordinator",
+    actionType: "engagement_letter_draft",
+    autonomy: "approval_required",
+    confidence: null,
+    recommendation: {
+      engagementId: input.engagementId,
+      fee: input.fee ?? null,
+      status: "draft",
+      reason: "Engagement letter ready for professional review before sending to client via DocuSign.",
+    },
   });
 }

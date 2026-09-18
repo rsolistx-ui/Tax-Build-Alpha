@@ -38,6 +38,8 @@ export function EngagementsPanel({ clientId, focusEngagementId }: { clientId: st
   const [title, setTitle] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [taxYear, setTaxYear] = useState("");
+  const [letterBusy, setLetterBusy] = useState<string | null>(null);
+  const [letterStatus, setLetterStatus] = useState<Record<string, string>>({});
   const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   useEffect(() => {
@@ -106,6 +108,31 @@ export function EngagementsPanel({ clientId, focusEngagementId }: { clientId: st
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not update due date");
+    }
+  }
+
+  async function sendEngagementLetter(engagementId: string) {
+    setLetterBusy(engagementId);
+    setLetterStatus((prev) => ({ ...prev, [engagementId]: "" }));
+    try {
+      const { request } = await api<{ documentId: string; request: { id: string } }>(
+        `/api/clients/${clientId}/engagements/${engagementId}/letter`,
+        { method: "POST", body: JSON.stringify({}) },
+      );
+      const sendResult = await api<{ status: string; sentVia: "docusign" | "local_stub" }>(
+        `/api/clients/${clientId}/signature-requests/${request.id}/send`,
+        { method: "POST" },
+      );
+      setLetterStatus((prev) => ({
+        ...prev,
+        [engagementId]: sendResult.sentVia === "docusign"
+          ? "Sent for signature via DocuSign."
+          : "Marked sent (DocuSign is not configured for this firm yet — no envelope was actually created).",
+      }));
+    } catch (e) {
+      setLetterStatus((prev) => ({ ...prev, [engagementId]: e instanceof Error ? e.message : "Could not send the engagement letter." }));
+    } finally {
+      setLetterBusy(null);
     }
   }
 
@@ -209,6 +236,19 @@ export function EngagementsPanel({ clientId, focusEngagementId }: { clientId: st
                 </div>
                 <div className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--color-muted)]">
                   <div className="h-full bg-[var(--color-primary)]" style={{ width: `${progress}%` }} />
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={letterBusy === eng.id}
+                    onClick={() => sendEngagementLetter(eng.id)}
+                  >
+                    {letterBusy === eng.id ? "Sending…" : "Send engagement letter"}
+                  </Button>
+                  {letterStatus[eng.id] ? (
+                    <span className="text-xs text-[var(--color-muted-foreground)]">{letterStatus[eng.id]}</span>
+                  ) : null}
                 </div>
               </div>
             );

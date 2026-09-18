@@ -23,9 +23,11 @@ function label(value: string): string {
   return value.replace(/_/g, " ");
 }
 
+const HIDDEN_RECOMMENDATION_KEYS = new Set(["reason", "gmailMessageId", "gmailThreadId"]);
+
 function recommendationText(task: DeskTask): string {
   return Object.entries(task.recommendation_json ?? {})
-    .filter(([key]) => key !== "reason")
+    .filter(([key]) => !HIDDEN_RECOMMENDATION_KEYS.has(key))
     .map(([key, value]) => `${label(key)}: ${String(value)}`)
     .join(" · ");
 }
@@ -34,6 +36,8 @@ export function AgentDeskPage() {
   const [tasks, setTasks] = useState<DeskTask[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [scanResult, setScanResult] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -67,13 +71,40 @@ export function AgentDeskPage() {
     }
   }
 
+  async function scanInbox() {
+    setScanning(true);
+    setScanResult(null);
+    try {
+      const result = await api<{ scanned: number; matched: number; tasksCreated: number; unmatchedSenders: string[]; note?: string }>(
+        "/api/gmail/triage",
+        { method: "POST", body: JSON.stringify({}) },
+      );
+      setScanResult(
+        result.note ?? `Scanned ${result.scanned} recent emails, matched ${result.matched} to clients, ${result.tasksCreated} new follow-up${result.tasksCreated === 1 ? "" : "s"} added below.`,
+      );
+      await load();
+    } catch (e) {
+      setScanResult(e instanceof Error ? e.message : "Could not scan the inbox.");
+    } finally {
+      setScanning(false);
+    }
+  }
+
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-xl font-semibold">Agent desk</h1>
-        <p className="text-sm text-[var(--color-muted-foreground)]">
-          Every agent recommendation awaiting your decision across all clients.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-semibold">Agent desk</h1>
+          <p className="text-sm text-[var(--color-muted-foreground)]">
+            Every agent recommendation awaiting your decision across all clients.
+          </p>
+        </div>
+        <div className="flex flex-col items-end gap-1">
+          <Button size="sm" variant="secondary" disabled={scanning} onClick={() => void scanInbox()}>
+            {scanning ? "Scanning…" : "Scan inbox for client emails"}
+          </Button>
+          {scanResult ? <p className="max-w-xs text-right text-xs text-[var(--color-muted-foreground)]">{scanResult}</p> : null}
+        </div>
       </div>
 
       {error ? <p className="text-sm text-[var(--color-destructive)]">{error}</p> : null}

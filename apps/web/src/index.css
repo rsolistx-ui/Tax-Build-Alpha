@@ -44,3 +44,19 @@ body {
 ::selection {
   background: #d6d3d1;
 }
+
+html.dark {
+  --color-background: #0f1115;
+  --color-foreground: #f3f4f6;
+  --color-card: #181b21;
+  --color-muted: #222630;
+  --color-muted-foreground: #9ca3af;
+  --color-border: #2b303c;
+  --color-primary: #10b981;
+  --color-primary-foreground: #ffffff;
+  --color-accent: #262c38;
+}
+
+html.dark ::selection {
+  background: #374151;
+}
