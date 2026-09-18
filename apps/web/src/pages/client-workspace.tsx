@@ -51,10 +51,12 @@ import { CarryforwardPanel, StateModsPanel, M3Panel, PriorYearPanel, ExtensionsP
 import { convertHeicToJpeg, createCaptureInput } from "@/lib/image-utils";
 import { enqueueReceipt, drainQueue, registerSyncListener, queueCount } from "@/lib/offline-queue";
 import { subscribePush, unsubscribePush } from "@/lib/push";
-import { Bell, Wifi, Sparkles, Smartphone, Mic } from "lucide-react";
+import { Bell, Wifi, Sparkles, Smartphone, Mic, CreditCard, Calendar as CalendarIcon } from "lucide-react";
 import { TaxBridgePanel } from "@/components/tax-bridge-panel";
 import { MagicMobileLinkModal } from "@/components/magic-mobile-link-modal";
 import { VoiceRuleDictationModal } from "@/components/voice-rule-dictation-modal";
+import { BillingPanel } from "@/components/billing-panel";
+import { DeadlineCalendarPanel } from "@/components/deadline-calendar-panel";
 
 type Category = {
   id: string;
@@ -113,11 +115,9 @@ type BatchFile = {
   error?: string;
 };
 
-type Tab = "overview" | "folders" | "upload" | "review" | "bank" | "pnl" | "tax-bridge" | "tax-readiness" | "workpaper" | "documents" | "engagements" | "requests" | "export" | "agent" | "analytics";
+type Tab = "overview" | "folders" | "upload" | "review" | "bank" | "pnl" | "tax-bridge" | "tax-readiness" | "workpaper" | "documents" | "engagements" | "requests" | "export" | "agent" | "analytics" | "billing" | "deadlines";
 
-
-
-const VALID_TABS: Tab[] = ["overview", "folders", "upload", "review", "bank", "pnl", "tax-bridge", "tax-readiness", "workpaper", "documents", "engagements", "requests", "export", "agent", "analytics"];
+const VALID_TABS: Tab[] = ["overview", "folders", "upload", "review", "bank", "pnl", "tax-bridge", "tax-readiness", "workpaper", "documents", "engagements", "requests", "export", "agent", "analytics", "billing", "deadlines"];
 
 export function ClientWorkspacePage() {
   const { clientId = "" } = useParams();
@@ -352,6 +352,8 @@ export function ClientWorkspacePage() {
       { id: "agent" as const, label: "Agent", icon: Bot },
        { id: "analytics" as const, label: "Analytics", icon: BarChart3 },
       { id: "tax-bridge" as const, label: "Tax Bridge & 1099", icon: Sparkles },
+      { id: "billing" as const, label: "Billing & Invoices", icon: CreditCard },
+      { id: "deadlines" as const, label: "Deadlines", icon: CalendarIcon },
       { id: "export" as const, label: "Export", icon: FileDown },
     ],
     [review.length],
@@ -463,6 +465,14 @@ export function ClientWorkspacePage() {
 
       {tab === "tax-bridge" ? (
         <TaxBridgePanel clientId={clientId} />
+      ) : null}
+
+      {tab === "billing" ? (
+        <BillingPanel clientId={clientId} clientName={client?.name} />
+      ) : null}
+
+      {tab === "deadlines" ? (
+        <DeadlineCalendarPanel clientId={clientId} clientName={client?.name} />
       ) : null}
 
       {tab === "tax-readiness" ? (

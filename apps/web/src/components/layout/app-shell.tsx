@@ -1,5 +1,5 @@
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
-import { Bot, Building2, ClipboardList, FolderKanban, LayoutDashboard, Lightbulb, LogOut, Map, ShieldCheck, Users } from "lucide-react";
+import { Bot, Building2, Calendar, ClipboardList, FolderKanban, LayoutDashboard, Lightbulb, LogOut, Map, ShieldCheck, Users } from "lucide-react";
 import { useEffect, useState } from "react";
 import { authClient } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
@@ -82,6 +82,20 @@ export function AppShell({
                 <span className="inline-flex items-center gap-1.5">
                   <FolderKanban className="h-3.5 w-3.5" />
                   Projects
+                </span>
+              </NavLink>
+              <NavLink
+                to="/calendar"
+                className={({ isActive }) =>
+                  cn(
+                    "rounded-md px-3 py-1.5 text-sm text-[var(--color-muted-foreground)] hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)]",
+                    isActive && "bg-[var(--color-muted)] text-[var(--color-foreground)]",
+                  )
+                }
+              >
+                <span className="inline-flex items-center gap-1.5">
+                  <Calendar className="h-3.5 w-3.5" />
+                  Deadlines
                 </span>
               </NavLink>
               <NavLink

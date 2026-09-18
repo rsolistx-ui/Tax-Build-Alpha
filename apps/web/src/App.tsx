@@ -12,6 +12,7 @@ import { WorkQueuePage } from "@/pages/work-queue";
 import { AgentDeskPage } from "@/pages/agent-desk";
 import { PortalPage } from "@/pages/portal";
 import { ProjectsPage } from "@/pages/projects";
+import { CalendarPage } from "@/pages/calendar";
 import AnalyticsDashboard from "@/pages/analytics";
 
 export default function App() {
@@ -27,6 +28,7 @@ export default function App() {
           <Route path="/clients" element={<ClientsPage />} />
           <Route path="/clients/:clientId" element={<ClientWorkspacePage />} />
           <Route path="/projects" element={<ProjectsPage />} />
+          <Route path="/calendar" element={<CalendarPage />} />
           <Route path="/beta-admin" element={<BetaAdminPage />} />
           <Route path="/documents/review" element={<DocumentReviewPage />} />
           <Route path="/work-queue" element={<WorkQueuePage />} />
