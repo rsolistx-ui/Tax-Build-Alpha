@@ -463,3 +463,99 @@ betaRoutes.get("/audit", requireSession, requireOwner, async (c) => {
   );
   return c.json({ events });
 });
+
+/**
+ * Fast-Pass Pairing Endpoints:
+ * Frictionless 6-digit workstation & mobile pairing without passwords
+ */
+betaRoutes.post("/fast-pass/create", requireSession, async (c) => {
+  const db = createDb(c.env);
+  const userId = c.get("userId");
+  const email = c.get("userEmail");
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS fast_pass_codes (
+      code TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      email TEXT NOT NULL,
+      expires_at TIMESTAMPTZ NOT NULL,
+      redeemed_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `).catch(() => {});
+
+  const randNum = Math.floor(1000 + Math.random() * 9000);
+  const randLetters = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+  const suffix = randLetters[Math.floor(Math.random() * randLetters.length)] + randLetters[Math.floor(Math.random() * randLetters.length)];
+  const code = `TP-${randNum}${suffix}`;
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour validity
+
+  await db.query(
+    `INSERT INTO fast_pass_codes (code, user_id, email, expires_at) VALUES ($1, $2, $3, $4)`,
+    [code, userId, email, expiresAt.toISOString()],
+  );
+
+  return c.json({ code, expiresAt: expiresAt.toISOString() });
+});
+
+betaRoutes.post("/fast-pass/claim", async (c) => {
+  const body = z.object({ code: z.string().min(4) }).parse(await c.req.json());
+  const db = createDb(c.env);
+  const formattedCode = body.code.trim().toUpperCase();
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS fast_pass_codes (
+      code TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      email TEXT NOT NULL,
+      expires_at TIMESTAMPTZ NOT NULL,
+      redeemed_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `).catch(() => {});
+
+  const [row] = await db.query<{ code: string; user_id: string; email: string }>(
+    `SELECT code, user_id, email FROM fast_pass_codes WHERE UPPER(code) = $1 AND expires_at > NOW() AND redeemed_at IS NULL`,
+    [formattedCode],
+  );
+
+  if (!row) {
+    return c.json({ error: "Invalid or expired Fast-Pass code. Please check and try again.", code: "FAST_PASS_EXPIRED" }, 400);
+  }
+
+  // Mark claimed
+  await db.query(`UPDATE fast_pass_codes SET redeemed_at = NOW() WHERE code = $1`, [row.code]);
+
+  // Create active session in D1
+  const sessionToken = crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
+  const sessionId = crypto.randomUUID();
+  const now = new Date();
+  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days
+
+  await c.env.AUTH_DB.prepare(
+    `INSERT INTO session (id, expiresAt, token, createdAt, updatedAt, userId) VALUES (?, ?, ?, ?, ?, ?)`
+  ).bind(sessionId, expiresAt.toISOString(), sessionToken, now.toISOString(), now.toISOString(), row.user_id).run().catch(() => {});
+
+  const user = await c.env.AUTH_DB.prepare(`SELECT id, email, name FROM user WHERE id = ?`).bind(row.user_id).first<{ id: string; email: string; name: string }>().catch(() => null);
+
+  const isProd = c.env.BETTER_AUTH_URL?.startsWith("https://") ?? false;
+  const cookieName = isProd ? "__Secure-better-auth.session_token" : "better-auth.session_token";
+
+  c.header(
+    "Set-Cookie",
+    `${cookieName}=${sessionToken}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${30 * 24 * 60 * 60}${isProd ? "; Secure" : ""}`,
+    { append: true }
+  );
+
+  c.header(
+    "Set-Cookie",
+    `better-auth.session_token=${sessionToken}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${30 * 24 * 60 * 60}${isProd ? "; Secure" : ""}`,
+    { append: true }
+  );
+
+  return c.json({
+    ok: true,
+    user: user || { id: row.user_id, email: row.email, name: "Practitioner" },
+  });
+});
+
