@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { convertHeicToJpeg, createCaptureInput, type CaptureSource } from "@/lib/image-utils";
+import { formatDate, formatLegibleMessage } from "@/lib/formatters";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 const SESSION_KEY = "folio_portal_token";
@@ -265,7 +266,7 @@ export function PortalPage() {
           <div className="rounded-md border border-[var(--color-border)] p-3">
             <p className="font-medium">{selected.title}</p>
             {selected.description ? <p className="mt-1 text-sm text-[var(--color-muted-foreground)]">{selected.description}</p> : null}
-            {selected.due_at ? <p className="mt-1 text-xs text-[var(--color-muted-foreground)]">Due {new Date(selected.due_at).toLocaleDateString()}</p> : null}
+            {selected.due_at ? <p className="mt-1 text-xs text-[var(--color-muted-foreground)]">Due {formatDate(selected.due_at)}</p> : null}
           </div>
           {selected.status !== "satisfied" && selected.status !== "cancelled" ? (
             <div className="space-y-2">
@@ -304,7 +305,7 @@ export function PortalPage() {
           <div className="space-y-2">
             {messages.map((m) => (
               <div key={m.id} className={`rounded-md p-2 text-sm ${m.author_type === "client" ? "bg-[var(--color-primary)] text-white" : "bg-[var(--color-muted)]"}`}>
-                {m.body}
+                {formatLegibleMessage(m.body)}
               </div>
             ))}
           </div>
@@ -355,9 +356,9 @@ export function PortalPage() {
             ) : (
               home.activeEngagements.map((e) => (
                 <div key={e.id} className="mb-1 rounded-md border border-[var(--color-border)] p-2 text-sm">
-                  <p className="font-medium">{label(e.service_type)}{e.tax_year ? ` \u00b7 ${e.tax_year}` : ""}</p>
+                  <p className="font-medium">{label(e.service_type)}{e.tax_year ? ` · ${e.tax_year}` : ""}</p>
                   <p className="text-xs text-[var(--color-muted-foreground)]">
-                    {label(e.status)}{e.due_date ? ` \u00b7 due ${new Date(e.due_date).toLocaleDateString()}` : ""} \u00b7 {e.completed_work_items}/{e.total_work_items} complete
+                    {label(e.status)}{e.due_date ? ` · due ${formatDate(e.due_date)}` : ""} · {e.completed_work_items}/{e.total_work_items} complete
                   </p>
                 </div>
               ))
@@ -372,7 +373,7 @@ export function PortalPage() {
             requests.map((r) => (
               <button key={r.id} onClick={() => openRequest(r)} className="w-full rounded-md border border-[var(--color-border)] p-3 text-left text-sm">
                 <p className="font-medium">{r.title}</p>
-                <p className="text-xs text-[var(--color-muted-foreground)]">{label(r.status)}{r.due_at ? ` \u00b7 due ${new Date(r.due_at).toLocaleDateString()}` : ""}</p>
+                <p className="text-xs text-[var(--color-muted-foreground)]">{label(r.status)}{r.due_at ? ` · due ${formatDate(r.due_at)}` : ""}</p>
               </button>
             ))
           )}
@@ -386,7 +387,7 @@ export function PortalPage() {
               <div key={d.id} className="flex items-center justify-between gap-2 rounded-md border border-[var(--color-border)] p-3 text-sm">
                 <div>
                   <p className="font-medium">{d.filename}</p>
-                  <p className="text-xs text-[var(--color-muted-foreground)]">{label(d.document_type)} · {new Date(d.uploaded_at).toLocaleDateString()}</p>
+                  <p className="text-xs text-[var(--color-muted-foreground)]">{label(d.document_type)} · {formatDate(d.uploaded_at)}</p>
                 </div>
                 <button
                   className="rounded-md border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium"

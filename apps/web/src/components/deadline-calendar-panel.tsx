@@ -9,6 +9,7 @@ import {
 import { api, apiUrl } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { formatDate } from "@/lib/formatters";
 
 export interface TaxDeadline {
   id: string;
@@ -276,12 +277,7 @@ export function DeadlineCalendarPanel({
                 <div className="flex items-center gap-4">
                   <div className="text-right">
                     <div className="font-mono font-bold text-sm text-[var(--color-foreground)]">
-                      {new Date(item.dueDate + "T00:00:00").toLocaleDateString(undefined, {
-                        weekday: "short",
-                        month: "short",
-                        day: "numeric",
-                        year: "numeric",
-                      })}
+                      {formatDate(item.dueDate + "T00:00:00")}
                     </div>
                     <span className="text-[10px] text-[var(--color-muted-foreground)]">Filing Target</span>
                   </div>

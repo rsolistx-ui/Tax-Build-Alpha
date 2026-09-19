@@ -3,6 +3,7 @@ import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { formatDateTime, formatLegibleMessage } from "@/lib/formatters";
 
 type RequestMessage = {
   id: string;
@@ -81,10 +82,10 @@ export function RequestThread({ requestId, clientId }: RequestThreadProps) {
                     {msg.author_type === "professional" ? "You" : msg.author_type === "client" ? "Client" : "System"}
                   </Badge>
                   <span className="text-xs opacity-70">
-                    {new Date(msg.created_at).toLocaleString()}
+                    {formatDateTime(msg.created_at)}
                   </span>
                 </div>
-                <p className="whitespace-pre-wrap">{msg.body}</p>
+                <p className="whitespace-pre-wrap">{formatLegibleMessage(msg.body)}</p>
               </div>
             ))}
           </div>

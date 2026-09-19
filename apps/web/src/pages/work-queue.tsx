@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { api } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { formatDate } from "@/lib/formatters";
 
 type WorkItem = {
   id: string;
@@ -131,7 +132,7 @@ export function WorkQueuePage() {
               <div>
                 <p className="font-medium">{item.title}</p>
                 <p className="text-xs text-[var(--color-muted-foreground)]">
-                  {item.due_at ? `Due ${new Date(item.due_at).toLocaleDateString()}` : "No due date"}
+                  {item.due_at ? `Due ${formatDate(item.due_at)}` : "No due date"}
                 </p>
               </div>
               <div className="flex items-center gap-2">

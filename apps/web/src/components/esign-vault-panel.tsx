@@ -15,6 +15,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { NativeEsignModal } from "./native-esign-modal";
+import { formatDateTime } from "@/lib/formatters";
 
 export interface VaultRecord {
   requestId: string;
@@ -242,7 +243,7 @@ export function EsignVaultPanel({ clientId }: { clientId: string }) {
                         <span>Signer: <strong className="text-[var(--color-foreground)]">{rec.signerName}</strong> ({rec.signerEmail || "Email not specified"})</span>
                         {rec.signedAt && (
                           <span>
-                            Signed: <strong className="text-[var(--color-foreground)]">{new Date(rec.signedAt).toLocaleString()}</strong>
+                            Signed: <strong className="text-[var(--color-foreground)]">{formatDateTime(rec.signedAt)}</strong>
                           </span>
                         )}
                       </div>

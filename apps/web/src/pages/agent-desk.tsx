@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { formatDate } from "@/lib/formatters";
 
 type DeskTask = {
   id: string;
@@ -134,7 +135,7 @@ export function AgentDeskPage() {
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-2">
-                <span className="text-xs text-[var(--color-muted-foreground)]">{new Date(task.created_at).toLocaleDateString()}</span>
+                <span className="text-xs text-[var(--color-muted-foreground)]">{formatDate(task.created_at)}</span>
                 <Button size="sm" variant="secondary" disabled={resolvingId === task.id} onClick={() => void review(task, "dismiss")}>
                   Dismiss
                 </Button>

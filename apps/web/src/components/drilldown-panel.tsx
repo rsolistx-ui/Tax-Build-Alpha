@@ -1,6 +1,7 @@
 import { ExternalLink } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import type { DrilldownState } from "@/types/pnl";
+import { formatDate, formatLegibleMessage } from "@/lib/formatters";
 
 export function DrilldownPanel({
   drilldown,
@@ -53,9 +54,9 @@ export function DrilldownPanel({
                       {entry.sourceRow !== null ? <p>CSV row: {entry.sourceRow}</p> : null}
                       {entry.importBatchId ? <p>Import batch: {entry.importBatchId}</p> : null}
                       {entry.originalRow ? (
-                        <pre className="mt-1 overflow-x-auto rounded bg-[var(--color-muted)]/40 p-2 text-[10px]">
-                          {JSON.stringify(entry.originalRow, null, 2)}
-                        </pre>
+                        <div className="mt-1 rounded bg-[var(--color-muted)]/40 p-2 text-xs font-sans">
+                          {formatLegibleMessage(entry.originalRow)}
+                        </div>
                       ) : null}
                     </div>
                   </details>
@@ -75,7 +76,7 @@ export function DrilldownPanel({
                     <p className="truncate font-medium">{entry.merchant || entry.filename}</p>
                     <p className="truncate text-xs text-[var(--color-muted-foreground)]">
                       {entry.description}
-                      {entry.date ? ` · ${entry.date}` : ""}
+                      {entry.date ? ` · ${formatDate(entry.date)}` : ""}
                     </p>
                   </div>
                   <span className="font-medium">${Number(entry.amount).toFixed(2)}</span>
@@ -96,7 +97,7 @@ export function DrilldownPanel({
                   <div className="min-w-0">
                     <p className="truncate font-medium">{entry.description}</p>
                     <p className="truncate text-xs text-[var(--color-muted-foreground)]">
-                      No receipt required{entry.date ? ` · ${entry.date}` : ""}
+                      No receipt required{entry.date ? ` · ${formatDate(entry.date)}` : ""}
                     </p>
                   </div>
                   <span className="font-medium">${Number(entry.amount).toFixed(2)}</span>

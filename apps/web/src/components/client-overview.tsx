@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/empty-state";
 import { presetRange, REPORTING_PERIOD_OPTIONS, type ReportingPeriodPreset } from "@/lib/reporting-period";
+import { formatDate, formatDateTime } from "@/lib/formatters";
 
 type CategoryOption = { id: string; name: string };
 
@@ -278,7 +279,7 @@ export function ClientOverview({ clientId, onNavigate }: { clientId: string; onN
           <Field label="Bookkeeping readiness" value={READINESS_LABEL[header.bookkeepingReadiness] ?? header.bookkeepingReadiness} />
           <Field label="Tax readiness" value={header.taxReadiness ? TAX_READINESS_LABEL[header.taxReadiness] ?? header.taxReadiness : "Not started"} />
           <Field label="Open actions" value={String(header.openActionCount)} />
-          <Field label="Last activity" value={header.lastActivityAt ? new Date(header.lastActivityAt).toLocaleDateString() : "No activity yet"} />
+          <Field label="Last activity" value={header.lastActivityAt ? formatDate(header.lastActivityAt) : "No activity yet"} />
         </CardContent>
       </Card>
 
@@ -384,7 +385,7 @@ export function ClientOverview({ clientId, onNavigate }: { clientId: string; onN
               {timeline.slice(0, 10).map((event) => (
                 <div key={event.id} className="flex items-center justify-between gap-2 py-1.5 text-sm">
                   <span>{event.summary}</span>
-                  <span className="text-xs text-[var(--color-muted-foreground)]">{new Date(event.createdAt).toLocaleString()}</span>
+                  <span className="text-xs text-[var(--color-muted-foreground)]">{formatDateTime(event.createdAt)}</span>
                 </div>
               ))}
             </div>

@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { formatDate } from "@/lib/formatters";
 
 interface FeatureRequest {
   id: string;
@@ -385,7 +386,7 @@ export function FeatureRequestModal({
                       <span>·</span>
                       <span className="inline-flex items-center gap-1">
                         <Clock className="h-3 w-3" />
-                        {new Date(r.createdAt).toLocaleDateString()}
+                        {formatDate(r.createdAt)}
                       </span>
                     </div>
                   </div>

@@ -39,6 +39,7 @@ import { Input } from "@/components/ui/input";
 import { api, setAdminToken } from "@/lib/api";
 import { VoiceRuleDictationModal } from "@/components/voice-rule-dictation-modal";
 import { AdminTokenGate } from "@/components/admin-token-gate";
+import { formatDate, formatTime, formatDateTime, formatLegibleMessage } from "@/lib/formatters";
 
 export interface InvitationItem {
   id: string;
@@ -1101,11 +1102,11 @@ export function AdminPanel() {
                                   : "bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/20"
                               }`}
                             >
-                              {t.status === "resolved" ? "Resolved" : "⚡ AI Auto-Responded"}
+                              {t.status === "resolved" ? "Resolved" : "⚡ Sentinel Auto-Responded"}
                             </Badge>
                           </div>
                           <div className="text-xs text-[var(--color-muted-foreground)]">
-                            From: <strong className="text-[var(--color-foreground)]">{t.user_name || "Practitioner"}</strong> ({t.user_email}) · Topic: {t.category || "General"} · {new Date(t.created_at).toLocaleString()}
+                            From: <strong className="text-[var(--color-foreground)]">{t.user_name || "Practitioner"}</strong> ({t.user_email}) · Topic: {t.category || "General"} · {formatDateTime(t.created_at)}
                           </div>
                         </div>
 
@@ -1144,16 +1145,16 @@ export function AdminPanel() {
                         <div className="mt-4 pt-4 border-t border-[var(--color-border)] space-y-4">
                           <div className="rounded-lg bg-[var(--color-muted)] p-3 text-xs">
                             <div className="font-semibold mb-1 text-[var(--color-foreground)]">Original Message from Client:</div>
-                            <div className="whitespace-pre-wrap text-[var(--color-muted-foreground)]">{t.message}</div>
+                            <div className="whitespace-pre-wrap text-[var(--color-muted-foreground)]">{formatLegibleMessage(t.message)}</div>
                           </div>
 
                           {t.ai_response && (
                             <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3 text-xs">
                               <div className="flex items-center gap-1.5 font-semibold text-emerald-800 dark:text-emerald-300 mb-1">
                                 <Zap className="h-3.5 w-3.5 text-emerald-600" />
-                                Instant Sentinel Response Sent to Client ({new Date(t.auto_responded_at || t.created_at).toLocaleTimeString()}):
+                                Instant Sentinel Response Sent to Client ({formatTime(t.auto_responded_at || t.created_at)}):
                               </div>
-                              <div className="whitespace-pre-wrap text-[var(--color-muted-foreground)] font-mono text-[11px]">{t.ai_response}</div>
+                              <div className="whitespace-pre-wrap text-[var(--color-muted-foreground)] text-xs leading-relaxed">{formatLegibleMessage(t.ai_response)}</div>
                             </div>
                           )}
 
@@ -1246,7 +1247,7 @@ export function AdminPanel() {
                           "{req.directive_text}"
                         </div>
                         <div className="text-[11px] text-[var(--color-muted-foreground)]">
-                          Requested by: {req.requested_by} ({req.user_email}) · {new Date(req.created_at).toLocaleString()}
+                          Requested by: {req.requested_by} ({req.user_email}) · {formatDateTime(req.created_at)}
                         </div>
                       </div>
 
@@ -1787,10 +1788,10 @@ export function AdminPanel() {
                               )}
                             </td>
                             <td className="py-3 font-mono text-[11px] text-[var(--color-muted-foreground)]">
-                              {new Date(ent.starts_at).toLocaleDateString()}
+                              {formatDate(ent.starts_at)}
                             </td>
                             <td className="py-3 font-mono text-[11px] text-[var(--color-muted-foreground)]">
-                              {new Date(ent.expires_at).toLocaleDateString()}
+                              {formatDate(ent.expires_at)}
                             </td>
                             <td className="py-3 text-right">
                               <div className="flex items-center justify-end gap-1.5">
@@ -1897,10 +1898,10 @@ export function AdminPanel() {
                             </Badge>
                           </td>
                           <td className="py-2.5 font-mono text-[11px] text-[var(--color-muted-foreground)]">
-                            {new Date(inv.issued_at).toLocaleDateString()}
+                            {formatDate(inv.issued_at)}
                           </td>
                           <td className="py-2.5 font-mono text-[11px] text-[var(--color-muted-foreground)]">
-                            Expires {new Date(inv.expires_at).toLocaleDateString()}
+                            Expires {formatDate(inv.expires_at)}
                           </td>
                           <td className="py-2.5 text-right">
                             {inv.status === "pending" && (
@@ -1968,7 +1969,7 @@ export function AdminPanel() {
                       {auditEvents.map((ev) => (
                         <tr key={ev.id} className="hover:bg-[var(--color-muted)]/50">
                           <td className="py-2.5 font-mono text-[11px] text-[var(--color-muted-foreground)] whitespace-nowrap">
-                            {new Date(ev.created_at).toLocaleString()}
+                            {formatDateTime(ev.created_at)}
                           </td>
                           <td className="py-2.5">
                             <Badge className="bg-slate-500/10 text-[var(--color-foreground)] font-mono text-[10px]">
@@ -1981,8 +1982,8 @@ export function AdminPanel() {
                           <td className="py-2.5 font-mono text-[11px]">
                             {ev.affected_email || ev.affected_user_id || "—"}
                           </td>
-                          <td className="py-2.5 text-[var(--color-muted-foreground)] text-[11px] max-w-xs truncate">
-                            {ev.reason || (ev.after_json ? JSON.stringify(ev.after_json) : "Verified")}
+                          <td className="py-2.5 text-[var(--color-muted-foreground)] text-[11px] max-w-sm truncate">
+                            {formatLegibleMessage(ev.reason || ev.after_json || "Verified")}
                           </td>
                         </tr>
                       ))}

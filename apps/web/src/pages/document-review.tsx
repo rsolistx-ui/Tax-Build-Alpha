@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/empty-state";
+import { formatDate } from "@/lib/formatters";
 
 type ReviewDocument = {
   id: string;
@@ -145,7 +146,7 @@ export function DocumentReviewPage() {
                     {doc.filename}
                   </a>
                   <p className="text-xs text-[var(--color-muted-foreground)]">
-                    {doc.clientName} - uploaded {new Date(doc.uploadedAt).toLocaleDateString()}
+                    {doc.clientName} - uploaded {formatDate(doc.uploadedAt)}
                     {doc.taxYear ? ` - tax year ${doc.taxYear}` : ""}
                   </p>
                 </div>

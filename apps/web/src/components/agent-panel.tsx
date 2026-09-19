@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { formatDate, formatDateTime, formatLegibleMessage } from "@/lib/formatters";
 
 type AgentTask = {
   id: string;
@@ -172,12 +173,12 @@ export function AgentPanel({ clientId }: { clientId: string }) {
                     </p>
                   ) : null}
                   {reason ? (
-                    <p className="mt-0.5 text-xs italic text-[var(--color-muted-foreground)]">{reason}</p>
+                    <p className="mt-0.5 text-xs italic text-[var(--color-muted-foreground)]">{formatLegibleMessage(reason)}</p>
                   ) : null}
                   <div className="mt-1 flex items-center gap-3 text-[10px] text-[var(--color-muted-foreground)]">
-                    <span>{new Date(task.created_at).toLocaleString()}</span>
-                    {task.resolved_at ? <span>Resolved {new Date(task.resolved_at).toLocaleString()}</span> : null}
-                    {task.resolution_note ? <span className="truncate max-w-[200px]">"{task.resolution_note}"</span> : null}
+                    <span>{formatDateTime(task.created_at)}</span>
+                    {task.resolved_at ? <span>Resolved {formatDateTime(task.resolved_at)}</span> : null}
+                    {task.resolution_note ? <span className="truncate max-w-[200px]">"{formatLegibleMessage(task.resolution_note)}"</span> : null}
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
@@ -237,7 +238,7 @@ export function AgentPanel({ clientId }: { clientId: string }) {
                       </td>
                       <td className="py-2 pr-3 tabular-nums">{rule.seen_count}</td>
                       <td className="py-2 text-xs text-[var(--color-muted-foreground)]">
-                        {rule.last_applied_at ? new Date(rule.last_applied_at).toLocaleDateString() : "\u2014"}
+                        {rule.last_applied_at ? formatDate(rule.last_applied_at) : "—"}
                       </td>
                     </tr>
                   ))}

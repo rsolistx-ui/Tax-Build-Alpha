@@ -23,6 +23,7 @@ import { cn } from "@/lib/utils";
 import { AccountingImportModal } from "@/components/accounting-import-modal";
 import { TimeSavingsTracker } from "@/components/time-savings-tracker";
 import { authClient } from "@/lib/auth-client";
+import { formatDate } from "@/lib/formatters";
 
 type Readiness = "ready" | "needs_review" | "missing_evidence" | "books_incomplete";
 
@@ -167,7 +168,7 @@ function timeAgo(iso: string): string {
   if (hours < 24) return `${hours}h ago`;
   const days = Math.floor(hours / 24);
   if (days < 30) return `${days}d ago`;
-  return new Date(iso).toLocaleDateString();
+  return formatDate(iso);
 }
 
 function PracticeOsStrip({ counts }: { counts: OperationsCommandCenter }) {

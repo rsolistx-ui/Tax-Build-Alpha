@@ -11,6 +11,7 @@ import {
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { formatDate } from "@/lib/formatters";
 
 interface MagicMobileLinkModalProps {
   clientId: string;
@@ -54,7 +55,7 @@ export function MagicMobileLinkModal({
 
       const fullUrl = `${window.location.origin}/portal#token=${encodeURIComponent(data.link.token)}`;
       setPortalUrl(fullUrl);
-      setExpiresAt(new Date(data.link.expiresAt).toLocaleDateString());
+      setExpiresAt(formatDate(data.link.expiresAt));
     } catch (err: any) {
       setError(err?.message || "Failed to generate magic mobile upload link.");
     } finally {

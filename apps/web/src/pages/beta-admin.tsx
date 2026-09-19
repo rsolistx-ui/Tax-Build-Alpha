@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AdminTokenGate } from "@/components/admin-token-gate";
+import { formatDateTime } from "@/lib/formatters";
 
 type Invitation = {
   id: string;
@@ -42,9 +43,8 @@ type AccessEvent = {
 };
 
 function fmt(value: string | null): string {
-  if (!value) return "\u2014";
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? value : d.toLocaleString();
+  if (!value) return "—";
+  return formatDateTime(value);
 }
 
 export function BetaAdminPage() {

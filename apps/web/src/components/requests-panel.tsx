@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { RequestThread } from "./request-thread";
+import { formatDate } from "@/lib/formatters";
 
 type ClientRequest = {
   id: string;
@@ -127,7 +128,7 @@ export function RequestsPanel({ clientId, focusRequestId }: { clientId: string; 
         {portalLink ? (
           <CardContent className="border-t border-[var(--color-border)] p-4 text-xs">
             <p className="text-[var(--color-muted-foreground)]">
-              Secure client portal link. Valid until {new Date(portalLink.expiresAt).toLocaleDateString()} unless revoked.
+              Secure client portal link. Valid until {formatDate(portalLink.expiresAt)} unless revoked.
             </p>
             <p className="mt-1 break-all font-mono">{portalLink.url}</p>
           </CardContent>
@@ -189,7 +190,7 @@ export function RequestsPanel({ clientId, focusRequestId }: { clientId: string; 
                 <div>
                   <p className="font-medium">{req.title}</p>
                   <p className="text-xs text-[var(--color-muted-foreground)]">
-                    {label(req.request_type)}{req.due_at ? ` \u00b7 due ${new Date(req.due_at).toLocaleDateString()}` : ""}
+                    {label(req.request_type)}{req.due_at ? ` · due ${formatDate(req.due_at)}` : ""}
                   </p>
                 </div>
               </div>

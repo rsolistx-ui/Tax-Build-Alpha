@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Save, Download, Upload, RefreshCw, Calculator, FileSpreadsheet, FileText, Link2, ShieldCheck, AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { api, apiUrl } from '@/lib/api';
+import { formatTime } from '@/lib/formatters';
 
 interface WorkpaperCell {
   row: number;
@@ -571,7 +572,7 @@ export function TaxWorkpaper({ clientId, taxYear }: { clientId: string; taxYear:
             <span>Ready</span>
             {isCalculating && <span className="flex items-center gap-1 text-blue-600"><RefreshCw className="h-3 w-3 animate-spin" />Calculating...</span>}
             {errors.size > 0 && <span className="text-red-600">{errors.size} error(s)</span>}
-            {lastSaved && <span>Last saved: {lastSaved.toLocaleTimeString()}</span>}
+            {lastSaved && <span>Last saved: {formatTime(lastSaved)}</span>}
           </div>
           <div className="flex items-center gap-2">
             <span className="font-mono">{selectedCell || 'No cell selected'}</span>

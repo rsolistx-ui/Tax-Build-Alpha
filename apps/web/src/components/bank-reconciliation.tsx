@@ -18,6 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { formatDateTime } from "@/lib/formatters";
 
 type Mapping = {
   date: string;
@@ -890,8 +891,7 @@ function auditLabel(action: string): string {
 }
 
 function formatTimestamp(value: string): string {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+  return formatDateTime(value);
 }
 
 function formatAmount(amount: number, currency: string): string {
