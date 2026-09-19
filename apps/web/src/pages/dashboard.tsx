@@ -22,6 +22,7 @@ import { EmptyState } from "@/components/empty-state";
 import { cn } from "@/lib/utils";
 import { AccountingImportModal } from "@/components/accounting-import-modal";
 import { TimeSavingsTracker } from "@/components/time-savings-tracker";
+import { authClient } from "@/lib/auth-client";
 
 type Readiness = "ready" | "needs_review" | "missing_evidence" | "books_incomplete";
 
@@ -315,6 +316,7 @@ function ClientPickerModal({
 }
 
 export function DashboardPage() {
+  const { data: session } = authClient.useSession();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -323,6 +325,19 @@ export function DashboardPage() {
   const [pickerTab, setPickerTab] = useState<string | null>(null);
   const [waveModalOpen, setWaveModalOpen] = useState(false);
   const navigate = useNavigate();
+
+  const greetingData = useMemo(() => {
+    const hour = new Date().getHours();
+    let salutation = "Good morning";
+    if (hour >= 4 && hour < 8) salutation = "Good early morning";
+    else if (hour >= 8 && hour < 12) salutation = "Good morning";
+    else if (hour >= 12 && hour < 17) salutation = "Good afternoon";
+    else if (hour >= 17 && hour < 22) salutation = "Good evening";
+    else salutation = "Good late evening";
+
+    const name = session?.user?.name ? session.user.name.split(" ")[0] : "Phyllis";
+    return `${salutation}, ${name}`;
+  }, [session?.user?.name]);
 
   async function load() {
     setLoading(true);
@@ -392,9 +407,9 @@ export function DashboardPage() {
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Operations</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">{greetingData}</h1>
           <p className="mt-1 text-sm text-[var(--color-muted-foreground)]">
-            Firm-wide workload across every client's books, evidence, and bank activity.
+            Here is your firm's real-time operations command center across books, evidence, and filings.
           </p>
         </div>
         <QuickActions onPickClient={(tab) => setPickerTab(tab)} onOpenWave={() => setWaveModalOpen(true)} />

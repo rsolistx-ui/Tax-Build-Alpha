@@ -1,5 +1,5 @@
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
-import { Bot, Building2, Calendar, ClipboardList, FolderKanban, LayoutDashboard, Lightbulb, LogOut, Map, ShieldCheck, Users } from "lucide-react";
+import { Bot, Building2, Calendar, ClipboardList, Clock, FolderKanban, LayoutDashboard, Lightbulb, LogOut, Map, ShieldCheck, Users } from "lucide-react";
 import { useEffect, useState } from "react";
 import { authClient } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
@@ -13,10 +13,12 @@ export function AppShell({
   firmName,
   userName,
   isOwner,
+  daysLeft,
 }: {
   firmName?: string;
   userName?: string;
   isOwner?: boolean;
+  daysLeft?: number;
 }) {
   const navigate = useNavigate();
   const [tourOpen, setTourOpen] = useState(false);
@@ -159,6 +161,15 @@ export function AppShell({
               Request a Feature
             </button>
             <button onClick={() => setTourOpen(true)} className="hidden items-center gap-1.5 text-xs text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)] sm:inline-flex"><Map className="h-3.5 w-3.5" /> Guide</button>
+            {typeof daysLeft === "number" ? (
+              <span
+                className="hidden items-center gap-1 rounded-full border border-[var(--color-border)] bg-[var(--color-muted)] px-2.5 py-0.5 text-[11px] font-medium text-[var(--color-muted-foreground)] tracking-tight sm:inline-flex"
+                title={`Beta access: ${daysLeft} days remaining on server clock`}
+              >
+                <Clock className="h-3 w-3 text-[var(--color-muted-foreground)]" />
+                {daysLeft === 1 ? "1 day left" : `${daysLeft} days left`}
+              </span>
+            ) : null}
             <span className="text-sm text-[var(--color-muted-foreground)]">{userName}</span>
             <ThemeToggle />
             <Button variant="ghost" size="icon" onClick={signOut} aria-label="Sign out">

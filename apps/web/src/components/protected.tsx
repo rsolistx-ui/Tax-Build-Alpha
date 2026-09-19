@@ -5,7 +5,12 @@ import { AppShell } from "@/components/layout/app-shell";
 import { LockedScreen } from "@/components/locked";
 import { api } from "@/lib/api";
 
-type BetaStatus = { isOwner: boolean; allowed: boolean; reason: string | null };
+type BetaStatus = {
+  isOwner: boolean;
+  allowed: boolean;
+  reason: string | null;
+  entitlement?: { status: string; startsAt: string; expiresAt: string } | null;
+};
 
 export function ProtectedLayout() {
   const { data: session, isPending } = authClient.useSession();
@@ -51,5 +56,17 @@ export function ProtectedLayout() {
     return <LockedScreen reason={betaStatus.reason} />;
   }
 
-  return <AppShell firmName={firmName} userName={session.user.name} isOwner={betaStatus.isOwner} />;
+  const daysLeft =
+    !betaStatus.isOwner && betaStatus.entitlement?.expiresAt
+      ? Math.max(0, Math.ceil((new Date(betaStatus.entitlement.expiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
+      : undefined;
+
+  return (
+    <AppShell
+      firmName={firmName}
+      userName={session.user.name}
+      isOwner={betaStatus.isOwner}
+      daysLeft={daysLeft}
+    />
+  );
 }
