@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Calculator, Sparkles, Trash2, CheckCircle2 } from "lucide-react";
 
 export function CarryforwardPanel({ clientId }: { clientId: string }) {
   const [cfs, setCfs] = useState<any[]>([]);
@@ -105,7 +106,28 @@ export function CarryforwardPanel({ clientId }: { clientId: string }) {
 
 export function StateModsPanel({ clientId, taxYear }: { clientId: string; taxYear: number }) {
   const [mods, setMods] = useState<any[]>([]);
-  const [showForm, setShowForm] = useState(false);
+  const [showManualForm, setShowManualForm] = useState(false);
+  const [showWizard, setShowWizard] = useState(false);
+  const [wizardState, setWizardState] = useState<"CA" | "NY">("CA");
+  const [wizardInputs, setWizardInputs] = useState({
+    federalBonusDepreciation: "",
+    californiaAllowableDepreciation: "",
+    federalSection179Deduction: "",
+    hsaContributionsDeducted: "",
+    hsaEarningsTaxable: "",
+    isCaliforniaLlc: false,
+    californiaGrossReceipts: "",
+    californiaPteTaxPaid: "",
+    newYorkAllowableDepreciation: "",
+    stateLocalTaxDeductedFed: "",
+    mctdNetSelfEmploymentEarnings: "",
+    mctdZone: 1 as 1 | 2,
+    nyPtetTaxPaid: "",
+  });
+  const [computedResult, setComputedResult] = useState<any>(null);
+  const [calculating, setCalculating] = useState(false);
+  const [applying, setApplying] = useState(false);
+
   const [form, setForm] = useState({ state: "", modificationType: "addition", description: "", amount: "", federalLineCode: "", stateLineCode: "", apportionmentFactor: "" });
   const [saving, setSaving] = useState(false);
 
@@ -113,6 +135,58 @@ export function StateModsPanel({ clientId, taxYear }: { clientId: string; taxYea
     api<{ mods: any[] }>(`/api/clients/${clientId}/state-mods/${taxYear}`).then((d) => setMods(d.mods)).catch(() => {});
   }, [clientId, taxYear]);
   useEffect(() => { load(); }, [load]);
+
+  async function handleComputeConformity(applyImmediately: boolean = false) {
+    if (applyImmediately) setApplying(true);
+    else setCalculating(true);
+    try {
+      const payload: any = {
+        state: wizardState,
+        taxYear: Number(taxYear),
+        applyImmediately,
+        federalBonusDepreciation: wizardInputs.federalBonusDepreciation ? Number(wizardInputs.federalBonusDepreciation) : undefined,
+      };
+
+      if (wizardState === "CA") {
+        payload.californiaAllowableDepreciation = wizardInputs.californiaAllowableDepreciation ? Number(wizardInputs.californiaAllowableDepreciation) : undefined;
+        payload.federalSection179Deduction = wizardInputs.federalSection179Deduction ? Number(wizardInputs.federalSection179Deduction) : undefined;
+        payload.hsaContributionsDeducted = wizardInputs.hsaContributionsDeducted ? Number(wizardInputs.hsaContributionsDeducted) : undefined;
+        payload.hsaEarningsTaxable = wizardInputs.hsaEarningsTaxable ? Number(wizardInputs.hsaEarningsTaxable) : undefined;
+        payload.isCaliforniaLlc = wizardInputs.isCaliforniaLlc;
+        payload.californiaGrossReceipts = wizardInputs.californiaGrossReceipts ? Number(wizardInputs.californiaGrossReceipts) : undefined;
+        payload.californiaPteTaxPaid = wizardInputs.californiaPteTaxPaid ? Number(wizardInputs.californiaPteTaxPaid) : undefined;
+      } else {
+        payload.newYorkAllowableDepreciation = wizardInputs.newYorkAllowableDepreciation ? Number(wizardInputs.newYorkAllowableDepreciation) : undefined;
+        payload.stateLocalTaxDeductedFed = wizardInputs.stateLocalTaxDeductedFed ? Number(wizardInputs.stateLocalTaxDeductedFed) : undefined;
+        payload.mctdNetSelfEmploymentEarnings = wizardInputs.mctdNetSelfEmploymentEarnings ? Number(wizardInputs.mctdNetSelfEmploymentEarnings) : undefined;
+        payload.mctdZone = wizardInputs.mctdZone;
+        payload.nyPtetTaxPaid = wizardInputs.nyPtetTaxPaid ? Number(wizardInputs.nyPtetTaxPaid) : undefined;
+      }
+
+      const res = await api<{ result: any; appliedCount: number }>(`/api/clients/${clientId}/state-mods/calculate-conformity`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+
+      setComputedResult(res.result);
+      if (applyImmediately) {
+        setShowWizard(false);
+        setComputedResult(null);
+        load();
+      }
+    } finally {
+      setCalculating(false);
+      setApplying(false);
+    }
+  }
+
+  async function handleDeleteMod(modId: string) {
+    if (!confirm("Are you sure you want to delete this state modification?")) return;
+    try {
+      await api(`/api/clients/${clientId}/state-mods/${modId}`, { method: "DELETE" });
+      load();
+    } catch {}
+  }
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -131,7 +205,7 @@ export function StateModsPanel({ clientId, taxYear }: { clientId: string; taxYea
           apportionmentFactor: form.apportionmentFactor ? Number(form.apportionmentFactor) : undefined,
         }),
       });
-      setShowForm(false);
+      setShowManualForm(false);
       setForm({ state: "", modificationType: "addition", description: "", amount: "", federalLineCode: "", stateLineCode: "", apportionmentFactor: "" });
       load();
     } finally { setSaving(false); }
@@ -140,18 +214,280 @@ export function StateModsPanel({ clientId, taxYear }: { clientId: string; taxYea
   return (
     <Card>
       <CardHeader className="pb-2">
-        <div className="flex items-center justify-between">
-          <CardTitle className="text-sm">State Modifications — {taxYear}</CardTitle>
-          <Button size="sm" variant="outline" onClick={() => setShowForm((v) => !v)}>{showForm ? "Cancel" : "New"}</Button>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <CardTitle className="text-sm font-semibold">State Conformity & Modifications — {taxYear}</CardTitle>
+            <CardDescription className="text-xs">
+              Automated California (CA 540) & New York (IT-201 / IT-225) statutory adjustments
+            </CardDescription>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant={showWizard ? "secondary" : "default"}
+              onClick={() => { setShowWizard((v) => !v); setShowManualForm(false); }}
+              className="flex items-center gap-1 text-xs"
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              {showWizard ? "Close Wizard" : "⚡ State Conformity Wizard"}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => { setShowManualForm((v) => !v); setShowWizard(false); }}
+              className="text-xs"
+            >
+              {showManualForm ? "Cancel" : "+ Manual Entry"}
+            </Button>
+          </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
-        {showForm && (
+        {/* State Conformity Wizard */}
+        {showWizard && (
+          <div className="space-y-3 rounded-lg border border-[var(--color-primary)]/30 bg-[var(--color-primary)]/5 p-4">
+            <div className="flex items-center justify-between border-b border-[var(--color-border)]/80 pb-2">
+              <div className="flex items-center gap-2">
+                <Calculator className="h-4 w-4 text-[var(--color-primary)]" />
+                <span className="font-semibold text-xs text-[var(--color-foreground)]">
+                  Automated State Conformity Engine
+                </span>
+              </div>
+              <div className="flex rounded-md border border-[var(--color-border)] bg-[var(--color-background)] p-0.5">
+                <button
+                  type="button"
+                  onClick={() => { setWizardState("CA"); setComputedResult(null); }}
+                  className={`rounded px-3 py-1 text-xs font-medium transition-colors ${
+                    wizardState === "CA"
+                      ? "bg-[var(--color-primary)] text-[var(--color-primary-foreground)]"
+                      : "text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)]"
+                  }`}
+                >
+                  California (CA 540 / Sch CA)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setWizardState("NY"); setComputedResult(null); }}
+                  className={`rounded px-3 py-1 text-xs font-medium transition-colors ${
+                    wizardState === "NY"
+                      ? "bg-[var(--color-primary)] text-[var(--color-primary-foreground)]"
+                      : "text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)]"
+                  }`}
+                >
+                  New York (IT-201 / IT-225)
+                </button>
+              </div>
+            </div>
+
+            {wizardState === "CA" ? (
+              <div className="grid grid-cols-2 gap-3 text-xs">
+                <div>
+                  <label className="text-[var(--color-muted-foreground)]">Federal Bonus Depreciation (IRC § 168(k))</label>
+                  <Input
+                    placeholder="e.g. 50000"
+                    value={wizardInputs.federalBonusDepreciation}
+                    onChange={(e) => setWizardInputs((w) => ({ ...w, federalBonusDepreciation: e.target.value }))}
+                  />
+                  <span className="text-[10px] text-[var(--color-muted-foreground)]">CA does not allow bonus depr. (R&TC § 17250)</span>
+                </div>
+                <div>
+                  <label className="text-[var(--color-muted-foreground)]">CA Allowable Regular MACRS Depreciation</label>
+                  <Input
+                    placeholder="e.g. 10000"
+                    value={wizardInputs.californiaAllowableDepreciation}
+                    onChange={(e) => setWizardInputs((w) => ({ ...w, californiaAllowableDepreciation: e.target.value }))}
+                  />
+                  <span className="text-[10px] text-[var(--color-muted-foreground)]">Subtraction modification in Col B</span>
+                </div>
+                <div>
+                  <label className="text-[var(--color-muted-foreground)]">Federal Section 179 Expense Claimed</label>
+                  <Input
+                    placeholder="e.g. 65000"
+                    value={wizardInputs.federalSection179Deduction}
+                    onChange={(e) => setWizardInputs((w) => ({ ...w, federalSection179Deduction: e.target.value }))}
+                  />
+                  <span className="text-[10px] text-[var(--color-muted-foreground)]">Auto-adds back excess over CA $25,000 cap</span>
+                </div>
+                <div>
+                  <label className="text-[var(--color-muted-foreground)]">HSA Contribution Deducted (Fed Sch 1 Ln 13)</label>
+                  <Input
+                    placeholder="e.g. 4150"
+                    value={wizardInputs.hsaContributionsDeducted}
+                    onChange={(e) => setWizardInputs((w) => ({ ...w, hsaContributionsDeducted: e.target.value }))}
+                  />
+                  <span className="text-[10px] text-[var(--color-muted-foreground)]">CA non-conformity to IRC § 223</span>
+                </div>
+                <div>
+                  <label className="text-[var(--color-muted-foreground)]">CA Pass-Through Entity Tax (AB 150 - 9.3%)</label>
+                  <Input
+                    placeholder="e.g. 9300"
+                    value={wizardInputs.californiaPteTaxPaid}
+                    onChange={(e) => setWizardInputs((w) => ({ ...w, californiaPteTaxPaid: e.target.value }))}
+                  />
+                  <span className="text-[10px] text-[var(--color-muted-foreground)]">Form 3804-CR credit + federal add-back</span>
+                </div>
+                <div className="space-y-1 rounded border border-[var(--color-border)] p-2">
+                  <label className="flex items-center gap-2 font-medium">
+                    <input
+                      type="checkbox"
+                      checked={wizardInputs.isCaliforniaLlc}
+                      onChange={(e) => setWizardInputs((w) => ({ ...w, isCaliforniaLlc: e.target.checked }))}
+                    />
+                    California LLC Entity ($800 Min Tax)
+                  </label>
+                  {wizardInputs.isCaliforniaLlc && (
+                    <Input
+                      placeholder="CA Gross Receipts (e.g. 600000)"
+                      value={wizardInputs.californiaGrossReceipts}
+                      onChange={(e) => setWizardInputs((w) => ({ ...w, californiaGrossReceipts: e.target.value }))}
+                    />
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-3 text-xs">
+                <div>
+                  <label className="text-[var(--color-muted-foreground)]">Federal Bonus Depreciation (IRC § 168(k))</label>
+                  <Input
+                    placeholder="e.g. 80000"
+                    value={wizardInputs.federalBonusDepreciation}
+                    onChange={(e) => setWizardInputs((w) => ({ ...w, federalBonusDepreciation: e.target.value }))}
+                  />
+                  <span className="text-[10px] text-[var(--color-muted-foreground)]">Form IT-225 Code A-201 add-back</span>
+                </div>
+                <div>
+                  <label className="text-[var(--color-muted-foreground)]">New York Allowable Regular MACRS Depreciation</label>
+                  <Input
+                    placeholder="e.g. 16000"
+                    value={wizardInputs.newYorkAllowableDepreciation}
+                    onChange={(e) => setWizardInputs((w) => ({ ...w, newYorkAllowableDepreciation: e.target.value }))}
+                  />
+                  <span className="text-[10px] text-[var(--color-muted-foreground)]">Form IT-225 Code S-201 subtraction</span>
+                </div>
+                <div>
+                  <label className="text-[var(--color-muted-foreground)]">Federal Schedule A State & Local Taxes (SALT)</label>
+                  <Input
+                    placeholder="e.g. 10000"
+                    value={wizardInputs.stateLocalTaxDeductedFed}
+                    onChange={(e) => setWizardInputs((w) => ({ ...w, stateLocalTaxDeductedFed: e.target.value }))}
+                  />
+                  <span className="text-[10px] text-[var(--color-muted-foreground)]">Form IT-225 Code A-101 add-back</span>
+                </div>
+                <div>
+                  <label className="text-[var(--color-muted-foreground)]">NY Pass-Through Entity Tax (PTET)</label>
+                  <Input
+                    placeholder="e.g. 12000"
+                    value={wizardInputs.nyPtetTaxPaid}
+                    onChange={(e) => setWizardInputs((w) => ({ ...w, nyPtetTaxPaid: e.target.value }))}
+                  />
+                  <span className="text-[10px] text-[var(--color-muted-foreground)]">Form IT-653 credit + Code A-219 add-back</span>
+                </div>
+                <div className="col-span-2 space-y-1 rounded border border-[var(--color-border)] p-2">
+                  <label className="font-medium text-[var(--color-foreground)]">
+                    Metropolitan Commuter Transportation Mobility Tax (MCTMT)
+                  </label>
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="MCTD Net Self-Employment Earnings (e.g. 150000)"
+                      value={wizardInputs.mctdNetSelfEmploymentEarnings}
+                      onChange={(e) => setWizardInputs((w) => ({ ...w, mctdNetSelfEmploymentEarnings: e.target.value }))}
+                    />
+                    <select
+                      className="h-9 rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-2 text-xs"
+                      value={wizardInputs.mctdZone}
+                      onChange={(e) => setWizardInputs((w) => ({ ...w, mctdZone: Number(e.target.value) as 1 | 2 }))}
+                    >
+                      <option value={1}>Zone 1 (NYC - 0.60%)</option>
+                      <option value={2}>Zone 2 (Suburbs - 0.34%)</option>
+                    </select>
+                  </div>
+                  <span className="text-[10px] text-[var(--color-muted-foreground)]">
+                    Applies if MCTD net self-employment earnings exceed $50,000 threshold (Article 23 § 801).
+                  </span>
+                </div>
+              </div>
+            )}
+
+            <div className="flex items-center justify-between pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => handleComputeConformity(false)}
+                disabled={calculating}
+                className="text-xs"
+              >
+                {calculating ? "Calculating..." : "Preview Calculations"}
+              </Button>
+              {computedResult && (
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => handleComputeConformity(true)}
+                  disabled={applying}
+                  className="bg-emerald-600 text-white hover:bg-emerald-700 text-xs"
+                >
+                  <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />
+                  {applying ? "Applying to Workpapers..." : "Apply All to Client Workpaper (1-Click)"}
+                </Button>
+              )}
+            </div>
+
+            {/* Computed Preview Results */}
+            {computedResult && (
+              <div className="mt-3 space-y-2 rounded-md border border-[var(--color-border)] bg-[var(--color-background)] p-3 text-xs">
+                <div className="flex flex-wrap gap-4 font-mono font-medium">
+                  <span className="text-amber-600 dark:text-amber-400">
+                    Additions: +${computedResult.totalAdditions.toLocaleString()}
+                  </span>
+                  <span className="text-emerald-600 dark:text-emerald-400">
+                    Subtractions: -${computedResult.totalSubtractions.toLocaleString()}
+                  </span>
+                  <span className="text-blue-600 dark:text-blue-400">
+                    Credits: ${computedResult.totalCredits.toLocaleString()}
+                  </span>
+                </div>
+
+                {computedResult.specialTaxesOrFees?.length > 0 && (
+                  <div className="rounded bg-amber-500/10 p-2 text-amber-700 dark:text-amber-300">
+                    <span className="font-semibold">Special Statutory Taxes & Fees:</span>
+                    {computedResult.specialTaxesOrFees.map((fee: any, idx: number) => (
+                      <div key={idx} className="flex justify-between text-[11px] pt-1">
+                        <span>{fee.title} ({fee.statutoryCitation}):</span>
+                        <span className="font-mono font-bold">${fee.amount.toLocaleString()}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="space-y-1 divide-y divide-[var(--color-border)]/40 pt-1">
+                  {computedResult.modifications.map((m: any, idx: number) => (
+                    <div key={idx} className="flex items-start justify-between gap-2 pt-1">
+                      <div>
+                        <div className="font-medium text-[var(--color-foreground)]">{m.description}</div>
+                        <div className="text-[10px] text-[var(--color-muted-foreground)]">
+                          {m.stateLineCode} · {m.statutoryReference}
+                        </div>
+                      </div>
+                      <span className="font-mono font-semibold">
+                        {m.modificationType === "subtraction" ? "-" : "+"}${m.amount.toLocaleString()}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Manual Addition Form */}
+        {showManualForm && (
           <form onSubmit={handleCreate} className="grid grid-cols-2 gap-2 rounded-md border border-[var(--color-border)] bg-[var(--color-muted)]/40 p-3">
             <Input placeholder="State code (CA, NY...)" maxLength={2} value={form.state} onChange={(e) => setForm((f) => ({ ...f, state: e.target.value }))} />
             <select value={form.modificationType} onChange={(e) => setForm((f) => ({ ...f, modificationType: e.target.value }))} className="h-9 rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-2 text-sm">
               <option value="addition">Addition</option>
               <option value="subtraction">Subtraction</option>
+              <option value="credit">Credit</option>
               <option value="apportionment">Apportionment</option>
             </select>
             <Input className="col-span-2" placeholder="Description (e.g. CA conformity adjustment)" value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} />
@@ -162,13 +498,37 @@ export function StateModsPanel({ clientId, taxYear }: { clientId: string; taxYea
             <div className="col-span-2"><Button type="submit" size="sm" disabled={saving}>{saving ? "Saving..." : "Create"}</Button></div>
           </form>
         )}
-        {mods.length === 0 ? <p className="text-sm text-[var(--color-muted-foreground)]">No state modifications for {taxYear}.</p> : mods.map((m: any) => (
-          <div key={m.id} className="flex items-center gap-2 rounded-md border border-[var(--color-border)] px-3 py-2 text-sm">
-            <Badge>{m.state}</Badge>
-            <span>{m.modification_type}: {m.description}</span>
-            <span className="ml-auto font-mono font-medium">${Number(m.amount).toLocaleString()}</span>
-          </div>
-        ))}
+
+        {/* Active Modifications List */}
+        {mods.length === 0 ? (
+          <p className="text-sm text-[var(--color-muted-foreground)]">No state modifications for {taxYear}. Click &quot;⚡ State Conformity Wizard&quot; to auto-calculate.</p>
+        ) : (
+          mods.map((m: any) => (
+            <div key={m.id} className="flex items-center gap-2 rounded-md border border-[var(--color-border)] px-3 py-2 text-sm">
+              <Badge className={m.state === "CA" ? "bg-amber-500/10 text-amber-600 border-amber-500/30" : "bg-blue-500/10 text-blue-600 border-blue-500/30"}>
+                {m.state}
+              </Badge>
+              <div className="flex flex-col">
+                <span className="font-medium">{m.description}</span>
+                {m.state_line_code && (
+                  <span className="text-[10px] text-[var(--color-muted-foreground)]">
+                    Form Line: {m.state_line_code}
+                  </span>
+                )}
+              </div>
+              <span className="ml-auto font-mono font-medium">
+                {m.modification_type === "subtraction" ? "-" : "+"}${Number(m.amount).toLocaleString()}
+              </span>
+              <button
+                onClick={() => handleDeleteMod(m.id)}
+                className="ml-2 rounded p-1 text-[var(--color-muted-foreground)] hover:bg-rose-500/10 hover:text-rose-600"
+                title="Delete modification"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ))
+        )}
       </CardContent>
     </Card>
   );

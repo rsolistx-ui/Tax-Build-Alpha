@@ -11,6 +11,7 @@ import { storeWebhookEvent } from "../services/docusign";
 import { newId } from "../lib/id";
 import { getValidDocuSignConfig, createDocuSignEnvelope, voidDocuSignEnvelope } from "../services/docu-sign";
 import { signDocumentToken } from "../lib/signed-url";
+import { NativeEsignService } from "../services/native-esign";
 
 export const docVersioningRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 docVersioningRoutes.use("*", requireSession);
@@ -172,6 +173,88 @@ docVersioningRoutes.post("/:clientId/signature-requests/:requestId/complete", as
   await db.query(`INSERT INTO audit_events (id, firm_id, client_id, event, actor_user_id, metadata, created_at) VALUES ($1,$2,$3,$4,$5,$6::jsonb,NOW())`,
     [crypto.randomUUID(), firm.id, client.id, "signature_request_signed", c.get("userId"), JSON.stringify(evidence)]);
   return c.json({ requestId: req.id, status: "signed", evidence });
+});
+docVersioningRoutes.post("/:clientId/signature-requests/:requestId/sign-native", async (c) => {
+  const db = createDb(c.env);
+  const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
+  const client = await getClient(db, c.req.param("clientId"), firm.id);
+  if (!client) return c.json({ error: "Client not found" }, 404);
+
+  const [req] = await db.query<any>(
+    `SELECT * FROM signature_requests WHERE id=$1 AND firm_id=$2 AND client_id=$3`,
+    [c.req.param("requestId"), firm.id, client.id]
+  );
+  if (!req) return c.json({ error: "Signature request not found" }, 404);
+  if (req.status === "signed") return c.json({ error: "Document is already signed" }, 400);
+
+  const body = z.object({
+    signatureType: z.enum(["drawn", "typed"]),
+    signatureData: z.string().min(1),
+    signerName: z.string().min(1),
+    signerEmail: z.string().email(),
+    consentAgreed: z.boolean(),
+  }).parse(await c.req.json());
+
+  if (!body.consentAgreed) {
+    return c.json({ error: "Signer must agree to ESIGN consent under 15 U.S.C. § 7001" }, 400);
+  }
+
+  let pdfBytes: Uint8Array | null = null;
+  if (req.document_id) {
+    const [version] = await db.query<any>(
+      `SELECT r2_key FROM document_versions WHERE document_id=$1 ORDER BY version DESC LIMIT 1`,
+      [req.document_id]
+    );
+    const key = version?.r2_key;
+    if (key && c.env.RECEIPTS) {
+      const obj = await c.env.RECEIPTS.get(key);
+      if (obj) pdfBytes = new Uint8Array(await obj.arrayBuffer());
+    }
+    if (!pdfBytes) {
+      const [doc] = await db.query<any>(
+        `SELECT r2_key FROM client_documents WHERE id=$1`,
+        [req.document_id]
+      );
+      if (doc?.r2_key && c.env.RECEIPTS) {
+        const obj = await c.env.RECEIPTS.get(doc.r2_key);
+        if (obj) pdfBytes = new Uint8Array(await obj.arrayBuffer());
+      }
+    }
+  }
+
+  if (!pdfBytes) {
+    return c.json({ error: "Document file not found in storage to sign" }, 404);
+  }
+
+  const ipAddress = c.req.header("cf-connecting-ip") || c.req.header("x-forwarded-for") || "127.0.0.1";
+  const userAgent = c.req.header("user-agent") || "Folio Practice OS Client";
+
+  const nativeService = new NativeEsignService(db, c.env);
+  const result = await nativeService.stampAndCertifyDocument(
+    firm.id,
+    client.id,
+    req.id,
+    req.document_id,
+    pdfBytes,
+    {
+      signatureType: body.signatureType,
+      signatureData: body.signatureData,
+      signerName: body.signerName,
+      signerEmail: body.signerEmail,
+      consentAgreed: body.consentAgreed,
+      ipAddress,
+      userAgent,
+    },
+    req.tabs as any
+  );
+
+  return c.json({
+    ok: true,
+    certificateId: result.certificateId,
+    documentHash: result.documentHash,
+    signedR2Key: result.signedR2Key,
+    status: "signed",
+  });
 });
 docVersioningRoutes.post("/:clientId/docusign/webhook", async (c) => {
   const db = createDb(c.env);
