@@ -17,3 +17,4 @@ apps/web/dist
 apps/api/dist
 src-tauri/target
 src-tauri/gen
+*.exe

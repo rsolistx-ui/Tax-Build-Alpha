@@ -68,9 +68,7 @@ export function LoginPage() {
     <div className="flex min-h-full items-center justify-center px-4 py-12">
       <div className="w-full max-w-md">
         <div className="mb-8 text-center">
-          <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-slate-950 text-sm font-bold text-white shadow-md ring-1 ring-emerald-500/40">
-            T
-          </div>
+          <img src="/icons/icon-192.png" alt="Truepost" className="mx-auto mb-3 h-12 w-12 rounded-xl shadow-md ring-1 ring-white/10 object-cover" />
           <h1 className="text-2xl font-semibold tracking-tight">Truepost · Practice OS</h1>
           <p className="mt-1 text-sm text-[var(--color-muted-foreground)]">
             Sign in to your verified firm workspace

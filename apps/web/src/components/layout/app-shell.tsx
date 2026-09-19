@@ -52,11 +52,9 @@ export function AppShell({
       <header className="sticky top-0 z-20 border-b border-[var(--color-border)] bg-[var(--color-card)]/90 backdrop-blur">
         <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4 sm:px-6">
           <div className="flex items-center gap-6">
-            <Link to="/" className="flex items-center gap-2 font-semibold tracking-tight">
-              <span className="flex h-7 w-7 items-center justify-center rounded-md bg-slate-950 text-xs font-bold text-white shadow-sm ring-1 ring-emerald-500/40">
-                T
-              </span>
-              <span className="font-semibold tracking-tight text-slate-900 dark:text-slate-100">Truepost</span>
+            <Link to="/" className="flex items-center gap-2.5 font-semibold tracking-tight">
+              <img src="/icons/icon-192.png" alt="Truepost" className="h-7 w-7 rounded-lg shadow-sm ring-1 ring-white/10 object-cover" />
+              <span className="font-semibold tracking-tight text-slate-900 dark:text-slate-100 text-base">Truepost</span>
             </Link>
             <nav className="hidden items-center gap-1 sm:flex">
               <NavLink
