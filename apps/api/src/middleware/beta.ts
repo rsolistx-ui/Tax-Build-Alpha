@@ -6,19 +6,37 @@ import { computeAccessDecision, type EntitlementRow } from "../services/beta";
 import { insertBetaAccessEvent } from "../services/beta-db";
 
 export function isOwnerEmail(env: Env, email: string): boolean {
-  return Boolean(env.OWNER_EMAIL) && email.trim().toLowerCase() === env.OWNER_EMAIL!.trim().toLowerCase();
+  if (!email) return false;
+  const normalized = email.trim().toLowerCase();
+  const owner = env.OWNER_EMAIL?.trim().toLowerCase();
+  const power = env.POWER_USER_EMAIL?.trim().toLowerCase();
+  return (Boolean(owner) && normalized === owner) || (Boolean(power) && normalized === power);
+}
+
+/** Validates 64-character hex master token with constant-time comparison against timing attacks. */
+export function isValidAdminMasterToken(env: Env, tokenHeader?: string | null): boolean {
+  if (!env.ADMIN_MASTER_TOKEN) return false;
+  if (!tokenHeader) return false;
+  const expected = env.ADMIN_MASTER_TOKEN.trim().toLowerCase();
+  const provided = tokenHeader.trim().toLowerCase();
+  if (expected.length !== provided.length) return false;
+  let diff = 0;
+  for (let i = 0; i < expected.length; i++) {
+    diff |= expected.charCodeAt(i) ^ provided.charCodeAt(i);
+  }
+  return diff === 0;
 }
 
 /**
- * Every protected business API route must pass through this. The owner is
- * never gated by an entitlement (they administer beta access, they don't
- * consume it). Everyone else needs an entitlement row whose computed status
- * is active right now - never trusting a client flag, the local clock, or a
- * cached value. An entitlement that has just crossed its expiry is
- * lazily transitioned to "expired" here so it never silently keeps working.
+ * Every protected business API route must pass through this. The owner and power users
+ * are never gated by an entitlement (they possess lifetime platform access).
+ * Everyone else needs an active entitlement evaluated strictly against Neon server time.
  */
 export const requireActiveBeta = createMiddleware<{ Bindings: Env; Variables: AuthedVars }>(async (c, next) => {
-  if (isOwnerEmail(c.env, c.get("userEmail"))) {
+  if (
+    isOwnerEmail(c.env, c.get("userEmail")) ||
+    isValidAdminMasterToken(c.env, c.req.header("x-admin-token"))
+  ) {
     await next();
     return;
   }
@@ -57,8 +75,21 @@ export const requireActiveBeta = createMiddleware<{ Bindings: Env; Variables: Au
 });
 
 export const requireOwner = createMiddleware<{ Bindings: Env; Variables: AuthedVars }>(async (c, next) => {
-  if (!isOwnerEmail(c.env, c.get("userEmail"))) {
+  const tokenHeader = c.req.header("x-admin-token");
+  const hasValidToken = isValidAdminMasterToken(c.env, tokenHeader);
+
+  // If ADMIN_MASTER_TOKEN is configured in the environment, require the 64-hex token
+  if (c.env.ADMIN_MASTER_TOKEN && !hasValidToken) {
+    return c.json({
+      error: "Admin master security token required",
+      code: "MASTER_TOKEN_REQUIRED",
+    }, 403);
+  }
+
+  // If token is valid, or if no master token is set, ensure the user is an owner or power user
+  if (!hasValidToken && !isOwnerEmail(c.env, c.get("userEmail"))) {
     return c.json({ error: "Owner access required", code: "OWNER_REQUIRED" }, 403);
   }
+
   await next();
 });

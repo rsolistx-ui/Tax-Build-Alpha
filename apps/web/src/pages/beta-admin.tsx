@@ -1,12 +1,14 @@
 import type { FormEvent } from "react";
 import { useEffect, useState } from "react";
-import { ShieldCheck } from "lucide-react";
+import { Link } from "react-router-dom";
+import { ShieldCheck, Brain, ArrowRight } from "lucide-react";
 import { api } from "@/lib/api";
 import { buildInvitationLink } from "@/lib/beta";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { AdminTokenGate } from "@/components/admin-token-gate";
 
 type Invitation = {
   id: string;
@@ -146,14 +148,25 @@ export function BetaAdminPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
-          <ShieldCheck className="h-5 w-5" /> Beta Access
-        </h1>
-        <p className="text-sm text-[var(--color-muted-foreground)]">
-          Owner-only. Invite testers, set beta duration, and revoke access immediately.
-        </p>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
+            <ShieldCheck className="h-5 w-5" /> Beta Access & Licensing
+          </h1>
+          <p className="text-sm text-[var(--color-muted-foreground)]">
+            Owner & Power User controls. Invite testers, set beta duration, and revoke access immediately.
+          </p>
+        </div>
+        <Link to="/admin">
+          <Button variant="outline" size="sm" className="gap-2 text-xs border-emerald-500/30 hover:bg-emerald-50 dark:hover:bg-emerald-950/40">
+            <Brain className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+            <span>AI Rules & Markdown Injector</span>
+            <ArrowRight className="h-3.5 w-3.5" />
+          </Button>
+        </Link>
       </div>
+
+      <AdminTokenGate onTokenChanged={loadAll} />
 
       {error ? <p className="text-sm text-[var(--color-destructive)]">{error}</p> : null}
 

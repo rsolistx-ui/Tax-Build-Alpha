@@ -1,5 +1,5 @@
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
-import { Bot, Building2, Calendar, ClipboardList, Clock, FolderKanban, Headphones, LayoutDashboard, Lightbulb, LogOut, Map, ShieldCheck, Users } from "lucide-react";
+import { Bot, Brain, Building2, Calendar, ClipboardList, Clock, FolderKanban, Headphones, LayoutDashboard, Lightbulb, LogOut, Map, ShieldCheck, Sparkles, Users } from "lucide-react";
 import { useEffect, useState } from "react";
 import { authClient } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,9 @@ import { PwaInstallBanner } from "@/components/pwa-install-banner";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { FeatureRequestModal } from "@/components/feature-request-modal";
 import { SupportConciergeModal } from "@/components/support-concierge-modal";
+import { VipOnboardingModal } from "@/components/vip-onboarding-modal";
+import { VoiceRuleDictationModal } from "@/components/voice-rule-dictation-modal";
+import { AccountingImportModal } from "@/components/accounting-import-modal";
 
 export function AppShell({
   firmName,
@@ -25,8 +28,19 @@ export function AppShell({
   const [tourOpen, setTourOpen] = useState(false);
   const [featureRequestOpen, setFeatureRequestOpen] = useState(false);
   const [supportModalOpen, setSupportModalOpen] = useState(false);
+  const [vipOnboardingOpen, setVipOnboardingOpen] = useState(false);
+  const [accountingImportOpen, setAccountingImportOpen] = useState(false);
+  const [voiceModalOpen, setVoiceModalOpen] = useState(false);
 
-  useEffect(() => setTourOpen(shouldShowWelcomeTour()), []);
+  useEffect(() => {
+    setTourOpen(shouldShowWelcomeTour());
+    try {
+      if (!localStorage.getItem("folio_vip_onboarding_shown")) {
+        setVipOnboardingOpen(true);
+        localStorage.setItem("folio_vip_onboarding_shown", "true");
+      }
+    } catch {}
+  }, []);
 
   async function signOut() {
     await authClient.signOut();
@@ -131,20 +145,36 @@ export function AppShell({
                 </span>
               </NavLink>
               {isOwner ? (
-                <NavLink
-                  to="/beta-admin"
-                  className={({ isActive }) =>
-                    cn(
-                      "rounded-md px-3 py-1.5 text-sm text-[var(--color-muted-foreground)] hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)]",
-                      isActive && "bg-[var(--color-muted)] text-[var(--color-foreground)]",
-                    )
-                  }
-                >
-                  <span className="inline-flex items-center gap-1.5">
-                    <ShieldCheck className="h-3.5 w-3.5" />
-                    Beta Access
-                  </span>
-                </NavLink>
+                <>
+                  <NavLink
+                    to="/beta-admin"
+                    className={({ isActive }) =>
+                      cn(
+                        "rounded-md px-3 py-1.5 text-sm text-[var(--color-muted-foreground)] hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)]",
+                        isActive && "bg-[var(--color-muted)] text-[var(--color-foreground)]",
+                      )
+                    }
+                  >
+                    <span className="inline-flex items-center gap-1.5">
+                      <ShieldCheck className="h-3.5 w-3.5" />
+                      Beta Access
+                    </span>
+                  </NavLink>
+                  <NavLink
+                    to="/admin"
+                    className={({ isActive }) =>
+                      cn(
+                        "rounded-md px-3 py-1.5 text-sm text-[var(--color-muted-foreground)] hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)]",
+                        isActive && "bg-[var(--color-muted)] text-[var(--color-foreground)]",
+                      )
+                    }
+                  >
+                    <span className="inline-flex items-center gap-1.5">
+                      <Brain className="h-3.5 w-3.5" />
+                      AI Rules Desk
+                    </span>
+                  </NavLink>
+                </>
               ) : null}
             </nav>
           </div>
@@ -155,6 +185,14 @@ export function AppShell({
                 {firmName}
               </span>
             ) : null}
+            <button
+              onClick={() => setVipOnboardingOpen(true)}
+              className="hidden items-center gap-1.5 rounded-full border border-emerald-400 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-800 hover:bg-emerald-100 dark:border-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300 sm:inline-flex transition-colors"
+              title="VIP Practice Concierge & Launchpad"
+            >
+              <Sparkles className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+              VIP Concierge
+            </button>
             <button
               onClick={() => setSupportModalOpen(true)}
               className="hidden items-center gap-1.5 rounded-full border border-blue-300 bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-800 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-300 sm:inline-flex transition-colors"
@@ -208,6 +246,24 @@ export function AppShell({
       <SupportConciergeModal
         isOpen={supportModalOpen}
         onClose={() => setSupportModalOpen(false)}
+      />
+      <VipOnboardingModal
+        isOpen={vipOnboardingOpen}
+        onClose={() => setVipOnboardingOpen(false)}
+        userName={userName}
+        firmName={firmName}
+        onOpenImport={() => setAccountingImportOpen(true)}
+        onOpenMobileLink={() => navigate("/clients")}
+        onOpenDictation={() => setVoiceModalOpen(true)}
+      />
+      <AccountingImportModal
+        isOpen={accountingImportOpen}
+        onClose={() => setAccountingImportOpen(false)}
+        onSuccess={() => navigate("/clients")}
+      />
+      <VoiceRuleDictationModal
+        isOpen={voiceModalOpen}
+        onClose={() => setVoiceModalOpen(false)}
       />
     </div>
   );

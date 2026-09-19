@@ -29,6 +29,10 @@ export type Env = {
   LLM_PROVIDER?: string;
   /** Case-insensitive email identifying the beta owner/operator. Set as a Worker secret, never hardcoded. */
   OWNER_EMAIL?: string;
+  /** Power user email possessing indefinite lifetime platform access, bypassing 30-day licensing limits. */
+  POWER_USER_EMAIL?: string;
+  /** 64-character hex master token to lock down the admin architecture and override all gates. */
+  ADMIN_MASTER_TOKEN?: string;
   /** Resend API key for outbound engineering alerts and concierge notifications. */
   RESEND_API_KEY?: string;
   /** Admin recipient email for rule submissions and support concierge tickets. */

@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
 import {
   Key,
   Copy,
@@ -11,6 +12,10 @@ import {
   CheckCircle2,
   BookOpen,
   Mic,
+  ShieldCheck,
+  Zap,
+  Filter,
+  RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -18,6 +23,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
 import { VoiceRuleDictationModal } from "@/components/voice-rule-dictation-modal";
+import { AdminTokenGate } from "@/components/admin-token-gate";
 
 interface FirmRule {
   id: string;
@@ -109,6 +115,11 @@ export function AdminPanel() {
   const [savingRule, setSavingRule] = useState(false);
   const [ruleSuccessMsg, setRuleSuccessMsg] = useState("");
   const [voiceModalOpen, setVoiceModalOpen] = useState(false);
+
+  // Client Scoping & Retroactive Recalculation
+  const [filterClientId, setFilterClientId] = useState<string>("");
+  const [retroactiveApplyingId, setRetroactiveApplyingId] = useState<string | null>(null);
+  const [retroactiveStatusMsg, setRetroactiveStatusMsg] = useState<string | null>(null);
 
   // Testing Simulator State
   const [simMerchant, setSimMerchant] = useState("Home Depot");
@@ -205,6 +216,25 @@ export function AdminPanel() {
     } catch {}
   }
 
+  async function handleApplyRetroactive(rule: FirmRule) {
+    setRetroactiveApplyingId(rule.id);
+    setRetroactiveStatusMsg(null);
+    try {
+      const res = await api<{ result: { updatedCount: number; ruleTitle: string } }>(
+        `/api/admin/rules/${rule.id}/apply-retroactive`,
+        { method: "POST" }
+      );
+      setRetroactiveStatusMsg(
+        `Directive "${rule.title}" applied retroactively: ${res.result.updatedCount} historical transaction(s) recalculated and re-bucketed.`
+      );
+      setTimeout(() => setRetroactiveStatusMsg(null), 6000);
+    } catch (err: any) {
+      alert(err?.message || "Failed to apply rule retroactively");
+    } finally {
+      setRetroactiveApplyingId(null);
+    }
+  }
+
   async function handleTestPurchase() {
     if (!simMerchant.trim()) return;
     setSimLoading(true);
@@ -217,6 +247,7 @@ export function AdminPanel() {
           description: simDescription,
           amount: Number(simAmount) || 0,
           rulesMarkdown: ruleContent || undefined,
+          clientId: ruleClientId || filterClientId || undefined,
         }),
       });
       setSimResult(res.result);
@@ -259,7 +290,13 @@ export function AdminPanel() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">Owner Access</Badge>
+          <Link to="/beta-admin">
+            <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs border-[var(--color-border)]">
+              <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
+              Beta Licensing & Tokens
+            </Button>
+          </Link>
+          <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">Owner / Power User</Badge>
           <div className="flex rounded-md border border-[var(--color-border)] bg-[var(--color-card)] p-0.5">
             <button
               onClick={() => setActiveTab("rules")}
@@ -276,6 +313,8 @@ export function AdminPanel() {
           </div>
         </div>
       </div>
+
+      <AdminTokenGate onTokenChanged={() => { void loadRules(); void loadMetrics(); }} />
 
       {activeTab === "rules" ? (
         <div className="space-y-6">
@@ -456,92 +495,138 @@ export function AdminPanel() {
               </Card>
 
               {/* Active Rules List */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base flex items-center justify-between">
-                    <span>Active Rulebooks ({rules.length})</span>
-                    <Button variant="ghost" size="sm" onClick={loadRules} className="text-xs h-7">
-                      Refresh
-                    </Button>
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {loadingRules ? (
-                    <p className="text-xs text-[var(--color-muted-foreground)]">Loading active rulebooks...</p>
-                  ) : rules.length === 0 ? (
-                    <div className="text-center py-6 border border-dashed rounded-lg">
-                      <FileCode className="h-8 w-8 mx-auto text-[var(--color-muted-foreground)] opacity-40 mb-2" />
-                      <p className="text-xs text-[var(--color-muted-foreground)]">
-                        No active rulebooks yet. Click a starter template above to activate Schedule C rules!
-                      </p>
-                    </div>
-                  ) : (
-                    rules.map((rule) => (
-                      <div
-                        key={rule.id}
-                        className={`p-3.5 rounded-lg border transition-colors ${rule.isActive ? "border-[var(--color-border)] bg-[var(--color-card)]" : "border-dashed opacity-60 bg-[var(--color-muted)]"}`}
-                      >
-                        <div className="flex items-start justify-between gap-2 mb-1.5">
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm font-semibold">{rule.title}</span>
-                              <Badge className="text-[10px] uppercase tracking-wide bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-200">
-                                {rule.ruleType.replace(/_/g, " ")}
-                              </Badge>
-                              {rule.clientId ? (
-                                <Badge className="text-[10px] bg-stone-100 text-stone-700 border border-stone-300">
-                                  Client-Specific
-                                </Badge>
-                              ) : (
-                                <Badge className="text-[10px] bg-blue-100 text-blue-800 border-blue-200">
-                                  Global
-                                </Badge>
-                              )}
-                            </div>
-                            <span className="text-[11px] text-[var(--color-muted-foreground)]">
-                              Updated {new Date(rule.updatedAt).toLocaleDateString()}
-                            </span>
+              {(() => {
+                const displayedRules = filterClientId
+                  ? rules.filter((r) => !r.clientId || r.clientId === filterClientId)
+                  : rules;
+
+                return (
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <CardTitle className="text-base flex items-center gap-2">
+                          <span>Active Rulebooks ({displayedRules.length})</span>
+                        </CardTitle>
+                        <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-1.5 text-xs">
+                            <Filter className="h-3.5 w-3.5 text-[var(--color-muted-foreground)]" />
+                            <select
+                              value={filterClientId}
+                              onChange={(e) => setFilterClientId(e.target.value)}
+                              className="h-7 rounded border border-[var(--color-border)] bg-[var(--color-card)] px-2 text-xs"
+                              aria-label="Filter rules by client"
+                            >
+                              <option value="">All Clients (Global + Scoped)</option>
+                              {clients.map((c) => (
+                                <option key={c.id} value={c.id}>
+                                  Client: {c.name}
+                                </option>
+                              ))}
+                            </select>
                           </div>
-                          <div className="flex items-center gap-1.5">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="text-xs h-7 px-2"
-                              onClick={() => {
-                                setRuleTitle(rule.title);
-                                setRuleType(rule.ruleType);
-                                setRuleClientId(rule.clientId || "");
-                                setRuleContent(rule.markdownContent);
-                              }}
-                            >
-                              Edit
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className={`text-xs h-7 px-2 ${rule.isActive ? "text-amber-600" : "text-emerald-600"}`}
-                              onClick={() => handleToggleRule(rule)}
-                            >
-                              {rule.isActive ? "Disable" : "Enable"}
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-7 w-7 text-red-500 hover:text-red-700"
-                              onClick={() => handleDeleteRule(rule.id)}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                          </div>
+                          <Button variant="ghost" size="sm" onClick={loadRules} className="text-xs h-7 px-2">
+                            <RefreshCw className="h-3 w-3" />
+                          </Button>
                         </div>
-                        <p className="text-xs font-mono text-[var(--color-muted-foreground)] line-clamp-2 bg-[var(--color-muted)] p-1.5 rounded">
-                          {rule.markdownContent}
-                        </p>
                       </div>
-                    ))
-                  )}
-                </CardContent>
-              </Card>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      {retroactiveStatusMsg ? (
+                        <div className="flex items-center gap-2 text-xs text-emerald-800 bg-emerald-50 dark:bg-emerald-950/60 dark:text-emerald-300 p-2.5 rounded-lg border border-emerald-500/30 animate-in fade-in">
+                          <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+                          <span>{retroactiveStatusMsg}</span>
+                        </div>
+                      ) : null}
+
+                      {loadingRules ? (
+                        <p className="text-xs text-[var(--color-muted-foreground)]">Loading active rulebooks...</p>
+                      ) : displayedRules.length === 0 ? (
+                        <div className="text-center py-6 border border-dashed rounded-lg">
+                          <FileCode className="h-8 w-8 mx-auto text-[var(--color-muted-foreground)] opacity-40 mb-2" />
+                          <p className="text-xs text-[var(--color-muted-foreground)]">
+                            {filterClientId ? "No active rulebooks found for this client." : "No active rulebooks yet. Click a starter template above to activate Schedule C rules!"}
+                          </p>
+                        </div>
+                      ) : (
+                        displayedRules.map((rule) => (
+                          <div
+                            key={rule.id}
+                            className={`p-3.5 rounded-lg border transition-colors ${rule.isActive ? "border-[var(--color-border)] bg-[var(--color-card)]" : "border-dashed opacity-60 bg-[var(--color-muted)]"}`}
+                          >
+                            <div className="flex items-start justify-between gap-2 mb-1.5">
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm font-semibold">{rule.title}</span>
+                                  <Badge className="text-[10px] uppercase tracking-wide bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-200">
+                                    {rule.ruleType.replace(/_/g, " ")}
+                                  </Badge>
+                                  {rule.clientId ? (
+                                    <Badge className="text-[10px] bg-stone-100 text-stone-700 border border-stone-300">
+                                      Client-Specific
+                                    </Badge>
+                                  ) : (
+                                    <Badge className="text-[10px] bg-blue-100 text-blue-800 border-blue-200">
+                                      Global
+                                    </Badge>
+                                  )}
+                                </div>
+                                <span className="text-[11px] text-[var(--color-muted-foreground)]">
+                                  Updated {new Date(rule.updatedAt).toLocaleDateString()}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  disabled={retroactiveApplyingId === rule.id}
+                                  className="text-[11px] h-7 px-2 border-emerald-500/40 text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-950/40 gap-1"
+                                  onClick={() => void handleApplyRetroactive(rule)}
+                                  title="Recalculate historical receipts against this rule"
+                                >
+                                  <Zap className={`h-3 w-3 ${retroactiveApplyingId === rule.id ? "animate-spin text-emerald-600" : "text-emerald-600"}`} />
+                                  {retroactiveApplyingId === rule.id ? "Recalculating..." : "Retroactive"}
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="text-xs h-7 px-2"
+                                  onClick={() => {
+                                    setRuleTitle(rule.title);
+                                    setRuleType(rule.ruleType);
+                                    setRuleClientId(rule.clientId || "");
+                                    setRuleContent(rule.markdownContent);
+                                  }}
+                                >
+                                  Edit
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className={`text-xs h-7 px-2 ${rule.isActive ? "text-amber-600" : "text-emerald-600"}`}
+                                  onClick={() => handleToggleRule(rule)}
+                                >
+                                  {rule.isActive ? "Disable" : "Enable"}
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-7 w-7 text-red-500 hover:text-red-700"
+                                  onClick={() => handleDeleteRule(rule.id)}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </Button>
+                              </div>
+                            </div>
+                            <p className="text-xs font-mono text-[var(--color-muted-foreground)] line-clamp-2 bg-[var(--color-muted)] p-1.5 rounded">
+                              {rule.markdownContent}
+                            </p>
+                          </div>
+                        ))
+                      )}
+                    </CardContent>
+                  </Card>
+                );
+              })()}
             </div>
 
             {/* Right Column: Live AI Bucketing Simulator (5 cols) */}

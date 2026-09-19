@@ -6,6 +6,7 @@ import { ClientsPage } from "@/pages/clients";
 import { DashboardPage } from "@/pages/dashboard";
 import { ClientWorkspacePage } from "@/pages/client-workspace";
 import { BetaAdminPage } from "@/pages/beta-admin";
+import { AdminPanel } from "@/pages/admin/admin-panel";
 import { BetaRedeemPage } from "@/pages/beta-redeem";
 import { DocumentReviewPage } from "@/pages/document-review";
 import { WorkQueuePage } from "@/pages/work-queue";
@@ -30,6 +31,7 @@ export default function App() {
           <Route path="/projects" element={<ProjectsPage />} />
           <Route path="/calendar" element={<CalendarPage />} />
           <Route path="/beta-admin" element={<BetaAdminPage />} />
+          <Route path="/admin" element={<AdminPanel />} />
           <Route path="/documents/review" element={<DocumentReviewPage />} />
           <Route path="/work-queue" element={<WorkQueuePage />} />
           <Route path="/agent-desk" element={<AgentDeskPage />} />
