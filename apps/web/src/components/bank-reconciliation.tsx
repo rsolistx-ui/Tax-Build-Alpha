@@ -349,10 +349,18 @@ export function BankReconciliation({
     <div className="space-y-4">
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2"><FileSpreadsheet className="h-4 w-4" /> Bank CSV import</CardTitle>
-          <CardDescription>
-            Folio maps the file, normalizes transactions, blocks duplicate reimports, and prepares receipt matches before you review them.
-          </CardDescription>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <CardTitle className="flex items-center gap-2"><FileSpreadsheet className="h-4 w-4" /> Bank Statement Import</CardTitle>
+              <CardDescription>
+                Folio maps the file, normalizes transactions, blocks duplicate reimports, and prepares receipt matches before you review them.
+              </CardDescription>
+            </div>
+            <span className="hidden items-center gap-1.5 rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 sm:inline-flex">
+              <Link2 className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+              Direct Feed Ready (Plaid / Live Sync)
+            </span>
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
           <label className="flex cursor-pointer flex-col items-center justify-center rounded-[var(--radius-lg)] border border-dashed border-[var(--color-border)] bg-[var(--color-muted)]/40 px-6 py-10 text-center hover:bg-[var(--color-muted)]/70">

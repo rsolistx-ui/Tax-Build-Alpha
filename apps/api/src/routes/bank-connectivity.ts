@@ -63,6 +63,19 @@ function getProvider(env: Env, provider: string) {
   }
 }
 
+bankConnectivityRoutes.get("/providers", async (c) => {
+  return c.json({
+    plaid: {
+      available: Boolean(c.env.PLAID_CLIENT_ID && c.env.PLAID_CLIENT_SECRET),
+      environment: c.env.PLAID_ENVIRONMENT || "sandbox",
+    },
+    teller: {
+      available: Boolean(c.env.TELLER_CLIENT_ID && c.env.TELLER_CLIENT_SECRET),
+      environment: c.env.TELLER_ENVIRONMENT || "sandbox",
+    },
+  });
+});
+
 // Create a link token for the bank connect flow
 bankConnectivityRoutes.post("/connect/link-token", async (c) => {
   const db = createDb(c.env);
