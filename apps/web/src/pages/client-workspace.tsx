@@ -415,7 +415,7 @@ export function ClientWorkspacePage() {
                     className="gap-1.5 border-purple-200 text-purple-700 hover:bg-purple-50 dark:border-purple-800 dark:text-purple-400"
                     onClick={() => setTeachAiOpen(true)}
                   >
-                    <Mic className="h-3.5 w-3.5" /> Dictate AI Rule
+                    <Mic className="h-3.5 w-3.5" /> Dictate Directive
                   </Button>
                 ) : (
                   <Button
@@ -424,7 +424,7 @@ export function ClientWorkspacePage() {
                     className="gap-1.5 border-purple-200 text-purple-700 hover:bg-purple-50 dark:border-purple-800 dark:text-purple-400"
                     onClick={() => setRequestRuleOpen(true)}
                   >
-                    <Sparkles className="h-3.5 w-3.5" /> Request Custom Rule
+                    <Sparkles className="h-3.5 w-3.5" /> Request Directive
                   </Button>
                 )}
                 <Button

@@ -36,7 +36,7 @@ pub fn run() {
         .setup(|app| {
             let app_handle = app.handle().clone();
             let w = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(PRODUCTION_URL.parse().unwrap()))
-                .title("Folio Beta")
+                .title("Truepost")
                 .inner_size(1280.0, 800.0)
                 .min_inner_size(960.0, 600.0)
                 .on_navigation(move |url| {
@@ -57,7 +57,7 @@ pub fn run() {
             Ok(())
         })
         .run(tauri::generate_context!())
-        .expect("error while running Folio Beta");
+        .expect("error while running Truepost");
 }
 
 #[cfg(test)]
