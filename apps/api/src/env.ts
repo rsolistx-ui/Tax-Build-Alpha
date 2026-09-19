@@ -29,6 +29,12 @@ export type Env = {
   LLM_PROVIDER?: string;
   /** Case-insensitive email identifying the beta owner/operator. Set as a Worker secret, never hardcoded. */
   OWNER_EMAIL?: string;
+  /** Resend API key for outbound engineering alerts and concierge notifications. */
+  RESEND_API_KEY?: string;
+  /** Admin recipient email for rule submissions and support concierge tickets. */
+  ADMIN_NOTIFICATION_EMAIL?: string;
+  /** Custom sender address for Resend (e.g. notifications@resend.dev or firm domain). */
+  SENDER_EMAIL?: string;
   /** Shared secret required by the internal smoke-cleanup endpoint. Never exposed to any client. */
   SMOKE_CLEANUP_TOKEN?: string;
   /** Push notifications (Web Push + VAPID). Never hardcoded; set as Worker secrets. */

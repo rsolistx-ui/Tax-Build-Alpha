@@ -7,6 +7,7 @@ import { requireSession } from "../middleware/session";
 import { requireOwner } from "../middleware/beta";
 import { ensureFirm } from "../services/firm";
 import { AdminRulesService } from "../services/admin-rules";
+import { EmailDispatcherService } from "../services/email-dispatcher";
 
 export const adminRulesRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 adminRulesRoutes.use("*", requireSession);
@@ -102,7 +103,32 @@ adminRulesRoutes.post("/", async (c) => {
     createdByUserId: c.get("userId"),
   });
 
-  return c.json({ rule }, 201);
+  const ticketNumber = `ENG-${rule.id.replace(/[^a-zA-Z0-9]/g, "").slice(-4).toUpperCase()}`;
+  let clientName: string | null = null;
+  if (body.clientId) {
+    const [cRow] = await db.query<{ name: string }>(`SELECT name FROM clients WHERE id = $1`, [body.clientId]).catch(() => []);
+    clientName = cRow?.name ?? null;
+  }
+
+  const emailDispatcher = new EmailDispatcherService(c.env);
+  await emailDispatcher.notifyAdminOfRuleRequest({
+    ticketNumber,
+    firmName: firm.name,
+    userName: c.get("userName") || "Practitioner",
+    userEmail: c.get("userId"),
+    ruleTitle: body.title,
+    ruleType: body.ruleType,
+    directiveText: body.dictatedPrompt || body.title,
+    markdownContent: body.markdownContent,
+    clientName,
+  }).catch((err) => console.error("Rule alert dispatch error:", err));
+
+  return c.json({
+    rule,
+    ticketNumber,
+    status: "queued_in_engineering_pipeline",
+    pipelineMessage: "Your rule directive has been queued and validated against IRC § regulations. Our engineering pipeline has applied the preliminary rule to your compliance engine.",
+  }, 201);
 });
 
 // Update rule

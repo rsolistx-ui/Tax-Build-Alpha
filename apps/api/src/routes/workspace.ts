@@ -486,11 +486,15 @@ workspaceRoutes.get("/:clientId/documents/:documentId/source", async (c) => {
   const object = await c.env.RECEIPTS.get(document.r2_key);
   if (!object) return c.json({ error: "Source object missing" }, 404);
   const filename = document.filename.replace(/["\r\n]/g, "");
+  const contentType = document.content_type || object.httpMetadata?.contentType || "application/octet-stream";
+  const isSafeInline = contentType.startsWith("application/pdf") || contentType.startsWith("image/");
   return new Response(object.body, {
     headers: {
-      "content-type": document.content_type || object.httpMetadata?.contentType || "application/octet-stream",
-      "content-disposition": `inline; filename="${filename}"`,
+      "content-type": contentType,
+      "content-disposition": isSafeInline ? `inline; filename="${filename}"` : `attachment; filename="${filename}"`,
       "cache-control": "private, no-store",
+      "x-content-type-options": "nosniff",
+      "x-frame-options": "SAMEORIGIN",
     },
   });
 });

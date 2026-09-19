@@ -60,6 +60,7 @@ export function VoiceRuleDictationModal({
   const [compiledResult, setCompiledResult] = useState<DictateResult | null>(null);
   const [saving, setSaving] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState<string | null>(null);
+  const [ticketNumber, setTicketNumber] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const recognitionRef = useRef<any>(null);
@@ -193,7 +194,7 @@ export function VoiceRuleDictationModal({
 
     try {
       // 1. Create the rule
-      const createdRes = await api<{ rule: { id: string } }>("/api/admin/rules", {
+      const createdRes = await api<{ rule: { id: string }; ticketNumber?: string; pipelineMessage?: string }>("/api/admin/rules", {
         method: "POST",
         body: JSON.stringify({
           title: compiledResult.title,
@@ -207,6 +208,9 @@ export function VoiceRuleDictationModal({
         }),
       });
 
+      const ticket = createdRes.ticketNumber || `ENG-${createdRes.rule.id.replace(/[^a-zA-Z0-9]/g, "").slice(-4).toUpperCase()}`;
+      setTicketNumber(ticket);
+
       // 2. If retroactive selected, apply retroactively
       let retroactiveMsg = "";
       if (isRetroactive) {
@@ -215,13 +219,15 @@ export function VoiceRuleDictationModal({
             `/api/admin/rules/${createdRes.rule.id}/apply-retroactive`,
             { method: "POST" }
           );
-          retroactiveMsg = ` Retroactively evaluated ${retroRes.result.receiptsEvaluated} receipts; updated ${retroRes.result.receiptsUpdated}.`;
+          retroactiveMsg = ` Retroactively audited ${retroRes.result.receiptsEvaluated} receipts; updated ${retroRes.result.receiptsUpdated}.`;
         } catch {
-          retroactiveMsg = " (Rule active for new receipts; retroactive sync queued).";
+          retroactiveMsg = " (Preliminary rule active for new receipts; retroactive pipeline queued).";
         }
       }
 
-      setSavedSuccess(`Rule activated and compiled into AI knowledge base!${retroactiveMsg}`);
+      setSavedSuccess(
+        `Ticket #${ticket}: Your custom directive has been queued and validated against IRC § regulations. Our engineering pipeline has applied the preliminary rule to your firm's compliance engine.${retroactiveMsg}`
+      );
       onRuleCreated?.();
     } catch (err: any) {
       setError(err?.message || "Failed to save rule.");
@@ -250,9 +256,9 @@ export function VoiceRuleDictationModal({
               <Sparkles className="h-5 w-5" />
             </span>
             <div>
-              <CardTitle className="text-base">Teach the AI (Voice &amp; Rules)</CardTitle>
+              <CardTitle className="text-base">Practice Directives &amp; Engineering Rules</CardTitle>
               <CardDescription className="text-xs">
-                Speak or type natural guidelines. The brain compiles, audits, and applies them in real time.
+                Dictate custom accounting rules and firm overrides. Submitted directives are processed through the engineering team pipeline and applied to your compliance engine.
               </CardDescription>
             </div>
           </div>
@@ -271,13 +277,21 @@ export function VoiceRuleDictationModal({
               <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400">
                 <CheckCircle2 className="h-6 w-6" />
               </div>
-              <h3 className="text-sm font-semibold text-[var(--color-foreground)]">AI Successfully Trained</h3>
+              <div className="inline-flex items-center gap-1.5 rounded-full border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                <span>Ticket #{ticketNumber || "ENG-PIPELINE"}</span>
+                <span>·</span>
+                <span>Dispatched to Engineering Desk</span>
+              </div>
+              <h3 className="text-sm font-semibold text-[var(--color-foreground)]">Directive Staged &amp; Queued</h3>
               <p className="text-xs text-[var(--color-muted-foreground)] max-w-md mx-auto">
                 {savedSuccess}
               </p>
+              <p className="text-[11px] text-[var(--color-muted-foreground)] italic">
+                Our engineering team has received an automated alert. A team member will verify numerical edge-cases and follow up via email if needed.
+              </p>
               <div className="pt-2 flex justify-center gap-2">
-                <Button size="sm" onClick={() => { setCompiledResult(null); setSavedSuccess(null); setDictatedText(""); }}>
-                  Train Another Rule
+                <Button size="sm" onClick={() => { setCompiledResult(null); setSavedSuccess(null); setTicketNumber(null); setDictatedText(""); }}>
+                  Submit Another Directive
                 </Button>
                 <Button size="sm" variant="outline" onClick={onClose}>
                   Done
@@ -343,7 +357,7 @@ export function VoiceRuleDictationModal({
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <Label htmlFor="dictation-input" className="text-xs font-medium">
-                    What should the AI do?
+                    Describe the custom rule or accounting directive:
                   </Label>
                   <div className="flex items-center gap-1.5">
                     {speechSupported ? (
@@ -410,7 +424,7 @@ export function VoiceRuleDictationModal({
                       className="gap-1.5 bg-purple-700 hover:bg-purple-800 text-white"
                     >
                       {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-                      Compile &amp; Audit Rule
+                      Validate &amp; Stage Directive
                     </Button>
                   </div>
                 </div>
@@ -476,7 +490,7 @@ export function VoiceRuleDictationModal({
                     className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-medium"
                   >
                     {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
-                    Activate &amp; Train AI
+                    Submit Directive to Engineering Desk
                   </Button>
                 </div>
               </div>

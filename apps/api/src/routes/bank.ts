@@ -581,6 +581,88 @@ bankRoutes.patch("/:clientId/bank-transactions/:transactionId/disposition", asyn
   return c.json({ transaction: serializeTransaction(after, client.id) });
 });
 
+bankRoutes.post("/:clientId/bank-transactions/batch-auto-triage", async (c) => {
+  const { db, client } = await authorizedClient(c);
+  if (!client) return c.json({ error: "Not found" }, 404);
+  const userId = c.get("userId");
+
+  const eligible = await db.query<{
+    id: string;
+    suggested_receipt_id: string | null;
+    suggested_disposition: string | null;
+    suggested_score: number | null;
+  }>(
+    `SELECT id, suggested_receipt_id, suggested_disposition, suggested_score
+     FROM bank_transactions
+     WHERE client_id = $1
+       AND triage IN ('likely_match', 'needs_review', 'unmatched')
+       AND (suggested_receipt_id IS NOT NULL OR suggested_disposition IS NOT NULL)
+     LIMIT 250`,
+    [client.id],
+  );
+
+  let approvedMatches = 0;
+  let classifiedDispositions = 0;
+
+  for (const item of eligible) {
+    if (item.suggested_receipt_id && (item.suggested_score ?? 0) >= 80) {
+      const [conflict] = await db.query<{ id: string }>(
+        `SELECT id FROM bank_transactions WHERE client_id = $1 AND id <> $2 AND matched_receipt_id = $3`,
+        [client.id, item.id, item.suggested_receipt_id],
+      );
+      if (!conflict) {
+        await db.query(
+          `UPDATE bank_transactions SET
+             triage = 'matched',
+             matched_receipt_id = $1,
+             resolved_at = NOW(),
+             resolved_by_user_id = $2,
+             reviewed_at = NOW(),
+             reviewed_by_user_id = $2,
+             disposition = COALESCE(disposition, suggested_disposition, 'business_expense')
+           WHERE id = $3 AND client_id = $4`,
+          [item.suggested_receipt_id, userId, item.id, client.id],
+        );
+        approvedMatches++;
+        continue;
+      }
+    }
+
+    if (item.suggested_disposition) {
+      await db.query(
+        `UPDATE bank_transactions SET
+           disposition = COALESCE(disposition, $1),
+           disposition_reviewed_at = NOW(),
+           reviewed_at = NOW(),
+           reviewed_by_user_id = $2
+         WHERE id = $3 AND client_id = $4 AND (disposition IS NULL OR disposition = 'unclassified')`,
+        [item.suggested_disposition, userId, item.id, client.id],
+      );
+      classifiedDispositions++;
+    }
+  }
+
+  if (approvedMatches > 0 || classifiedDispositions > 0) {
+    await db.query(
+      `INSERT INTO audit_events (id, client_id, actor_user_id, action, after_json)
+       VALUES ($1, $2, $3, 'bank_batch_auto_triage', $4::jsonb)`,
+      [
+        newId("aud"),
+        client.id,
+        userId,
+        { approvedMatches, classifiedDispositions, totalProcessed: eligible.length },
+      ],
+    );
+  }
+
+  return c.json({
+    approvedMatches,
+    classifiedDispositions,
+    totalProcessed: eligible.length,
+    message: `Batch auto-triage complete: approved ${approvedMatches} matches and classified ${classifiedDispositions} transactions.`,
+  });
+});
+
 async function authorizedClient(c: {
   env: Env;
   get(key: "userId" | "userName"): string;

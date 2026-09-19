@@ -51,6 +51,7 @@ import { featureRequestRoutes } from "./routes/feature-requests";
 import { timeSavingsRoutes } from "./routes/time-savings";
 import { systemReliabilityRoutes } from "./routes/system-reliability";
 import { bankConnectivityRoutes } from "./routes/bank-connectivity";
+import { supportRoutes } from "./routes/support";
 
 const app = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 
@@ -187,6 +188,7 @@ app.route("/api/feature-requests", featureRequestRoutes);
 app.route("/api/time-savings", timeSavingsRoutes);
 app.route("/api/system", systemReliabilityRoutes);
 app.route("/api/bank-connectivity", bankConnectivityRoutes);
+app.route("/api/support", supportRoutes);
 
 app.notFound((c) => c.json({ error: "Not found" }, 404));
 app.onError((err, c) => {

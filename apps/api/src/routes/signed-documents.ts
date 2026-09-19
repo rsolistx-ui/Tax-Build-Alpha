@@ -32,11 +32,16 @@ signedDocumentRoutes.get("/:docId/:token", async (c) => {
   const object = await c.env.RECEIPTS.get(r2Key);
   if (!object) return c.json({ error: "Not found" }, 404);
 
+  const filename = doc.filename.replace(/["\r\n\\]/g, "");
+  const contentType = doc.content_type || "application/pdf";
+  const isSafeInline = contentType.startsWith("application/pdf") || contentType.startsWith("image/");
   return new Response(object.body, {
     headers: {
-      "Content-Type": doc.content_type || "application/pdf",
-      "Content-Disposition": `inline; filename="${doc.filename}"`,
+      "Content-Type": contentType,
+      "Content-Disposition": isSafeInline ? `inline; filename="${filename}"` : `attachment; filename="${filename}"`,
       "Cache-Control": "private, max-age=0, no-store",
+      "X-Content-Type-Options": "nosniff",
+      "X-Frame-Options": "SAMEORIGIN",
     },
   });
 });

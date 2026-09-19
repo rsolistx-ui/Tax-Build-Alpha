@@ -1,5 +1,5 @@
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
-import { Bot, Building2, Calendar, ClipboardList, Clock, FolderKanban, LayoutDashboard, Lightbulb, LogOut, Map, ShieldCheck, Users } from "lucide-react";
+import { Bot, Building2, Calendar, ClipboardList, Clock, FolderKanban, Headphones, LayoutDashboard, Lightbulb, LogOut, Map, ShieldCheck, Users } from "lucide-react";
 import { useEffect, useState } from "react";
 import { authClient } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,7 @@ import { shouldShowWelcomeTour, WelcomeTour } from "@/components/welcome-tour";
 import { PwaInstallBanner } from "@/components/pwa-install-banner";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { FeatureRequestModal } from "@/components/feature-request-modal";
+import { SupportConciergeModal } from "@/components/support-concierge-modal";
 
 export function AppShell({
   firmName,
@@ -23,6 +24,7 @@ export function AppShell({
   const navigate = useNavigate();
   const [tourOpen, setTourOpen] = useState(false);
   const [featureRequestOpen, setFeatureRequestOpen] = useState(false);
+  const [supportModalOpen, setSupportModalOpen] = useState(false);
 
   useEffect(() => setTourOpen(shouldShowWelcomeTour()), []);
 
@@ -154,11 +156,18 @@ export function AppShell({
               </span>
             ) : null}
             <button
+              onClick={() => setSupportModalOpen(true)}
+              className="hidden items-center gap-1.5 rounded-full border border-blue-300 bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-800 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-300 sm:inline-flex transition-colors"
+            >
+              <Headphones className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
+              Reach out to Team
+            </button>
+            <button
               onClick={() => setFeatureRequestOpen(true)}
               className="hidden items-center gap-1.5 rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300 sm:inline-flex transition-colors"
             >
               <Lightbulb className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
-              Request a Feature
+              Request Feature
             </button>
             <button onClick={() => setTourOpen(true)} className="hidden items-center gap-1.5 text-xs text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)] sm:inline-flex"><Map className="h-3.5 w-3.5" /> Guide</button>
             {typeof daysLeft === "number" ? (
@@ -195,6 +204,10 @@ export function AppShell({
       <FeatureRequestModal
         isOpen={featureRequestOpen}
         onClose={() => setFeatureRequestOpen(false)}
+      />
+      <SupportConciergeModal
+        isOpen={supportModalOpen}
+        onClose={() => setSupportModalOpen(false)}
       />
     </div>
   );

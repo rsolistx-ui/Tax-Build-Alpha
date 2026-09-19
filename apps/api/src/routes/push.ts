@@ -88,10 +88,17 @@ pushRoutes.post("/sync/events", async (c) => {
 
 pushRoutes.get("/sync/poll", async (c) => {
   const db = createDb(c.env);
+  const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
   const since = c.req.query("since") as string | undefined;
-  let whereClause = "";
-  let params: unknown[] = [];
-  if (since) { whereClause = `WHERE ts > $1`; params = [since]; }
-  const rows = await db.query<any>(`SELECT id, firm_id, user_id, entity, entity_id, op, payload, ts FROM sync_events ${whereClause} ORDER BY ts DESC LIMIT 50`, params).catch(() => []);
+  let whereClause = "WHERE firm_id = $1";
+  let params: unknown[] = [firm.id];
+  if (since) {
+    whereClause += " AND ts > $2";
+    params.push(since);
+  }
+  const rows = await db.query<any>(
+    `SELECT id, firm_id, user_id, entity, entity_id, op, payload, ts FROM sync_events ${whereClause} ORDER BY ts DESC LIMIT 50`,
+    params,
+  ).catch(() => []);
   return c.json({ events: rows });
 });

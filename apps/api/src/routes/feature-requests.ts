@@ -5,6 +5,7 @@ import type { Env } from "../env";
 import { requireSession, type AuthedVars } from "../middleware/session";
 import { ensureFirm } from "../services/firm";
 import { FeatureRequestsService, type FeatureRequestArea, type FeatureRequestStatus } from "../services/feature-requests";
+import { EmailDispatcherService } from "../services/email-dispatcher";
 
 export const featureRequestRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 
@@ -47,7 +48,23 @@ featureRequestRoutes.post("/", async (c) => {
     source: body.source,
   });
 
-  return c.json({ request }, 201);
+  const ticketNumber = `ENG-${request.id.replace(/[^a-zA-Z0-9]/g, "").slice(-4).toUpperCase()}`;
+  const emailDispatcher = new EmailDispatcherService(c.env);
+  await emailDispatcher.notifyAdminOfSupportContact({
+    ticketNumber,
+    firmName: firm.name,
+    userName: c.get("userName") || "Practitioner",
+    userEmail: c.get("userId"),
+    subject: `Feature Request: ${body.title}`,
+    message: body.description,
+    category: body.area || "Feature Request",
+  }).catch((err) => console.error("Feature request alert error:", err));
+
+  return c.json({
+    request,
+    ticketNumber,
+    message: "Request logged in the engineering backlog. Our team reviews submissions weekly and will follow up via email.",
+  }, 201);
 });
 
 featureRequestRoutes.patch("/:id", async (c) => {

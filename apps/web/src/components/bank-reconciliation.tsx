@@ -9,6 +9,7 @@ import {
   Link2,
   ReceiptText,
   Search,
+  Sparkles,
   Upload,
   X,
 } from "lucide-react";
@@ -139,6 +140,31 @@ export function BankReconciliation({
   const [error, setError] = useState<string | null>(null);
   const [categories, setCategories] = useState<Array<{ id: string; name: string; slug: string }>>([]);
   const [dispositionBusyId, setDispositionBusyId] = useState<string | null>(null);
+  const [batchTriageBusy, setBatchTriageBusy] = useState(false);
+
+  const highConfidenceCount = useMemo(() => {
+    return transactions.filter(
+      (t) => (t.suggestedReceipt && (t.suggestedScore ?? 0) >= 0.8 && t.triage !== "matched") || (t.suggestedDisposition && t.disposition === "unclassified")
+    ).length;
+  }, [transactions]);
+
+  async function handleBatchAutoTriage() {
+    setBatchTriageBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const res = await api<{ message: string; approvedMatches: number; classifiedDispositions: number }>(
+        `/api/clients/${clientId}/bank-transactions/batch-auto-triage`,
+        { method: "POST" }
+      );
+      setMessage(`⚡ ${res.message}`);
+      void loadTransactions();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Batch auto-triage failed");
+    } finally {
+      setBatchTriageBusy(false);
+    }
+  }
 
   async function loadTransactions() {
     const data = await api<{ transactions: BankTransaction[]; summary: BankSummary }>(
@@ -439,13 +465,26 @@ export function BankReconciliation({
             <MetricButton label="No receipt required" value={summary.noReceiptRequired} active={filter === "no_receipt_required"} onClick={() => setFilter("no_receipt_required")} />
           </div>
 
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-xs text-[var(--color-muted-foreground)]">
               Showing {visibleTransactions.length} of {summary.total} transaction{summary.total === 1 ? "" : "s"}
             </p>
-            <Button size="sm" variant="secondary" onClick={() => setFilter(filter === "all" ? "action" : "all")}>
-              <Search className="h-3.5 w-3.5" /> {filter === "all" ? "Needs action" : "Show all"}
-            </Button>
+            <div className="flex items-center gap-2">
+              {highConfidenceCount > 0 ? (
+                <Button
+                  size="sm"
+                  onClick={() => void handleBatchAutoTriage()}
+                  disabled={batchTriageBusy}
+                  className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm"
+                >
+                  <Sparkles className="h-3.5 w-3.5" />
+                  {batchTriageBusy ? "Applying Auto-Triage…" : `⚡ 1-Click Auto-Triage (${highConfidenceCount} ready)`}
+                </Button>
+              ) : null}
+              <Button size="sm" variant="secondary" onClick={() => setFilter(filter === "all" ? "action" : "all")}>
+                <Search className="h-3.5 w-3.5" /> {filter === "all" ? "Needs action" : "Show all"}
+              </Button>
+            </div>
           </div>
 
           {message ? <p className="rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-800">{message}</p> : null}
