@@ -182,6 +182,12 @@ export class NativeEsignService {
 
     // 4. Create new version in PostgreSQL
     await createVersion(this.db, firmId, documentId, signedR2Key, "client-signer");
+    await this.db.query(
+      `UPDATE client_documents
+       SET r2_key = $1, status = 'confirmed', content_type = 'application/pdf', updated_at = NOW()
+       WHERE id = $2 AND client_id = $3`,
+      [signedR2Key, documentId, clientId],
+    );
 
     // 5. Update signature request status
     await this.db.query(

@@ -51,12 +51,13 @@ import { CarryforwardPanel, StateModsPanel, M3Panel, PriorYearPanel, ExtensionsP
 import { convertHeicToJpeg, createCaptureInput } from "@/lib/image-utils";
 import { enqueueReceipt, drainQueue, registerSyncListener, queueCount } from "@/lib/offline-queue";
 import { subscribePush, unsubscribePush } from "@/lib/push";
-import { Bell, Wifi, Sparkles, Smartphone, Mic, CreditCard, Calendar as CalendarIcon } from "lucide-react";
+import { Bell, Wifi, Sparkles, Smartphone, Mic, CreditCard, Calendar as CalendarIcon, ShieldCheck } from "lucide-react";
 import { TaxBridgePanel } from "@/components/tax-bridge-panel";
 import { MagicMobileLinkModal } from "@/components/magic-mobile-link-modal";
 import { VoiceRuleDictationModal } from "@/components/voice-rule-dictation-modal";
 import { BillingPanel } from "@/components/billing-panel";
 import { DeadlineCalendarPanel } from "@/components/deadline-calendar-panel";
+import { EsignVaultPanel } from "@/components/esign-vault-panel";
 
 type Category = {
   id: string;
@@ -115,9 +116,9 @@ type BatchFile = {
   error?: string;
 };
 
-type Tab = "overview" | "folders" | "upload" | "review" | "bank" | "pnl" | "tax-bridge" | "tax-readiness" | "workpaper" | "documents" | "engagements" | "requests" | "export" | "agent" | "analytics" | "billing" | "deadlines";
+type Tab = "overview" | "folders" | "upload" | "review" | "bank" | "pnl" | "tax-bridge" | "tax-readiness" | "workpaper" | "documents" | "esign" | "engagements" | "requests" | "export" | "agent" | "analytics" | "billing" | "deadlines";
 
-const VALID_TABS: Tab[] = ["overview", "folders", "upload", "review", "bank", "pnl", "tax-bridge", "tax-readiness", "workpaper", "documents", "engagements", "requests", "export", "agent", "analytics", "billing", "deadlines"];
+const VALID_TABS: Tab[] = ["overview", "folders", "upload", "review", "bank", "pnl", "tax-bridge", "tax-readiness", "workpaper", "documents", "esign", "engagements", "requests", "export", "agent", "analytics", "billing", "deadlines"];
 
 export function ClientWorkspacePage() {
   const { clientId = "" } = useParams();
@@ -347,6 +348,7 @@ export function ClientWorkspacePage() {
       { id: "tax-readiness" as const, label: "Tax readiness", icon: ClipboardList },
       { id: "workpaper" as const, label: "Workpaper", icon: FileSpreadsheet },
       { id: "documents" as const, label: "Documents", icon: FileStack },
+      { id: "esign" as const, label: "E-Sign Vault", icon: ShieldCheck },
       { id: "engagements" as const, label: "Engagements", icon: ClipboardList },
       { id: "requests" as const, label: "Requests", icon: Inbox },
       { id: "agent" as const, label: "Agent", icon: Bot },
@@ -495,6 +497,7 @@ export function ClientWorkspacePage() {
       ) : null}
 
       {tab === "documents" ? <DocumentsPanel clientId={clientId} /> : null}
+      {tab === "esign" ? <EsignVaultPanel clientId={clientId} /> : null}
 
       {tab === "engagements" ? <EngagementsPanel clientId={clientId} focusEngagementId={focusId} /> : null}
 

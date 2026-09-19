@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Upload } from "lucide-react";
+import { Upload, ShieldCheck } from "lucide-react";
 import { api, apiUrl } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -69,19 +69,27 @@ export function DocumentsPanel({ clientId }: { clientId: string }) {
               Bank statements, tax documents, prior-year returns, payroll, loan, and formation documents beyond receipts.
             </p>
           </div>
-          <label>
-            <input
-              ref={fileInput}
-              type="file"
-              multiple
-              className="hidden"
-              onChange={(e) => handleUpload(e.target.files)}
-              accept=".pdf,.png,.jpg,.jpeg,.heic,.docx,.xlsx,.csv"
-            />
-            <Button size="sm" disabled={uploading} onClick={() => fileInput.current?.click()}>
-              <Upload className="h-3.5 w-3.5" /> {uploading ? "Uploading..." : "Upload document"}
-            </Button>
-          </label>
+          <div className="flex items-center gap-2">
+            <a
+              href="?tab=esign"
+              className="inline-flex items-center gap-1.5 rounded-md border border-emerald-500/30 bg-emerald-500/5 px-2.5 py-1 text-xs font-medium text-emerald-600 hover:bg-emerald-500/10"
+            >
+              <ShieldCheck className="h-3.5 w-3.5" /> E-Sign & Audit Vault
+            </a>
+            <label>
+              <input
+                ref={fileInput}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={(e) => handleUpload(e.target.files)}
+                accept=".pdf,.png,.jpg,.jpeg,.heic,.docx,.xlsx,.csv"
+              />
+              <Button size="sm" disabled={uploading} onClick={() => fileInput.current?.click()}>
+                <Upload className="h-3.5 w-3.5" /> {uploading ? "Uploading..." : "Upload document"}
+              </Button>
+            </label>
+          </div>
         </CardContent>
       </Card>
 
@@ -103,6 +111,11 @@ export function DocumentsPanel({ clientId }: { clientId: string }) {
               </a>
               <div className="flex items-center gap-2">
                 {doc.duplicate_of_document_id ? <Badge>Possible duplicate</Badge> : null}
+                {doc.document_type === "engagement_letter" ? (
+                  <Badge className="border-emerald-500/40 bg-emerald-500/10 text-emerald-600 text-[10px]">
+                    ESIGN Certified
+                  </Badge>
+                ) : null}
                 <Badge>{label(doc.document_type)}</Badge>
                 <Badge>{label(doc.status)}</Badge>
               </div>

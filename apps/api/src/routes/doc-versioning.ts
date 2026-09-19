@@ -32,6 +32,67 @@ docVersioningRoutes.get("/:clientId/signature-requests", async (c) => {
   const client = await getClient(db, c.req.param("clientId"), firm.id); if (!client) return c.json({ error: "Client not found" }, 404);
   return c.json({ requests: await listSignatureRequests(db, firm.id, client.id) });
 });
+docVersioningRoutes.get("/:clientId/signature-vault", async (c) => {
+  const db = createDb(c.env); const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
+  const client = await getClient(db, c.req.param("clientId"), firm.id); if (!client) return c.json({ error: "Client not found" }, 404);
+
+  const rows = await db.query<any>(
+    `SELECT 
+       sr.id as request_id,
+       sr.document_id,
+       sr.engagement_id,
+       sr.form_type,
+       sr.status,
+       sr.signed_at,
+       sr.created_at,
+       sr.recipients,
+       cd.filename,
+       cd.document_type,
+       e.title as engagement_title,
+       ae.metadata as audit_metadata
+     FROM signature_requests sr
+     LEFT JOIN client_documents cd ON cd.id = sr.document_id
+     LEFT JOIN engagements e ON e.id = sr.engagement_id
+     LEFT JOIN (
+       SELECT DISTINCT ON (metadata->>'requestId') metadata, created_at
+       FROM audit_events
+       WHERE event IN ('native_document_signed', 'signature_request_signed')
+       ORDER BY metadata->>'requestId', created_at DESC
+     ) ae ON ae.metadata->>'requestId' = sr.id
+     WHERE sr.firm_id = $1 AND sr.client_id = $2
+     ORDER BY sr.created_at DESC`,
+    [firm.id, client.id]
+  );
+
+  const records = rows.map((r: any) => {
+    const meta = r.audit_metadata || {};
+    const recipients = Array.isArray(r.recipients) ? r.recipients : [];
+    const signer = recipients[0] || {};
+    return {
+      requestId: r.request_id,
+      documentId: r.document_id,
+      engagementId: r.engagement_id,
+      formType: r.form_type || "document",
+      status: r.status,
+      signedAt: r.signed_at || meta.signedAt || null,
+      createdAt: r.created_at,
+      filename: r.filename || `${r.form_type || "Document"}.pdf`,
+      documentType: r.document_type || r.form_type,
+      engagementTitle: r.engagement_title,
+      signerName: meta.signerName || signer.name || "Client Signer",
+      signerEmail: meta.signerEmail || signer.email || null,
+      certificateId: meta.certificateId || null,
+      documentHash: meta.finalHash || null,
+      originalHash: meta.originalHash || null,
+      ipAddress: meta.ipAddress || null,
+      sourceUrl: r.document_id ? `/api/clients/${client.id}/documents/${r.document_id}/source` : null,
+      tamperEvidentStatus: r.status === "signed" ? "Sealed & Tamper-Evident" : "Pending Signature",
+      complianceNotice: "15 U.S.C. § 7001 (ESIGN) & UETA Compliant · 7-Yr Statutory Vault",
+    };
+  });
+
+  return c.json({ records });
+});
 docVersioningRoutes.post("/:clientId/signature-requests", async (c) => {
   const db = createDb(c.env); const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
   const client = await getClient(db, c.req.param("clientId"), firm.id); if (!client) return c.json({ error: "Client not found" }, 404);
