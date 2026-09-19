@@ -21,6 +21,7 @@ import { Input } from "@/components/ui/input";
 import { EmptyState } from "@/components/empty-state";
 import { cn } from "@/lib/utils";
 import { AccountingImportModal } from "@/components/accounting-import-modal";
+import { TimeSavingsTracker } from "@/components/time-savings-tracker";
 
 type Readiness = "ready" | "needs_review" | "missing_evidence" | "books_incomplete";
 
@@ -401,6 +402,7 @@ export function DashboardPage() {
 
       <SummaryStrip summary={data.summary} />
       {data.operationsCommandCenter ? <PracticeOsStrip counts={data.operationsCommandCenter} /> : null}
+      <TimeSavingsTracker />
 
       {caughtUp ? (
         <Card>
