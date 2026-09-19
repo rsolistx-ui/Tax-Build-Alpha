@@ -51,12 +51,12 @@ export function SignupPage() {
     <div className="flex min-h-full items-center justify-center px-4 py-12">
       <div className="w-full max-w-md">
         <div className="mb-8 text-center">
-          <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--color-primary)] text-sm font-semibold text-white">
-            F
+          <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-slate-950 text-sm font-bold text-white shadow-md ring-1 ring-emerald-500/40">
+            T
           </div>
           <h1 className="text-2xl font-semibold tracking-tight">Activate your beta invitation</h1>
           <p className="mt-1 text-sm text-[var(--color-muted-foreground)]">
-            Folio is invitation-only during the beta. Enter the one-time invitation link details below.
+            Truepost is invitation-only during the beta. Enter the one-time invitation link details below.
           </p>
         </div>
         <Card>

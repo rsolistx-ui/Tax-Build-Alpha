@@ -176,7 +176,7 @@ export function Contractor1099Panel({ clientId }: { clientId: string }) {
               </button>
             </div>
             <p className="text-[11px] text-indigo-800 dark:text-indigo-300">
-              Contractor will receive an encrypted invitation to sign Form W-9 via the Folio Native E-Sign Vault under 15 U.S.C. § 7001.
+              Contractor will receive an encrypted invitation to sign Form W-9 via the Truepost Native E-Sign Vault under 15 U.S.C. § 7001.
             </p>
             <div className="flex gap-2 pt-1">
               <input

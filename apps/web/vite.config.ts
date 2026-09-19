@@ -12,9 +12,9 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg'],
       manifest: {
-        name: 'Folio Tax',
-        short_name: 'Folio',
-        description: 'Tax preparation and bookkeeping for professionals',
+        name: 'Truepost Practice OS',
+        short_name: 'Truepost',
+        description: 'Verified double-entry accounting and practice OS for modern firms',
         theme_color: '#0f172a',
         background_color: '#ffffff',
         display: 'standalone',

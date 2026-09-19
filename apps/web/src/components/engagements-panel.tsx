@@ -268,7 +268,7 @@ export function EngagementsPanel({ clientId, focusEngagementId }: { clientId: st
                     className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs"
                   >
                     <PenTool className="h-3.5 w-3.5" />
-                    {letterBusy === eng.id ? "Preparing…" : "⚡ Sign with Folio E-Sign"}
+                    {letterBusy === eng.id ? "Preparing…" : "⚡ Sign with Truepost E-Sign"}
                   </Button>
                   <Button
                     size="sm"

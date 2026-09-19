@@ -58,6 +58,8 @@ import { VoiceRuleDictationModal } from "@/components/voice-rule-dictation-modal
 import { BillingPanel } from "@/components/billing-panel";
 import { DeadlineCalendarPanel } from "@/components/deadline-calendar-panel";
 import { EsignVaultPanel } from "@/components/esign-vault-panel";
+import { ClientRuleRequestModal } from "@/components/client-rule-request-modal";
+import { getAdminToken } from "@/lib/api";
 
 type Category = {
   id: string;
@@ -153,6 +155,7 @@ export function ClientWorkspacePage() {
   const [pushSubscribed, setPushSubscribed] = useState(false);
   const [mobileLinkOpen, setMobileLinkOpen] = useState(false);
   const [teachAiOpen, setTeachAiOpen] = useState(false);
+  const [requestRuleOpen, setRequestRuleOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -405,14 +408,25 @@ export function ClientWorkspacePage() {
                 <span>Currency: <strong>{profile?.default_currency || "USD"}</strong></span>
               </div>
               <div className="flex items-center gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="gap-1.5 border-purple-200 text-purple-700 hover:bg-purple-50 dark:border-purple-800 dark:text-purple-400"
-                  onClick={() => setTeachAiOpen(true)}
-                >
-                  <Mic className="h-3.5 w-3.5" /> Teach AI Rule
-                </Button>
+                {getAdminToken() ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1.5 border-purple-200 text-purple-700 hover:bg-purple-50 dark:border-purple-800 dark:text-purple-400"
+                    onClick={() => setTeachAiOpen(true)}
+                  >
+                    <Mic className="h-3.5 w-3.5" /> Dictate AI Rule
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1.5 border-purple-200 text-purple-700 hover:bg-purple-50 dark:border-purple-800 dark:text-purple-400"
+                    onClick={() => setRequestRuleOpen(true)}
+                  >
+                    <Sparkles className="h-3.5 w-3.5" /> Request Custom Rule
+                  </Button>
+                )}
                 <Button
                   size="sm"
                   variant="outline"
@@ -957,6 +971,14 @@ export function ClientWorkspacePage() {
         defaultClientId={clientId}
         defaultClientName={client?.name}
         onRuleCreated={() => void load()}
+      />
+
+      <ClientRuleRequestModal
+        isOpen={requestRuleOpen}
+        onClose={() => setRequestRuleOpen(false)}
+        clientId={clientId}
+        clientName={client?.name}
+        onSubmitted={() => void load()}
       />
     </div>
   );

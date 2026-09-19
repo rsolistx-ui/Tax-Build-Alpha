@@ -1,5 +1,5 @@
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
-import { Bot, Brain, Building2, Calendar, ClipboardList, Clock, FolderKanban, Headphones, LayoutDashboard, Lightbulb, LogOut, Map, ShieldCheck, Sparkles, Users } from "lucide-react";
+import { Bot, Building2, Calendar, ClipboardList, Clock, FolderKanban, Headphones, LayoutDashboard, Lightbulb, LogOut, Map, Sparkles, Users } from "lucide-react";
 import { useEffect, useState } from "react";
 import { authClient } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
@@ -16,7 +16,7 @@ import { AccountingImportModal } from "@/components/accounting-import-modal";
 export function AppShell({
   firmName,
   userName,
-  isOwner,
+  isOwner: _isOwner,
   daysLeft,
 }: {
   firmName?: string;
@@ -53,10 +53,10 @@ export function AppShell({
         <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4 sm:px-6">
           <div className="flex items-center gap-6">
             <Link to="/" className="flex items-center gap-2 font-semibold tracking-tight">
-              <span className="flex h-7 w-7 items-center justify-center rounded-md bg-[var(--color-primary)] text-xs text-white">
-                F
+              <span className="flex h-7 w-7 items-center justify-center rounded-md bg-slate-950 text-xs font-bold text-white shadow-sm ring-1 ring-emerald-500/40">
+                T
               </span>
-              Folio
+              <span className="font-semibold tracking-tight text-slate-900 dark:text-slate-100">Truepost</span>
             </Link>
             <nav className="hidden items-center gap-1 sm:flex">
               <NavLink
@@ -144,38 +144,6 @@ export function AppShell({
                   Agent Desk
                 </span>
               </NavLink>
-              {isOwner ? (
-                <>
-                  <NavLink
-                    to="/beta-admin"
-                    className={({ isActive }) =>
-                      cn(
-                        "rounded-md px-3 py-1.5 text-sm text-[var(--color-muted-foreground)] hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)]",
-                        isActive && "bg-[var(--color-muted)] text-[var(--color-foreground)]",
-                      )
-                    }
-                  >
-                    <span className="inline-flex items-center gap-1.5">
-                      <ShieldCheck className="h-3.5 w-3.5" />
-                      Beta Access
-                    </span>
-                  </NavLink>
-                  <NavLink
-                    to="/admin"
-                    className={({ isActive }) =>
-                      cn(
-                        "rounded-md px-3 py-1.5 text-sm text-[var(--color-muted-foreground)] hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)]",
-                        isActive && "bg-[var(--color-muted)] text-[var(--color-foreground)]",
-                      )
-                    }
-                  >
-                    <span className="inline-flex items-center gap-1.5">
-                      <Brain className="h-3.5 w-3.5" />
-                      AI Rules Desk
-                    </span>
-                  </NavLink>
-                </>
-              ) : null}
             </nav>
           </div>
           <div className="flex items-center gap-3">

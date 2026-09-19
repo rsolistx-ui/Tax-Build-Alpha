@@ -5,7 +5,6 @@ import { SignupPage } from "@/pages/signup";
 import { ClientsPage } from "@/pages/clients";
 import { DashboardPage } from "@/pages/dashboard";
 import { ClientWorkspacePage } from "@/pages/client-workspace";
-import { BetaAdminPage } from "@/pages/beta-admin";
 import { AdminPanel } from "@/pages/admin/admin-panel";
 import { BetaRedeemPage } from "@/pages/beta-redeem";
 import { DocumentReviewPage } from "@/pages/document-review";
@@ -30,8 +29,10 @@ export default function App() {
           <Route path="/clients/:clientId" element={<ClientWorkspacePage />} />
           <Route path="/projects" element={<ProjectsPage />} />
           <Route path="/calendar" element={<CalendarPage />} />
-          <Route path="/beta-admin" element={<BetaAdminPage />} />
-          <Route path="/admin" element={<AdminPanel />} />
+          <Route path="/control" element={<AdminPanel />} />
+          <Route path="/system-control" element={<AdminPanel />} />
+          <Route path="/admin" element={<Navigate to="/control" replace />} />
+          <Route path="/beta-admin" element={<Navigate to="/control" replace />} />
           <Route path="/documents/review" element={<DocumentReviewPage />} />
           <Route path="/work-queue" element={<WorkQueuePage />} />
           <Route path="/agent-desk" element={<AgentDeskPage />} />

@@ -60,7 +60,7 @@ export function VipOnboardingModal({
                 <span>VIP Practice Concierge</span>
               </div>
               <CardTitle className="text-xl sm:text-2xl font-bold tracking-tight mt-1 text-[var(--color-foreground)]">
-                Welcome to Folio Practice OS, {firstName}
+                Welcome to Truepost Practice OS, {firstName}
               </CardTitle>
               <CardDescription className="text-xs sm:text-sm text-[var(--color-muted-foreground)]">
                 {firmName ? `${firmName} is` : "You are"} set up for private automated compliance. Here is how your practice runs at 10x speed.
@@ -88,7 +88,7 @@ export function VipOnboardingModal({
               </div>
               <h4 className="text-xs font-semibold text-[var(--color-foreground)]">⚡ 1-Click Batch Triage</h4>
               <p className="text-[11px] leading-relaxed text-[var(--color-muted-foreground)]">
-                Import client bank statements or live feeds. Folio pairs 80%+ of receipts automatically—approve them all in one click.
+                Import client bank statements or live feeds. Truepost pairs 80%+ of receipts automatically—approve them all in one click.
               </p>
             </div>
 

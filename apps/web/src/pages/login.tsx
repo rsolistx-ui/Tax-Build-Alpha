@@ -31,8 +31,8 @@ export function LoginPage() {
     <div className="flex min-h-full items-center justify-center px-4 py-12">
       <div className="w-full max-w-md">
         <div className="mb-8 text-center">
-          <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--color-primary)] text-sm font-semibold text-white">
-            F
+          <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-slate-950 text-sm font-bold text-white shadow-md ring-1 ring-emerald-500/40">
+            T
           </div>
           <h1 className="text-2xl font-semibold tracking-tight">Welcome back</h1>
           <p className="mt-1 text-sm text-[var(--color-muted-foreground)]">
@@ -74,7 +74,7 @@ export function LoginPage() {
                 {loading ? "Signing in…" : "Sign in"}
               </Button>
             </form>
-            <p className="mt-4 text-center text-sm text-[var(--color-muted-foreground)]">Folio beta is invitation-only. Use the secure invitation link sent by your firm.</p>
+            <p className="mt-4 text-center text-sm text-[var(--color-muted-foreground)]">Truepost beta is invitation-only. Use the secure invitation link sent by your firm.</p>
           </CardContent>
         </Card>
       </div>

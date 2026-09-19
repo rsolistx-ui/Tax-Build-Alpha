@@ -48,7 +48,7 @@ export default function AnalyticsDashboard() {
     <div className="max-w-7xl mx-auto space-y-6 p-6 bg-[#1a1d23] text-[#f0f0f0] min-h-screen">
       <header className="flex items-center gap-3 border-b border-[#333] pb-4">
         <LineChart className="h-8 w-8 text-amber-400" />
-        <div><h1 className="text-3xl font-bold tracking-tight">Folio — Analytics</h1><p className="text-sm text-[#888]">Live metrics from /api/admin/metrics</p></div>
+        <div><h1 className="text-3xl font-bold tracking-tight">Truepost — Analytics</h1><p className="text-sm text-[#888]">Live metrics from /api/admin/metrics</p></div>
         <Badge className="ml-auto bg-amber-100 text-amber-700 border-amber-200">Live</Badge>
       </header>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

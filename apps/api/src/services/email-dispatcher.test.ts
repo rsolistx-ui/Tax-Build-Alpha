@@ -19,7 +19,7 @@ describe("EmailDispatcherService", () => {
 
     expect(draft).toContain("Hi Phyllis,");
     expect(draft).toContain('directive regarding "De Minimis Expensing under $2,500" for Acme Industrial.');
-    expect(draft).toContain("The Platform Engineering Team");
+    expect(draft).toContain("Truepost Operations Desk");
     expect(draft).not.toContain("LLM");
     expect(draft).not.toContain("prompt");
   });

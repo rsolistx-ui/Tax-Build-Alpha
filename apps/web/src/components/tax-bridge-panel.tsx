@@ -240,7 +240,7 @@ export function TaxBridgePanel({ clientId }: { clientId: string }) {
                 60-Second Tax Software Bridge:
               </span>{" "}
               <span className="text-emerald-800/80 dark:text-emerald-200/80">
-                Open MyTAXPrepOffice, ProConnect, or Drake on one screen and Folio on the other. Every number below is
+                Open MyTAXPrepOffice, ProConnect, or Drake on one screen and Truepost on the other. Every number below is
                 verified against your bank feeds and receipt evidence, mapped line-for-line to Form 1040 Schedule C.
               </span>
             </div>

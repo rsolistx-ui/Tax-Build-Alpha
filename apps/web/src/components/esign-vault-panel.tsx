@@ -305,7 +305,7 @@ export function EsignVaultPanel({ clientId }: { clientId: string }) {
                           className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white text-xs"
                         >
                           <PenTool className="mr-1.5 h-3.5 w-3.5" />
-                          Sign with Folio E-Sign
+                          Sign with Truepost E-Sign
                         </Button>
                       )}
                     </div>

@@ -245,7 +245,7 @@ export function PortalPage() {
   return (
     <div className="mx-auto max-w-md space-y-4 p-4">
       <div>
-        <p className="text-xs text-[var(--color-muted-foreground)]">Folio client portal</p>
+        <p className="text-xs text-[var(--color-muted-foreground)]">Truepost client portal</p>
         <h1 className="text-lg font-semibold">{home?.client.name ?? "Loading..."}</h1>
       </div>
 
