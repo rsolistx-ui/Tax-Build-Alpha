@@ -49,6 +49,7 @@ import { adminRulesRoutes } from "./routes/admin-rules";
 import { taxRadarAdvisoryRoutes } from "./routes/tax-radar-advisory";
 import { featureRequestRoutes } from "./routes/feature-requests";
 import { timeSavingsRoutes } from "./routes/time-savings";
+import { systemReliabilityRoutes } from "./routes/system-reliability";
 
 const app = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 
@@ -183,6 +184,7 @@ app.route("/api/admin/rules", adminRulesRoutes);
 app.route("/api/clients", taxRadarAdvisoryRoutes);
 app.route("/api/feature-requests", featureRequestRoutes);
 app.route("/api/time-savings", timeSavingsRoutes);
+app.route("/api/system", systemReliabilityRoutes);
 
 app.notFound((c) => c.json({ error: "Not found" }, 404));
 app.onError((err, c) => {

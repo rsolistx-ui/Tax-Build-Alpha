@@ -58,9 +58,14 @@ export function TimeSavingsTracker() {
     );
   }
 
-  if (!data) return null;
+  if (!data || typeof data.totalHoursSaved !== "number") return null;
 
-  const progressRefills = Math.min(100, (data.totalHoursSaved / 10) * 100);
+  const totalHoursSaved = Number(data.totalHoursSaved || 0);
+  const hoursFromReceipts = Number(data.hoursFromReceipts || 0);
+  const hoursFromBank = Number(data.hoursFromBank || 0);
+  const hoursFromChasing = Number(data.hoursFromChasing || 0);
+  const progressRefills = Math.min(100, (totalHoursSaved / 10) * 100);
+  const weeklyData = Array.isArray(data.weeklyData) ? data.weeklyData : [];
 
   return (
     <Card>
@@ -85,7 +90,7 @@ export function TimeSavingsTracker() {
           <div>
             <div className="flex items-center justify-between text-sm">
               <span className="text-[var(--color-muted-foreground)]">Weekly Progress</span>
-              <span className="font-medium">{data.totalHoursSaved.toFixed(1)} / 10 hours</span>
+              <span className="font-medium">{totalHoursSaved.toFixed(1)} / 10 hours</span>
             </div>
             <div className="mt-2 h-2 w-full rounded-full bg-[var(--color-muted)]">
               <div
@@ -93,7 +98,7 @@ export function TimeSavingsTracker() {
                 style={{ width: `${progressRefills}%` }}
               />
             </div>
-            {data.weeksToTarget !== null && (
+            {data.weeksToTarget !== null && data.weeksToTarget !== undefined && (
               <p className="mt-2 text-xs text-[var(--color-muted-foreground)]">
                 {data.weeksToTarget > 0
                   ? `${data.weeksToTarget} more weeks to reach 10+ hour target`
@@ -108,9 +113,9 @@ export function TimeSavingsTracker() {
                 <Receipt className="h-3 w-3" />
                 Receipt Processing
               </div>
-              <div className="mt-1 text-2xl font-semibold">{data.hoursFromReceipts.toFixed(1)}h</div>
+              <div className="mt-1 text-2xl font-semibold">{hoursFromReceipts.toFixed(1)}h</div>
               <div className="text-xs text-[var(--color-muted-foreground)]">
-                {((data.hoursFromReceipts / data.totalHoursSaved) * 100).toFixed(0)}% of savings
+                {totalHoursSaved > 0 ? ((hoursFromReceipts / totalHoursSaved) * 100).toFixed(0) : "0"}% of savings
               </div>
             </div>
 
@@ -119,9 +124,9 @@ export function TimeSavingsTracker() {
                 <Banknote className="h-3 w-3" />
                 Bank Statements
               </div>
-              <div className="mt-1 text-2xl font-semibold">{data.hoursFromBank.toFixed(1)}h</div>
+              <div className="mt-1 text-2xl font-semibold">{hoursFromBank.toFixed(1)}h</div>
               <div className="text-xs text-[var(--color-muted-foreground)]">
-                {((data.hoursFromBank / data.totalHoursSaved) * 100).toFixed(0)}% of savings
+                {totalHoursSaved > 0 ? ((hoursFromBank / totalHoursSaved) * 100).toFixed(0) : "0"}% of savings
               </div>
             </div>
 
@@ -130,14 +135,14 @@ export function TimeSavingsTracker() {
                 <Clock className="h-3 w-3" />
                 Client Chasing
               </div>
-              <div className="mt-1 text-2xl font-semibold">{data.hoursFromChasing.toFixed(1)}h</div>
+              <div className="mt-1 text-2xl font-semibold">{hoursFromChasing.toFixed(1)}h</div>
               <div className="text-xs text-[var(--color-muted-foreground)]">
-                {((data.hoursFromChasing / data.totalHoursSaved) * 100).toFixed(0)}% of savings
+                {totalHoursSaved > 0 ? ((hoursFromChasing / totalHoursSaved) * 100).toFixed(0) : "0"}% of savings
               </div>
             </div>
           </div>
 
-          {data.weeklyData.length > 0 && (
+          {weeklyData.length > 0 && (
             <div>
               <h4 className="mb-3 text-sm font-medium">Weekly Breakdown</h4>
               <div className="overflow-x-auto">
@@ -151,10 +156,10 @@ export function TimeSavingsTracker() {
                     </tr>
                   </thead>
                   <tbody>
-                    {data.weeklyData.map((week, i) => (
+                    {weeklyData.map((week, i) => (
                       <tr key={i} className="border-b border-[var(--color-border)] last:border-0">
                         <td className="px-4 py-2">{week.week}</td>
-                        <td className="px-4 py-2 text-right font-medium">{week.hoursSaved.toFixed(1)}h</td>
+                        <td className="px-4 py-2 text-right font-medium">{Number(week.hoursSaved || 0).toFixed(1)}h</td>
                         <td className="px-4 py-2 text-right text-[var(--color-muted-foreground)]">1.5h</td>
                         <td className="px-4 py-2 text-right">
                           <Badge

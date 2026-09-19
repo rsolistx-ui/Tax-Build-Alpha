@@ -2,16 +2,25 @@ import type { Db, DbStatement } from "../db";
 import { newId } from "../lib/id";
 
 export const AGENT_POLICY = {
-  autonomous: ["intake", "extraction", "matching_suggestion", "reminder_preparation", "request_draft", "work_queue_triage"],
+  autonomous: [
+    "intake",
+    "extraction",
+    "matching_suggestion",
+    "reminder_preparation",
+    "request_draft",
+    "work_queue_triage",
+    "system_diagnostics",
+    "self_healing_recovery",
+  ],
   approvalRequired: ["categorization", "filing", "bank_disposition", "client_sync", "tax_accounting_conclusion"],
 } as const;
 
 type AgentTaskInput = {
   firmId: string;
   clientId: string;
-  sourceType: "receipt" | "bank_import" | "client_request" | "gmail_message" | "engagement_letter";
+  sourceType: "receipt" | "bank_import" | "client_request" | "gmail_message" | "engagement_letter" | "system_diagnostic";
   sourceId: string;
-  agentName: "intake_specialist" | "reconciliation_specialist" | "practice_coordinator";
+  agentName: "intake_specialist" | "reconciliation_specialist" | "practice_coordinator" | "reliability_engineer";
   actionType: string;
   autonomy: "autonomous" | "approval_required";
   confidence?: number | null;
