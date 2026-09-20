@@ -56,6 +56,7 @@ import { difAuditRoutes } from "./routes/dif-audit";
 import { taxAdvisoryRoutes } from "./routes/tax-advisory";
 import { intercompanyRoutes } from "./routes/intercompany";
 import { directUploadSmsRoutes } from "./routes/direct-upload-sms";
+import { turnstileRoutes } from "./routes/turnstile";
 
 const app = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 
@@ -90,11 +91,12 @@ app.use("*", async (c, next) => {
     "Content-Security-Policy",
     [
       "default-src 'self'",
-      "script-src 'self'",
+      "script-src 'self' https://challenges.cloudflare.com",
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       "font-src 'self' https://fonts.gstatic.com",
       "img-src 'self' data:",
-      "connect-src 'self'",
+      "frame-src 'self' https://challenges.cloudflare.com",
+      "connect-src 'self' https://challenges.cloudflare.com",
       "object-src 'none'",
       "base-uri 'self'",
       "frame-ancestors 'none'",
@@ -128,6 +130,7 @@ app.get("/api/health", (c) =>
 app.post("/api/auth/sign-up/email", (c) =>
   c.json({ error: "Registration requires a beta invitation.", code: "BETA_REQUIRED" }, 403),
 );
+app.route("/api/auth/turnstile", turnstileRoutes);
 app.on(["POST", "GET"], "/api/auth/*", (c) => createAuth(c.env).handler(c.req.raw));
 
 app.route("/api/beta", betaRoutes);

@@ -44,6 +44,12 @@ export type Env = {
   /** Push notifications (Web Push + VAPID). Never hardcoded; set as Worker secrets. */
   VAPID_PUBLIC_KEY: string;
   VAPID_PRIVATE_KEY: string;
+  /** Cloudflare Turnstile bot challenge (site key & secret key) */
+  CF_TURNSTILE_SITE_KEY?: string;
+  CF_TURNSTILE_SECRET_KEY?: string;
+  /** Telegram bot alerts for system status, outages, and client requests */
+  TELEGRAM_BOT_TOKEN?: string;
+  TELEGRAM_CHAT_ID?: string;
   /** Optional Teller bank connectivity. Worker secret only. */
   TELLER_CLIENT_ID?: string;
   TELLER_CLIENT_SECRET?: string;

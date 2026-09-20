@@ -7,6 +7,7 @@ import { requireSession } from "../middleware/session";
 import { requireOwner } from "../middleware/beta";
 import { ensureFirm } from "../services/firm";
 import { EmailDispatcherService } from "../services/email-dispatcher";
+import { TelegramNotifierService } from "../services/telegram-notifier";
 
 export const adminRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 adminRoutes.use("*", requireSession);
@@ -178,3 +179,15 @@ adminRoutes.post("/report-daily", async (c) => {
   const [stats] = await db.query<any>(`SELECT COUNT(DISTINCT s.user_id) as active_users, COUNT(*) as sync_events FROM sync_events s WHERE s.firm_id=$1 AND s.ts > NOW() - INTERVAL '1 day'`, [firm.id]);
   return c.json({ report: stats ?? { active_users: 0, sync_events: 0 } });
 });
+
+/**
+ * Superadmin endpoint to test live Telegram connectivity
+ */
+adminRoutes.post("/telegram/test", async (c) => {
+  const telegram = new TelegramNotifierService(c.env);
+  const result = await telegram.sendMessage(
+    `🔔 <b>Truepost Telegram Alert Engine Online</b>\n\nAdministrator <code>${c.get("userEmail")}</code> triggered a manual test ping.\n\nAll real-time telemetry, system incidents, and client directives will be streamed to this channel.\n🕒 <code>${new Date().toLocaleString("en-US", { hour12: true })}</code>`
+  );
+  return c.json({ ok: result.success, simulated: result.simulated, error: result.error });
+});
+
