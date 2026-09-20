@@ -69,6 +69,9 @@ Worst of all: **legacy platforms are completely passive.** They record numbers, 
 - **Scale Capability:** Native multi-threaded streaming handles single documents up to 100MB in size without crashing or freezing the interface.
 - **The Client Magic Link:** Phyllis never has to chase clients for receipts. With one click, Truepost generates an encrypted, single-use camera portal link sent straight to the client's smartphone. The client taps the link, takes a picture of their paper receipt or invoice, and it uploads directly into Phyllis’s workspace. No passwords or app downloads required for the client.
 - **Native SMS Dispatch ($0 Cost):** Integrated with native operating system messaging and Windows Phone Link. Phyllis clicks "Send SMS" on her computer screen, and her PC pairs with her phone to dispatch the magic link directly over her cellular carrier with zero third-party messaging fees or carrier registration hurdles.
+- **Universal Cloud Storage & Synced Drive Compatibility (Dropbox, Google Drive, OneDrive, Apple iCloud, Box):**
+  - **Native Desktop Sync Ingestion:** Practitioners and bookkeepers can drag and drop entire statement folders or receipt batches directly from their synchronized **Dropbox**, **Google Drive**, **OneDrive**, or **iCloud** folders into Truepost's 100MB streaming intake zone. No manual exporting or conversion steps needed.
+  - **Eliminating "Client Cloud Fatigue":** Traditional accounting firms struggle because clients forget their Dropbox passwords or fail to organize Google Drive links. Truepost provides its own sovereign, encrypted cloud storage vault (Cloudflare R2), so clients simply tap their magic link and snap photos—freeing them and your firm from third-party cloud subscription fees.
 
 #### 2. Multimodal Vision OCR with Unreadable Receipt Triage
 - **What it does:** Reads crumpled, faded, thermal paper receipts, handwritten restaurant stubs, and digital PDF invoices with near-perfect line-item extraction.
@@ -197,6 +200,10 @@ To assist the graphic design and marketing department in producing social media 
 ### Visual Concept 3: "Frictionless Client Magic Link"
 - **Visual:** Split screen. On the left: Phyllis’s desktop workstation with a 1-click "Send SMS" confirmation. On the right: A modern smartphone displaying a zero-login camera interface capturing a paper receipt with instant green boundary detection.
 - **Headline Copy:** *"Never Chase a Paper Receipt Again. No client app downloads. No forgotten passwords. Just snap and sync."*
+
+### Visual Concept 4: "Universal Cloud Storage Freedom"
+- **Visual:** Sleek infographic showing Dropbox, Google Drive, OneDrive, and iCloud folder icons converging smoothly into Truepost's obsidian-and-emerald high-speed intake engine.
+- **Headline Copy:** *"Drop from Anywhere. Reconcile in One Place. Works natively with your Dropbox, Google Drive, and OneDrive files—without forcing clients into third-party cloud subscriptions."*
 
 ---
 
