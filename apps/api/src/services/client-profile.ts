@@ -54,3 +54,20 @@ export function validateProfileInput(input: Record<string, unknown>): ProfileVal
 export function mergeProfile(existing: Record<string, unknown>, incoming: ClientProfileInput): Record<string, unknown> {
   return { ...existing, ...incoming };
 }
+
+export async function getClientProfile(
+  db: { query: <T>(sql: string, params?: unknown[]) => Promise<T[]> },
+  clientId: string
+): Promise<{ entity_type?: string | null; industry?: string | null; state?: string | null; tax_year?: number | null } | null> {
+  const rows = await db.query<{
+    entity_type: string | null;
+    industry: string | null;
+    state: string | null;
+    tax_year: number | null;
+  }>(
+    `SELECT entity_type, industry, state, tax_year FROM client_profiles WHERE client_id = $1`,
+    [clientId]
+  );
+  return rows[0] || null;
+}
+
