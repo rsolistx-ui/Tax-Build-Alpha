@@ -23,9 +23,10 @@ export function getLlmProvider(env: Env): LlmProvider {
 
   if (mode === "workers-ai") {
     const providers: LlmProvider[] = [];
+    // Prioritize state-of-the-art multimodal vision (Gemini 2.0 Flash) when API key is provided
+    if (env.GEMINI_API_KEY) providers.push(createGeminiProvider(env.GEMINI_API_KEY));
     if (env.AI) providers.push(createWorkersAiProvider(env.AI));
     if (env.GROQ_API_KEY) providers.push(createGroqProvider(env.GROQ_API_KEY));
-    if (env.GEMINI_API_KEY) providers.push(createGeminiProvider(env.GEMINI_API_KEY));
     if (providers.length === 0) {
       throw new Error("Workers AI binding is missing and no Gemini fallback is configured");
     }

@@ -41,9 +41,16 @@ export function createGroqProvider(apiKey: string): LlmProvider {
 
 function receiptPrompt(filename: string, context?: ReceiptBusinessContext): string {
   const categories = context?.categories?.join(", ") || "use the best accounting category";
-  return `Extract this receipt as JSON only. Do not invent missing values. Itemize every purchased line separately. Use client category names when appropriate: ${categories}.
-{"date":"YYYY-MM-DD or null","merchant":"string or null","subtotal":number or null,"tax":number or null,"tip":number or null,"total":number or null,"currency":"USD","category":"string or null","confidence":0-1,"lineItems":[{"description":"string","quantity":number or null,"unitPrice":number or null,"amount":number or null,"category":"string or null","confidence":0-1}]}
-Filename: ${filename}`;
+  const rulesHint = context?.markdownRules
+    ? `\n\nApply the following professional categorization and tax bucketing rules strictly:\n${context.markdownRules}\n`
+    : "";
+
+  return `Extract this receipt as JSON only. Do not invent missing values. Itemize every purchased line separately. Use client category names when appropriate: ${categories}.${rulesHint}
+{"date":"YYYY-MM-DD or null","merchant":"string or null","paymentMethod":"credit_card | debit_card | cash | check | null","cardLast4":"4 digits or null","subtotal":number or null,"tax":number or null,"tip":number or null,"total":number or null,"currency":"USD","category":"string or null","confidence":0-1,"lineItems":[{"description":"string","quantity":number or null,"unitPrice":number or null,"amount":number or null,"category":"string or null","confidence":0-1}]}
+Filename: ${filename}
+Client: ${context?.clientName ?? "unknown"}
+Entity Type: ${context?.entityType ?? "unknown"}
+Industry: ${context?.industry ?? "unknown"}`;
 }
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {

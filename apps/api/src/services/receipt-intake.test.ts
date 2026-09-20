@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Db } from "../db";
 import type { Env } from "../env";
 import type { ClientRow } from "./clients";
-import { HttpError, ingestReceiptForClient, isSupportedReceiptUpload } from "./receipt-intake";
+import { HttpError, ingestReceiptForClient, isSupportedReceiptUpload, applyDeterministicMarkdownRules } from "./receipt-intake";
 
 const client: ClientRow = { id: "cli_1", firm_id: "firm_1", name: "Acme", legal_name: null, notes: null, email: null, phone: null, created_at: "now", updated_at: "now" };
 

@@ -128,7 +128,7 @@ export async function ingestReceiptForClient(
       isMultiPage,
     });
     const withMemory = await applyCorrectionMemory(db, client.id, extraction);
-    extraction = withMemory.extraction;
+    extraction = applyDeterministicMarkdownRules(withMemory.extraction, context.markdownRules);
     const rememberedCategory = withMemory.rememberedCategory;
     const validation = validateReceipt(extraction);
 
@@ -340,4 +340,65 @@ export function classifyDocument(file: File): "W-2" | "1099" | "return" | "state
   if (["png", "jpg", "jpeg", "heic"].includes(ext || "")) return "generic_receipt";
 
   return "generic_receipt";
+}
+
+export function applyDeterministicMarkdownRules(
+  extraction: ReceiptExtraction,
+  markdownRules?: string,
+): ReceiptExtraction {
+  if (!markdownRules || !extraction.merchant) return extraction;
+
+  const merchantLower = extraction.merchant.toLowerCase();
+  const total = extraction.total || 0;
+  let targetCategory: string | null = null;
+
+  // Split into individual rule blocks (separated by --- or ### Rule:)
+  const ruleBlocks = markdownRules.split(/(?=### Rule:)|(?=---\n)/);
+
+  for (const block of ruleBlocks) {
+    const bLower = block.toLowerCase();
+
+    // Check if this rule block pertains to the extracted merchant
+    const matchesMerchant =
+      (bLower.includes("home depot") && merchantLower.includes("home depot")) ||
+      (bLower.includes("lowe's") && merchantLower.includes("lowe")) ||
+      (bLower.includes("costco") && merchantLower.includes("costco")) ||
+      (bLower.includes("amazon") && merchantLower.includes("amazon")) ||
+      (bLower.includes("staples") && merchantLower.includes("staples")) ||
+      (bLower.includes("shell") && merchantLower.includes("shell")) ||
+      (bLower.includes("exxon") && merchantLower.includes("exxon")) ||
+      (bLower.includes("chevron") && merchantLower.includes("chevron")) ||
+      (bLower.includes("starbucks") && merchantLower.includes("starbucks")) ||
+      (bLower.includes("panera") && merchantLower.includes("panera"));
+
+    if (matchesMerchant) {
+      // Check for dollar threshold rules
+      const thresholdMatches = block.match(/(?:>|over|exceeds?)\s*\$?(\d+(?:\.\d{2})?)/i);
+      const underMatches = block.match(/(?:<|under|less than|<=)\s*\$?(\d+(?:\.\d{2})?)/i);
+
+      if (thresholdMatches && total > parseFloat(thresholdMatches[1])) {
+        const catMatch = block.match(/(?:>|over)\s*\$?\d+.*?(?:=>|->|to|into|as)\s*["']?([^"\n\r,]+)["']?/i);
+        if (catMatch) targetCategory = catMatch[1].trim();
+      } else if (underMatches && total <= parseFloat(underMatches[1])) {
+        const catMatch = block.match(/(?:<|under|<=)\s*\$?\d+.*?(?:=>|->|to|into|as)\s*["']?([^"\n\r,]+)["']?/i);
+        if (catMatch) targetCategory = catMatch[1].trim();
+      } else {
+        const generalCatMatch = block.match(/(?:category|classify|bucket|into)\s*(?:is|as|to)?\s*["']?([A-Za-z0-9 &/-]+)["']?/i);
+        if (generalCatMatch) targetCategory = generalCatMatch[1].trim();
+      }
+    }
+  }
+
+  if (targetCategory) {
+    return {
+      ...extraction,
+      category: targetCategory,
+      lineItems: extraction.lineItems.map((item) => ({
+        ...item,
+        category: item.category || targetCategory,
+      })),
+    };
+  }
+
+  return extraction;
 }
