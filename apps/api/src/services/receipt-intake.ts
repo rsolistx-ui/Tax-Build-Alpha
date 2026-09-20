@@ -237,12 +237,33 @@ export async function ingestReceiptForClient(
   } catch (error) {
     const requestId = crypto.randomUUID();
     const message = error instanceof Error ? error.message : "extract failed";
-    console.error(`[${requestId}] receipt extraction failed for ${receiptId}:`, error);
+    const validationPayload = JSON.stringify({
+      status: "fail",
+      checks: [
+        {
+          code: "OCR_UNREADABLE",
+          label: "AI Optical Character Recognition",
+          status: "fail",
+          message: `The AI could not automatically extract data from this file (${message}). Original evidence is saved; please enter details manually.`,
+        },
+      ],
+    });
     await db.transaction([
       { query: `UPDATE jobs SET status = 'failed', error = $1, updated_at = NOW() WHERE id = $2`, params: [message, jobId] },
-      { query: `UPDATE receipts SET status = 'failed', updated_at = NOW() WHERE id = $1`, params: [receiptId] },
+      {
+        query: `UPDATE receipts SET
+          status = 'review',
+          extracted_merchant = 'Unreadable / Blurry Receipt (Manual Review)',
+          extracted_total = 0,
+          confidence = 0,
+          validation_status = 'fail',
+          validation_json = $1::jsonb,
+          updated_at = NOW()
+          WHERE id = $2`,
+        params: [validationPayload, receiptId],
+      },
     ]);
-    return { ok: false, receiptId, jobId, error: "Receipt extraction failed", requestId };
+    return { ok: false, receiptId, jobId, error: "Receipt extraction failed; routed to review queue", requestId };
   }
 }
 

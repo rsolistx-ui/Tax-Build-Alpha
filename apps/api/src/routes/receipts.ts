@@ -113,7 +113,7 @@ receiptRoutes.get("/:clientId/review", async (c) => {
   if (!client) return c.json({ error: "Not found" }, 404);
 
   const receipts = await db.query<{ id: string }>(
-    `SELECT id FROM receipts WHERE client_id = $1 AND status = 'review' ORDER BY created_at DESC`,
+    `SELECT id FROM receipts WHERE client_id = $1 AND status IN ('review', 'failed') ORDER BY created_at DESC`,
     [client.id],
   );
   const detailed = await Promise.all(receipts.map((receipt) => getReceiptDetails(db, receipt.id, client.id)));
@@ -160,7 +160,7 @@ receiptRoutes.patch("/:clientId/receipts/:receiptId", async (c) => {
   const receiptId = c.req.param("receiptId");
   const before = await getReceiptDetails(db, receiptId, client.id);
   if (!before) return c.json({ error: "Not found" }, 404);
-  if (before.status !== "review") return c.json({ error: "Only receipts in review can be edited" }, 409);
+  if (before.status !== "review" && before.status !== "failed") return c.json({ error: "Only receipts in review can be edited" }, 409);
 
   const extraction: ReceiptExtraction = {
     date: body.date,
