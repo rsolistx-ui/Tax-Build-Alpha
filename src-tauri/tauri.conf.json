@@ -19,7 +19,7 @@
     "category": "Business",
     "shortDescription": "Verified double-entry bookkeeping and practice OS",
     "longDescription": "Truepost — verified double-entry bookkeeping and practice OS for modern firms. All data lives server-side; the EXE is a hardened WebView wrapper (Tauri/Rust, no Electron).",
-    "targets": ["nsis", "msi"],
+    "targets": "all",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

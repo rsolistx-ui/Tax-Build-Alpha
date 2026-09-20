@@ -1,0 +1,56 @@
+name: macos-build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - run: npm ci
+
+      - run: npm run build -w @folio/web
+
+      - name: Compute short commit SHA
+        id: vars
+        run: echo "sha_short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Build Tauri macOS beta (DMG and App)
+        run: npx tauri build --bundles app,dmg
+
+      - name: Collect macOS artifacts
+        id: collect
+        run: |
+          set -e
+          mkdir -p dist-macos
+          version="0.1.0"
+          sha="${{ steps.vars.outputs.sha_short }}"
+          name="Truepost-macos-${version}-${sha}"
+          echo "artifact_name=$name" >> "$GITHUB_OUTPUT"
+          find src-tauri/target/release/bundle -type f -name "*.dmg" -exec cp {} "dist-macos/${name}.dmg" \;
+          ls -la dist-macos
+
+      - name: Generate SHA256SUMS.txt
+        run: |
+          set -e
+          cd dist-macos
+          shasum -a 256 *.dmg > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.collect.outputs.artifact_name }}
+          path: dist-macos/*
+          if-no-files-found: error
