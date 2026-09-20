@@ -410,7 +410,7 @@ export function LoginPage() {
 
             <div className="mt-5 pt-4 border-t border-[var(--color-border)] text-center text-xs text-[var(--color-muted-foreground)] space-y-1">
               <p>Have an invitation link or token?</p>
-              <Link to="/redeem" className="text-emerald-600 dark:text-emerald-400 font-semibold hover:underline inline-flex items-center gap-1">
+              <Link to="/beta-redeem" className="text-emerald-600 dark:text-emerald-400 font-semibold hover:underline inline-flex items-center gap-1">
                 Activate Your Practice License <ArrowRight className="h-3 w-3" />
               </Link>
             </div>

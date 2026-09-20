@@ -24,7 +24,7 @@ const rememberedReceipt: ReviewReceipt = {
   validation_status: "pass",
   validation_json: { checks: [] },
   lineItems: [],
-  source_url: "/source",
+  source_url: "about:blank",
 };
 
 const categories = [

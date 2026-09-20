@@ -166,16 +166,11 @@ export function BetaRedeemPage() {
                 </Button>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <Button
-                    variant="outline"
-                    className="text-xs h-9 gap-1.5 justify-center border-[var(--color-border)]"
-                    onClick={() => {
-                      const desktopUrl = "https://folio-api.rsolistx.workers.dev/download/Truepost_0.1.0_x64-setup.exe";
-                      window.open(desktopUrl, "_blank");
-                    }}
-                  >
-                    <Download className="h-3.5 w-3.5 text-emerald-600" />
-                    Download Desktop App
+                  <Button asChild variant="outline" className="text-xs h-9 gap-1.5 justify-center border-[var(--color-border)]">
+                    <a href="/download/Truepost_0.1.0_x64-setup.exe" download>
+                      <Download className="h-3.5 w-3.5 text-emerald-600" />
+                      Download Desktop App
+                    </a>
                   </Button>
 
                   <Button

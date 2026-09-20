@@ -1,5 +1,5 @@
 use tauri::{WebviewUrl, WebviewWindowBuilder};
-use tauri_plugin_shell::ShellExt;
+use tauri_plugin_opener::OpenerExt;
 use url::Url;
 
 const ALLOWED_HOST: &str = "folio-api.rsolistx.workers.dev";
@@ -20,6 +20,14 @@ fn is_allowed_origin(url: &Url) -> bool {
         && url.password().is_none()
 }
 
+/// Links that leave the privileged webview may only be handed to the
+/// operating system's default handler for normal web/contact schemes.
+/// Rejecting opaque and executable schemes prevents a page navigation from
+/// becoming a local command-launch primitive.
+fn is_safe_external_url(url: &Url) -> bool {
+    matches!(url.scheme(), "https" | "http" | "mailto" | "tel")
+}
+
 /// Folio Beta is a client-only desktop wrapper: no DATABASE_URL, auth
 /// secret, Cloudflare credential, Neon credential, AI key, or
 /// administrative credential exists anywhere in this crate. The window
@@ -32,7 +40,7 @@ fn is_allowed_origin(url: &Url) -> bool {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let app_handle = app.handle().clone();
             let w = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(PRODUCTION_URL.parse().unwrap()))
@@ -43,7 +51,13 @@ pub fn run() {
                     if is_allowed_origin(url) {
                         return true;
                     }
-                    let _ = app_handle.shell().open(url.to_string(), None);
+                    if is_safe_external_url(url) {
+                        if let Err(error) = app_handle.opener().open_url(url.to_string(), None::<&str>) {
+                            eprintln!("Could not open external URL in the system browser: {error}");
+                        }
+                    } else {
+                        eprintln!("Blocked unsupported external navigation scheme: {}", url.scheme());
+                    }
                     false
                 })
                 .build()?;
@@ -103,5 +117,13 @@ mod tests {
     fn rejects_a_subdomain_or_lookalike_host() {
         assert!(!is_allowed_origin(&u("https://folio-api.rsolistx.workers.dev.evil.com/")));
         assert!(!is_allowed_origin(&u("https://evil-folio-api.rsolistx.workers.dev/")));
+    }
+
+    #[test]
+    fn only_allows_safe_external_schemes() {
+        assert!(is_safe_external_url(&u("https://example.com/")));
+        assert!(is_safe_external_url(&u("mailto:support@example.com")));
+        assert!(!is_safe_external_url(&u("file:///C:/Windows/System32/cmd.exe")));
+        assert!(!is_safe_external_url(&u("javascript:alert(1)")));
     }
 }

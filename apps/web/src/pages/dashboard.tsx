@@ -290,8 +290,19 @@ function ClientPickerModal({
   const [query, setQuery] = useState("");
   const filtered = clients.filter((c) => c.name.toLowerCase().includes(query.trim().toLowerCase()));
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 pt-24" onClick={onClose}>
-      <Card className="w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Choose a client"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 pt-24"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") onClose();
+      }}
+    >
+      <Card className="w-full max-w-sm">
         <CardContent className="space-y-3 p-4">
           <Input autoFocus placeholder="Search clients..." value={query} onChange={(e) => setQuery(e.target.value)} />
           <div className="max-h-72 space-y-1 overflow-y-auto">

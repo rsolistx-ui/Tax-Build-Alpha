@@ -18,3 +18,8 @@ apps/api/dist
 src-tauri/target
 src-tauri/gen
 *.exe
+# Local credential stores and exported access tokens must never be committed.
+.git-credentials
+.netrc
+*.token
+!apps/web/public/download/Truepost_0.1.0_x64-setup.exe

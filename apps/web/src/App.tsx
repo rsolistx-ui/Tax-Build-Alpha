@@ -21,6 +21,7 @@ export default function App() {
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/beta-redeem" element={<BetaRedeemPage />} />
+        <Route path="/redeem" element={<Navigate to="/beta-redeem" replace />} />
         <Route path="/portal" element={<PortalPage />} />
         <Route path="/signup" element={<SignupPage />} />
         <Route element={<ProtectedLayout />}>
