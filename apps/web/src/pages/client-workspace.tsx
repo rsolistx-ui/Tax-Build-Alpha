@@ -413,6 +413,7 @@ export function ClientWorkspacePage() {
                 <span>State: <strong>{profile?.state || "Not set"}</strong></span>
                 <span>Tax year: <strong>{profile?.tax_year || "Not set"}</strong></span>
                 <span>Basis: <strong>{profile?.accounting_basis || "Not set"}</strong></span>
+                <span>Phone: <strong>{profile?.profile?.contactPhone || (client as any)?.phone || "Not set"}</strong></span>
                 <span>Currency: <strong>{profile?.default_currency || "USD"}</strong></span>
               </div>
               <div className="flex items-center gap-2">
@@ -990,6 +991,7 @@ export function ClientWorkspacePage() {
       <MagicMobileLinkModal
         clientId={clientId}
         clientName={client?.name}
+        clientPhone={profile?.profile?.contactPhone || (client as any)?.phone || null}
         isOpen={mobileLinkOpen}
         onClose={() => setMobileLinkOpen(false)}
       />
