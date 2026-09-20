@@ -52,6 +52,7 @@ import { timeSavingsRoutes } from "./routes/time-savings";
 import { systemReliabilityRoutes } from "./routes/system-reliability";
 import { bankConnectivityRoutes } from "./routes/bank-connectivity";
 import { supportRoutes } from "./routes/support";
+import { difAuditRoutes } from "./routes/dif-audit";
 
 const app = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 
@@ -189,6 +190,7 @@ app.route("/api/time-savings", timeSavingsRoutes);
 app.route("/api/system", systemReliabilityRoutes);
 app.route("/api/bank-connectivity", bankConnectivityRoutes);
 app.route("/api/support", supportRoutes);
+app.route("/api/clients", difAuditRoutes);
 
 app.notFound((c) => c.json({ error: "Not found" }, 404));
 app.onError((err, c) => {
