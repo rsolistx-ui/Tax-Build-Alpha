@@ -51,7 +51,7 @@ import { CarryforwardPanel, StateModsPanel, M3Panel, PriorYearPanel, ExtensionsP
 import { convertHeicToJpeg, createCaptureInput } from "@/lib/image-utils";
 import { enqueueReceipt, drainQueue, registerSyncListener, queueCount } from "@/lib/offline-queue";
 import { subscribePush, unsubscribePush } from "@/lib/push";
-import { Bell, Wifi, Sparkles, Smartphone, Mic, CreditCard, Calendar as CalendarIcon, ShieldCheck, ShieldAlert } from "lucide-react";
+import { Bell, Wifi, Sparkles, Smartphone, Mic, CreditCard, Calendar as CalendarIcon, ShieldCheck, ShieldAlert, TrendingUp } from "lucide-react";
 import { TaxBridgePanel } from "@/components/tax-bridge-panel";
 import { MagicMobileLinkModal } from "@/components/magic-mobile-link-modal";
 import { VoiceRuleDictationModal } from "@/components/voice-rule-dictation-modal";
@@ -60,6 +60,7 @@ import { DeadlineCalendarPanel } from "@/components/deadline-calendar-panel";
 import { EsignVaultPanel } from "@/components/esign-vault-panel";
 import { ClientRuleRequestModal } from "@/components/client-rule-request-modal";
 import { DifAuditScannerPanel } from "@/components/dif-audit-scanner-panel";
+import { TaxAdvisoryRoadmapPanel } from "@/components/tax-advisory-roadmap-panel";
 import { getAdminToken } from "@/lib/api";
 
 type Category = {
@@ -119,9 +120,9 @@ type BatchFile = {
   error?: string;
 };
 
-type Tab = "overview" | "folders" | "upload" | "review" | "bank" | "pnl" | "tax-bridge" | "tax-readiness" | "dif-audit" | "workpaper" | "documents" | "esign" | "engagements" | "requests" | "export" | "agent" | "analytics" | "billing" | "deadlines";
+type Tab = "overview" | "folders" | "upload" | "review" | "bank" | "pnl" | "tax-bridge" | "tax-readiness" | "dif-audit" | "advisory" | "workpaper" | "documents" | "esign" | "engagements" | "requests" | "export" | "agent" | "analytics" | "billing" | "deadlines";
 
-const VALID_TABS: Tab[] = ["overview", "folders", "upload", "review", "bank", "pnl", "tax-bridge", "tax-readiness", "dif-audit", "workpaper", "documents", "esign", "engagements", "requests", "export", "agent", "analytics", "billing", "deadlines"];
+const VALID_TABS: Tab[] = ["overview", "folders", "upload", "review", "bank", "pnl", "tax-bridge", "tax-readiness", "dif-audit", "advisory", "workpaper", "documents", "esign", "engagements", "requests", "export", "agent", "analytics", "billing", "deadlines"];
 
 export function ClientWorkspacePage() {
   const { clientId = "" } = useParams();
@@ -351,6 +352,7 @@ export function ClientWorkspacePage() {
       { id: "pnl" as const, label: "P&L", icon: LineChart },
       { id: "tax-readiness" as const, label: "Tax readiness", icon: ClipboardList },
       { id: "dif-audit" as const, label: "IRS DIF Risk", icon: ShieldAlert },
+      { id: "advisory" as const, label: "Tax Advisory", icon: TrendingUp },
       { id: "workpaper" as const, label: "Workpaper", icon: FileSpreadsheet },
       { id: "documents" as const, label: "Documents", icon: FileStack },
       { id: "esign" as const, label: "E-Sign Vault", icon: ShieldCheck },
@@ -499,6 +501,10 @@ export function ClientWorkspacePage() {
 
       {tab === "dif-audit" ? (
         <DifAuditScannerPanel clientId={clientId} />
+      ) : null}
+
+      {tab === "advisory" ? (
+        <TaxAdvisoryRoadmapPanel clientId={clientId} />
       ) : null}
 
       {tab === "workpaper" ? (
