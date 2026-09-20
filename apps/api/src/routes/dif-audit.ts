@@ -6,6 +6,7 @@ import { requireSession } from "../middleware/session";
 import { requireActiveBeta } from "../middleware/beta";
 import { ensureFirm } from "../services/firm";
 import { getClient } from "../services/clients";
+import { getClientProfile } from "../services/client-profile";
 import { assemblePnlReport } from "../services/reporting";
 import { computeDifAuditReport, type DifInputData } from "../services/dif-audit-scanner";
 import { newId } from "../lib/id";
@@ -21,8 +22,10 @@ difAuditRoutes.get("/:clientId/dif-audit", async (c) => {
   const client = await getClient(db, clientId, firm.id);
   if (!client) return c.json({ error: "Client not found" }, 404);
 
+  const profile = await getClientProfile(db, clientId);
+
   // 1. Gather canonical P&L report
-  const pnl = await assemblePnlReport(db, client, null, null);
+  const pnl = await assemblePnlReport(db, clientId, null, null);
 
   // 2. Query underlying bank transactions for commingling and audit indicators
   const txRows = await db.query<{
@@ -44,14 +47,21 @@ difAuditRoutes.get("/:clientId/dif-audit", async (c) => {
     [clientId],
   );
 
+  const grossRevenue = "income" in pnl ? Number(pnl.income) : 0;
+  const totalExpenses = "expenses" in pnl ? Number(pnl.expenses) : 0;
+  const netProfit = "net" in pnl ? Number(pnl.net) : 0;
+  const expensesByCategory = "categorizedExpenses" in pnl
+    ? pnl.categorizedExpenses.map((cat: { category: string; total: number }) => ({
+        categoryName: cat.category,
+        amount: cat.total,
+      }))
+    : [];
+
   const inputData: DifInputData = {
-    grossRevenue: pnl.summary.totalIncome,
-    totalExpenses: pnl.summary.totalExpenses,
-    netProfit: pnl.summary.netProfit,
-    expensesByCategory: pnl.categories.map((cat) => ({
-      categoryName: cat.category,
-      amount: cat.expenses,
-    })),
+    grossRevenue,
+    totalExpenses,
+    netProfit,
+    expensesByCategory,
     transactions: txRows.map((t) => ({
       id: t.id,
       date: t.date,
@@ -61,7 +71,7 @@ difAuditRoutes.get("/:clientId/dif-audit", async (c) => {
       disposition: t.disposition,
       hasReceipt: Boolean(t.has_receipt),
     })),
-    industry: client.industry || null,
+    industry: profile?.industry || null,
   };
 
   const report = computeDifAuditReport(inputData);
@@ -70,8 +80,8 @@ difAuditRoutes.get("/:clientId/dif-audit", async (c) => {
     report,
     clientName: client.name,
     legalName: client.legal_name,
-    taxYear: client.tax_year || new Date().getFullYear(),
-    industry: client.industry || "General Small Business",
+    taxYear: profile?.tax_year || new Date().getFullYear(),
+    industry: profile?.industry || "General Small Business",
   });
 });
 
@@ -90,6 +100,7 @@ difAuditRoutes.post("/:clientId/dif-audit/memo", async (c) => {
   }
 
   // Record audit event in compliance vault
+  const profile = await getClientProfile(db, clientId);
   const eventId = newId("audit");
   await db.query(
     `INSERT INTO audit_events (id, firm_id, client_id, event, actor_user_id, metadata, created_at)
@@ -100,7 +111,7 @@ difAuditRoutes.post("/:clientId/dif-audit/memo", async (c) => {
       client.id,
       c.get("userId"),
       JSON.stringify({
-        taxYear: client.tax_year || new Date().getFullYear(),
+        taxYear: profile?.tax_year || new Date().getFullYear(),
         memoLength: memoText.length,
         certifiedBy: c.get("userName"),
       }),

@@ -20,7 +20,7 @@ describe("Turnstile Routes", () => {
   it("returns enabled=false when CF_TURNSTILE_SITE_KEY is not configured", async () => {
     const res = await turnstileRoutes.request("/config", {}, baseEnv);
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.enabled).toBe(false);
     expect(body.siteKey).toBeNull();
   });
@@ -32,7 +32,7 @@ describe("Turnstile Routes", () => {
     };
     const res = await turnstileRoutes.request("/config", {}, envWithTurnstile);
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.enabled).toBe(true);
     expect(body.siteKey).toBe("0x4AAAAAAAMockSiteKey");
   });
@@ -48,7 +48,7 @@ describe("Turnstile Routes", () => {
       baseEnv,
     );
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.success).toBe(true);
     expect(body.simulated).toBe(true);
   });
@@ -78,7 +78,7 @@ describe("Turnstile Routes", () => {
     );
 
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.success).toBe(true);
     expect(body.simulated).toBe(false);
   });
@@ -105,7 +105,7 @@ describe("Turnstile Routes", () => {
     );
 
     expect(res.status).toBe(403);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.success).toBe(false);
     expect(body.codes).toContain("invalid-input-response");
   });

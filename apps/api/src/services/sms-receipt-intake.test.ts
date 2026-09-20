@@ -19,8 +19,8 @@ describe("SmsReceiptIntakeService", () => {
     ];
 
     const db: Db = {
-      query: vi.fn(async () => mockClients),
-      transaction: vi.fn(async (s) => s.map(() => [])),
+      query: vi.fn(async () => mockClients) as any,
+      transaction: vi.fn(async (s) => s.map(() => [])) as any,
     };
     const env = { RECEIPTS: { put: vi.fn() } } as unknown as Env;
 
@@ -40,8 +40,8 @@ describe("SmsReceiptIntakeService", () => {
           return [{ id: "bt_123", description: "Home Depot #4401", amount: -145.2 }];
         }
         return [];
-      }),
-      transaction: vi.fn(async (s) => s.map(() => [])),
+      }) as any,
+      transaction: vi.fn(async (s) => s.map(() => [])) as any,
     };
     const mockR2Put = vi.fn(async () => {});
     const env = { RECEIPTS: { put: mockR2Put } } as unknown as Env;

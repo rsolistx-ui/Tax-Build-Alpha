@@ -3,12 +3,12 @@ import { IntercompanyMirrorService } from "./intercompany-mirror";
 import type { Db } from "../db";
 
 describe("IntercompanyMirrorService", () => {
-  function mockDb(queries: { [pattern: string]: any[] } = {}): Db {
+  function mockDb(queries: { [pattern: string]: any } = {}): Db {
     return {
       query: vi.fn(async (sql: string, params?: unknown[]) => {
         for (const [pattern, result] of Object.entries(queries)) {
           if (sql.includes(pattern)) {
-            return typeof result === "function" ? result(params) : result;
+            return typeof result === "function" ? (result as Function)(params) : result;
           }
         }
         return [];
