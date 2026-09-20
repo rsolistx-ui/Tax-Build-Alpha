@@ -55,6 +55,7 @@ import { supportRoutes } from "./routes/support";
 import { difAuditRoutes } from "./routes/dif-audit";
 import { taxAdvisoryRoutes } from "./routes/tax-advisory";
 import { intercompanyRoutes } from "./routes/intercompany";
+import { directUploadSmsRoutes } from "./routes/direct-upload-sms";
 
 const app = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 
@@ -195,6 +196,8 @@ app.route("/api/support", supportRoutes);
 app.route("/api/clients", difAuditRoutes);
 app.route("/api/clients", taxAdvisoryRoutes);
 app.route("/api/clients", intercompanyRoutes);
+app.route("/api/clients", directUploadSmsRoutes);
+app.route("/api", directUploadSmsRoutes);
 
 app.notFound((c) => c.json({ error: "Not found" }, 404));
 app.onError((err, c) => {

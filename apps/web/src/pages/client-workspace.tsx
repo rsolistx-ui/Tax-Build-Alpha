@@ -51,7 +51,7 @@ import { CarryforwardPanel, StateModsPanel, M3Panel, PriorYearPanel, ExtensionsP
 import { convertHeicToJpeg, createCaptureInput } from "@/lib/image-utils";
 import { enqueueReceipt, drainQueue, registerSyncListener, queueCount } from "@/lib/offline-queue";
 import { subscribePush, unsubscribePush } from "@/lib/push";
-import { Bell, Wifi, Sparkles, Smartphone, Mic, CreditCard, Calendar as CalendarIcon, ShieldCheck, ShieldAlert, TrendingUp, Network } from "lucide-react";
+import { Bell, Wifi, Sparkles, Smartphone, Mic, CreditCard, Calendar as CalendarIcon, ShieldCheck, ShieldAlert, TrendingUp, Network, Cloud } from "lucide-react";
 import { TaxBridgePanel } from "@/components/tax-bridge-panel";
 import { MagicMobileLinkModal } from "@/components/magic-mobile-link-modal";
 import { VoiceRuleDictationModal } from "@/components/voice-rule-dictation-modal";
@@ -62,6 +62,7 @@ import { ClientRuleRequestModal } from "@/components/client-rule-request-modal";
 import { DifAuditScannerPanel } from "@/components/dif-audit-scanner-panel";
 import { TaxAdvisoryRoadmapPanel } from "@/components/tax-advisory-roadmap-panel";
 import { IntercompanyMirrorPanel } from "@/components/intercompany-mirror-panel";
+import { DirectScaleUploadModal } from "@/components/direct-scale-upload-modal";
 import { getAdminToken } from "@/lib/api";
 
 type Category = {
@@ -159,6 +160,7 @@ export function ClientWorkspacePage() {
   const [mobileLinkOpen, setMobileLinkOpen] = useState(false);
   const [teachAiOpen, setTeachAiOpen] = useState(false);
   const [requestRuleOpen, setRequestRuleOpen] = useState(false);
+  const [scaleUploadOpen, setScaleUploadOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -440,6 +442,15 @@ export function ClientWorkspacePage() {
                   onClick={() => setMobileLinkOpen(true)}
                 >
                   <Smartphone className="h-3.5 w-3.5" /> Magic Phone Upload
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1.5 border-emerald-200 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-400"
+                  onClick={() => setScaleUploadOpen(true)}
+                  title="Direct Cloudflare R2 Streaming Upload (up to 100MB) and Inbound SMS Receipt Drop Intake"
+                >
+                  <Cloud className="h-3.5 w-3.5" /> Direct R2 &amp; SMS Intake
                 </Button>
                 <Button size="sm" variant="secondary" onClick={() => setEditingProfile(true)}>Edit</Button>
               </div>
@@ -997,6 +1008,17 @@ export function ClientWorkspacePage() {
         clientId={clientId}
         clientName={client?.name}
         onSubmitted={() => void load()}
+      />
+
+      <DirectScaleUploadModal
+        isOpen={scaleUploadOpen}
+        onClose={() => setScaleUploadOpen(false)}
+        clientId={clientId}
+        clientName={client?.name || "Workspace"}
+        clientPhone={profile?.profile?.contactPhone || null}
+        onUploadSuccess={() => {
+          void load();
+        }}
       />
     </div>
   );
