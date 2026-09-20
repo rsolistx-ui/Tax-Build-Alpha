@@ -1,5 +1,5 @@
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
-import { Bot, Building2, Calendar, ClipboardList, Clock, FolderKanban, Headphones, LayoutDashboard, Lightbulb, LogOut, Map, Sparkles, Users } from "lucide-react";
+import { Bot, Building2, Calendar, ClipboardList, Clock, FolderKanban, Headphones, LayoutDashboard, Lightbulb, LogOut, Map, Sparkles, Users, Search } from "lucide-react";
 import { useEffect, useState } from "react";
 import { authClient } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import { SupportConciergeModal } from "@/components/support-concierge-modal";
 import { VipOnboardingModal } from "@/components/vip-onboarding-modal";
 import { VoiceRuleDictationModal } from "@/components/voice-rule-dictation-modal";
 import { AccountingImportModal } from "@/components/accounting-import-modal";
+import { UniversalCommandPalette } from "@/components/universal-command-palette";
 
 export function AppShell({
   firmName,
@@ -31,6 +32,18 @@ export function AppShell({
   const [vipOnboardingOpen, setVipOnboardingOpen] = useState(false);
   const [accountingImportOpen, setAccountingImportOpen] = useState(false);
   const [voiceModalOpen, setVoiceModalOpen] = useState(false);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+
+  useEffect(() => {
+    function handleGlobalKeyDown(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setCommandPaletteOpen((prev) => !prev);
+      }
+    }
+    window.addEventListener("keydown", handleGlobalKeyDown);
+    return () => window.removeEventListener("keydown", handleGlobalKeyDown);
+  }, []);
 
   useEffect(() => {
     setTourOpen(shouldShowWelcomeTour());
@@ -145,6 +158,18 @@ export function AppShell({
             </nav>
           </div>
           <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setCommandPaletteOpen(true)}
+              className="inline-flex items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-muted)]/50 px-2.5 py-1 text-xs text-[var(--color-muted-foreground)] hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)] transition-colors"
+              title="Open Universal Command Palette (Ctrl+K)"
+            >
+              <Search className="h-3.5 w-3.5" />
+              <span className="hidden md:inline font-medium">Command Palette</span>
+              <kbd className="rounded border border-[var(--color-border)] bg-[var(--color-card)] px-1 py-0.2 font-mono text-[10px] text-[var(--color-muted-foreground)]">
+                Ctrl+K
+              </kbd>
+            </button>
             {firmName ? (
               <span className="hidden items-center gap-1.5 text-xs text-[var(--color-muted-foreground)] sm:inline-flex">
                 <Building2 className="h-3.5 w-3.5" />
@@ -230,6 +255,11 @@ export function AppShell({
       <VoiceRuleDictationModal
         isOpen={voiceModalOpen}
         onClose={() => setVoiceModalOpen(false)}
+      />
+      <UniversalCommandPalette
+        isOpen={commandPaletteOpen}
+        onClose={() => setCommandPaletteOpen(false)}
+        onOpenVoiceModal={() => setVoiceModalOpen(true)}
       />
     </div>
   );

@@ -12,6 +12,8 @@ import {
   Sparkles,
   Upload,
   X,
+  Zap,
+  Keyboard,
 } from "lucide-react";
 import { api, apiUrl } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
@@ -372,6 +374,68 @@ export function BankReconciliation({
     [transactions, filter],
   );
 
+  const [selectedTxnIndex, setSelectedTxnIndex] = useState<number>(0);
+  const [showCheatsheet, setShowCheatsheet] = useState<boolean>(false);
+
+  // Auto-clamp selected index when visible list changes
+  useEffect(() => {
+    if (selectedTxnIndex >= visibleTransactions.length) {
+      setSelectedTxnIndex(Math.max(0, visibleTransactions.length - 1));
+    }
+  }, [visibleTransactions.length, selectedTxnIndex]);
+
+  // Home-row warp-speed reconciler keyboard listener
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      const target = e.target as HTMLElement;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT")) {
+        return;
+      }
+
+      if (e.key === "j" || e.key === "ArrowDown") {
+        e.preventDefault();
+        setSelectedTxnIndex((prev) => {
+          const next = Math.min(prev + 1, Math.max(0, visibleTransactions.length - 1));
+          const el = document.getElementById(`bank-txn-${visibleTransactions[next]?.id}`);
+          el?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+          return next;
+        });
+      } else if (e.key === "k" || e.key === "ArrowUp") {
+        e.preventDefault();
+        setSelectedTxnIndex((prev) => {
+          const next = Math.max(0, prev - 1);
+          const el = document.getElementById(`bank-txn-${visibleTransactions[next]?.id}`);
+          el?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+          return next;
+        });
+      } else if (e.key.toLowerCase() === "a") {
+        const current = visibleTransactions[selectedTxnIndex];
+        if (current && current.suggestedReceipt && !decisionId) {
+          e.preventDefault();
+          void decide(current.id, "confirm");
+        }
+      } else if (e.key.toLowerCase() === "n") {
+        const current = visibleTransactions[selectedTxnIndex];
+        if (current && !decisionId && !isResolved(current)) {
+          e.preventDefault();
+          void decide(current.id, "no_receipt_required", { reason: "Routine electronic banking item / immaterial" });
+        }
+      } else if (e.key.toLowerCase() === "r") {
+        const current = visibleTransactions[selectedTxnIndex];
+        if (current && !decisionId && !isResolved(current)) {
+          e.preventDefault();
+          void requestFromClient(current.id, "receipt");
+        }
+      } else if (e.key === "?" || (e.shiftKey && e.key === "/")) {
+        e.preventDefault();
+        setShowCheatsheet((prev) => !prev);
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [visibleTransactions, selectedTxnIndex, decisionId]);
+
   return (
     <div className="space-y-4">
       <Card>
@@ -491,18 +555,44 @@ export function BankReconciliation({
           {message ? <p className="rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-800">{message}</p> : null}
           {error ? <p className="text-sm text-[var(--color-destructive)]">{error}</p> : null}
 
+          {/* Warp Speed Ergonomics Keyboard Bar */}
+          {visibleTransactions.length > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3 py-1.5 text-xs text-emerald-900 dark:text-emerald-200">
+              <div className="flex items-center gap-2">
+                <Zap className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+                <span className="font-semibold">Warp Speed Reconciler:</span>
+                <span className="hidden sm:inline text-[var(--color-muted-foreground)]">Home-row keyboard rapid processing</span>
+              </div>
+              <div className="flex items-center gap-1.5 font-mono text-[11px]">
+                <kbd className="rounded border border-[var(--color-border)] bg-[var(--color-card)] px-1.5 py-0.5 shadow-xs">J / K</kbd> Move
+                <kbd className="rounded border border-[var(--color-border)] bg-[var(--color-card)] px-1.5 py-0.5 shadow-xs ml-1">A</kbd> Approve
+                <kbd className="rounded border border-[var(--color-border)] bg-[var(--color-card)] px-1.5 py-0.5 shadow-xs ml-1">N</kbd> No Receipt
+                <kbd className="rounded border border-[var(--color-border)] bg-[var(--color-card)] px-1.5 py-0.5 shadow-xs ml-1">R</kbd> Request
+                <button
+                  type="button"
+                  onClick={() => setShowCheatsheet(true)}
+                  className="ml-2 underline font-sans text-emerald-700 dark:text-emerald-300 hover:text-emerald-900"
+                >
+                  [?] Cheatsheet
+                </button>
+              </div>
+            </div>
+          )}
+
           {transactions.length === 0 ? (
             <p className="text-sm text-[var(--color-muted-foreground)]">No bank transactions imported yet.</p>
           ) : visibleTransactions.length === 0 ? (
             <p className="text-sm text-[var(--color-muted-foreground)]">No transactions are in this queue.</p>
           ) : (
             <div className="space-y-2">
-              {visibleTransactions.map((transaction) => (
+              {visibleTransactions.map((transaction, index) => (
                 <div
                   key={transaction.id}
                   id={`bank-txn-${transaction.id}`}
+                  onClick={() => setSelectedTxnIndex(index)}
                   className={cn(
-                    "rounded-lg border p-4",
+                    "rounded-lg border p-4 transition-all cursor-pointer",
+                    index === selectedTxnIndex ? "ring-2 ring-emerald-500/80 bg-emerald-500/5 shadow-sm" : "",
                     transaction.id === focusTransactionId ? "border-[var(--color-primary)] bg-[var(--color-accent)]" : "border-[var(--color-border)]",
                   )}
                 >
@@ -693,6 +783,64 @@ export function BankReconciliation({
           )}
         </CardContent>
       </Card>
+
+      {/* Warp Speed Keyboard Shortcuts Cheatsheet Modal */}
+      {showCheatsheet && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-md rounded-xl border border-[var(--color-border)] bg-[var(--color-card)] p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-100">
+            <div className="flex items-center justify-between border-b border-[var(--color-border)] pb-3">
+              <h3 className="text-base font-bold text-[var(--color-foreground)] flex items-center gap-2">
+                <Keyboard className="h-5 w-5 text-emerald-600" />
+                Warp Speed Reconciler Hotkeys
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowCheatsheet(false)}
+                className="text-xs text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)]"
+              >
+                ✕ Close
+              </button>
+            </div>
+
+            <div className="space-y-2 text-xs">
+              <div className="flex items-center justify-between p-2 rounded-md bg-[var(--color-muted)]/50">
+                <span className="font-medium">Move Down / Next Transaction</span>
+                <kbd className="rounded border border-[var(--color-border)] bg-[var(--color-card)] px-2 py-0.5 font-mono font-bold">J or ↓</kbd>
+              </div>
+              <div className="flex items-center justify-between p-2 rounded-md bg-[var(--color-muted)]/50">
+                <span className="font-medium">Move Up / Previous Transaction</span>
+                <kbd className="rounded border border-[var(--color-border)] bg-[var(--color-card)] px-2 py-0.5 font-mono font-bold">K or ↑</kbd>
+              </div>
+              <div className="flex items-center justify-between p-2 rounded-md bg-[var(--color-muted)]/50">
+                <span className="font-medium">Confirm / Approve Matched Receipt</span>
+                <kbd className="rounded border border-[var(--color-border)] bg-[var(--color-card)] px-2 py-0.5 font-mono font-bold text-emerald-600">A</kbd>
+              </div>
+              <div className="flex items-center justify-between p-2 rounded-md bg-[var(--color-muted)]/50">
+                <span className="font-medium">Mark No Receipt Required</span>
+                <kbd className="rounded border border-[var(--color-border)] bg-[var(--color-card)] px-2 py-0.5 font-mono font-bold">N</kbd>
+              </div>
+              <div className="flex items-center justify-between p-2 rounded-md bg-[var(--color-muted)]/50">
+                <span className="font-medium">Request Receipt from Client</span>
+                <kbd className="rounded border border-[var(--color-border)] bg-[var(--color-card)] px-2 py-0.5 font-mono font-bold">R</kbd>
+              </div>
+              <div className="flex items-center justify-between p-2 rounded-md bg-[var(--color-muted)]/50">
+                <span className="font-medium">Universal Command Palette</span>
+                <kbd className="rounded border border-[var(--color-border)] bg-[var(--color-card)] px-2 py-0.5 font-mono font-bold">Ctrl + K</kbd>
+              </div>
+              <div className="flex items-center justify-between p-2 rounded-md bg-[var(--color-muted)]/50">
+                <span className="font-medium">Toggle This Cheatsheet</span>
+                <kbd className="rounded border border-[var(--color-border)] bg-[var(--color-card)] px-2 py-0.5 font-mono font-bold">?</kbd>
+              </div>
+            </div>
+
+            <div className="pt-2 text-center">
+              <Button size="sm" onClick={() => setShowCheatsheet(false)} className="w-full text-xs">
+                Got It
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
