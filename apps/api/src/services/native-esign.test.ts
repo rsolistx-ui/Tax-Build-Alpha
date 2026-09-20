@@ -98,6 +98,9 @@ describe("NativeEsignService (DocuSign/HelloSign Killer)", () => {
     expect(result.certificateId).toMatch(/^cert_/);
     expect(result.signedR2Key).toContain("signed-documents/firm_1/cli_1/doc_1-certified.pdf");
     expect(result.documentHash).toHaveLength(64);
+    const completedDigest = await crypto.subtle.digest("SHA-256", result.signedPdfBytes);
+    const completedHash = Array.from(new Uint8Array(completedDigest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    expect(result.documentHash).toBe(completedHash);
 
     // Verify PDF structure has added the certificate page (original 1 page -> now 2 pages)
     const signedDoc = await PDFDocument.load(result.signedPdfBytes);

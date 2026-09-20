@@ -47,7 +47,7 @@ export function NativeEsignModal({
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    ctx.strokeStyle = "#0f2347"; // Classic rich legal blue
+    ctx.strokeStyle = "#0f2347";
     ctx.lineWidth = 2.5;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
@@ -161,7 +161,7 @@ export function NativeEsignModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="native-esign-title">
       <Card className="relative w-full max-w-xl border-[var(--color-border)] bg-[var(--color-card)] shadow-2xl">
         <button
           onClick={onClose}
@@ -177,11 +177,11 @@ export function NativeEsignModal({
               <ShieldCheck className="h-5 w-5" />
             </div>
             <div>
-              <CardTitle className="text-base font-semibold">
-                Folio Cryptographic E-Sign Engine
+              <CardTitle id="native-esign-title" className="text-base font-semibold">
+                Folio In-House Document Signing
               </CardTitle>
               <CardDescription className="text-xs">
-                ESIGN Act (15 U.S.C. § 7001) & UETA Compliant · 100% Native Architecture ($0 / env)
+                For ordinary business documents. IRS Forms 8878 and 8879 require additional identity-verification controls and are unavailable here.
               </CardDescription>
             </div>
           </div>
@@ -192,10 +192,10 @@ export function NativeEsignModal({
             <div className="space-y-4 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-4 text-left">
               <div className="flex items-center gap-2 text-emerald-600">
                 <FileCheck2 className="h-5 w-5" />
-                <span className="font-semibold text-sm">Document Cryptographically Sealed</span>
+                <span className="font-semibold text-sm">Signed document recorded</span>
               </div>
               <p className="text-xs text-[var(--color-muted-foreground)]">
-                An unalterable Certificate of Completion & Audit Trail has been appended to the PDF and permanently archived.
+                A Certificate of Completion and the completed-document SHA-256 digest have been recorded with this signed PDF.
               </p>
               <div className="space-y-1.5 font-mono text-xs">
                 <div className="flex justify-between border-b border-[var(--color-border)]/60 pb-1">
@@ -211,7 +211,7 @@ export function NativeEsignModal({
                 <div className="flex justify-between pt-1">
                   <span className="text-[var(--color-muted-foreground)]">Status:</span>
                   <Badge className="border-emerald-500 text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30">
-                    Tamper-Evident Record Sealed
+                    Folio signing record
                   </Badge>
                 </div>
               </div>
@@ -235,7 +235,7 @@ export function NativeEsignModal({
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="text-xs font-medium text-[var(--color-foreground)]">
+                  <label htmlFor="native-esign-name" className="text-xs font-medium text-[var(--color-foreground)]">
                     Legal Full Name
                   </label>
                   <input
@@ -244,11 +244,12 @@ export function NativeEsignModal({
                     value={signerName}
                     onChange={(e) => setSignerName(e.target.value)}
                     placeholder="e.g. Eleanor Vance"
-                    className="h-9 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-3 text-sm focus:outline-none focus:ring-1 focus:ring-[var(--color-ring)]"
+                    id="native-esign-name"
+                    className="h-9 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-3 text-sm focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-xs font-medium text-[var(--color-foreground)]">
+                  <label htmlFor="native-esign-email" className="text-xs font-medium text-[var(--color-foreground)]">
                     Signer Email
                   </label>
                   <input
@@ -257,7 +258,8 @@ export function NativeEsignModal({
                     value={signerEmail}
                     onChange={(e) => setSignerEmail(e.target.value)}
                     placeholder="signer@example.com"
-                    className="h-9 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-3 text-sm focus:outline-none focus:ring-1 focus:ring-[var(--color-ring)]"
+                    id="native-esign-email"
+                    className="h-9 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-3 text-sm focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
                   />
                 </div>
               </div>

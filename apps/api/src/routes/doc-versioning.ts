@@ -131,7 +131,7 @@ docVersioningRoutes.post("/:clientId/signature-requests/:requestId/send", async 
   if (!req) return c.json({ error: "Signature request not found" }, 404);
   if (req.status !== "pending") return c.json({ error: `Request already ${req.status}` }, 400);
 
-  let sentVia: "docusign" | "local_stub" = "local_stub";
+  let sentVia: "docusign" = "docusign";
   let config: Awaited<ReturnType<typeof getValidDocuSignConfig>> = null;
   try {
     config = await getValidDocuSignConfig(db, firm.id);
@@ -139,7 +139,13 @@ docVersioningRoutes.post("/:clientId/signature-requests/:requestId/send", async 
     return c.json({ error: "DocuSign is configured but its access token could not be refreshed", details: error instanceof Error ? error.message : String(error) }, 502);
   }
 
-  if (config) {
+  if (!config) {
+    return c.json({
+      error: "External signature delivery is not configured for this firm. No request was sent; use Folio's in-house signing for an ordinary document or connect an approved provider.",
+    }, 409);
+  }
+
+  {
     const recipients = (req.recipients ?? []) as Array<{ email?: string; name?: string; roleName?: string; recipientId?: string }>;
     if (!recipients.length) return c.json({ error: "Signature request has no recipients" }, 400);
     if (recipients.some((r) => !r.email || !r.name)) return c.json({ error: "Every recipient needs an email and name to send for signature" }, 400);
@@ -247,6 +253,11 @@ docVersioningRoutes.post("/:clientId/signature-requests/:requestId/sign-native",
   );
   if (!req) return c.json({ error: "Signature request not found" }, 404);
   if (req.status === "signed") return c.json({ error: "Document is already signed" }, 400);
+  if (/^887(?:8|9)(?:[-\s]|$)/i.test(req.form_type ?? "")) {
+    return c.json({
+      error: "Native signing is not enabled for IRS Forms 8878 or 8879. Remote tax-signature authorization requires the IRS identity-verification, record, and retention controls before it can be offered.",
+    }, 409);
+  }
 
   const body = z.object({
     signatureType: z.enum(["drawn", "typed"]),

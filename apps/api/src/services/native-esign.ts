@@ -23,11 +23,10 @@ export interface StampedSignatureResult {
 }
 
 /**
- * Clean-Room Native E-Sign Engine:
- * Implements federal ESIGN Act (15 U.S.C. § 7001) and UETA standards.
+ * Native document-signing engine for non-IRS signature-authorisation documents.
  * 1. Takes the original document from storage.
  * 2. Stamps the signature on designated signature tabs.
- * 3. Appends a cryptographic "Certificate of Completion & Audit Trail" as an unalterable final page.
+ * 3. Appends a Certificate of Completion and writes the completed-document digest to the audit record.
  * 4. Computes SHA-256 cryptographic hashes before and after signature.
  */
 export class NativeEsignService {
@@ -44,6 +43,9 @@ export class NativeEsignService {
   ): Promise<StampedSignatureResult> {
     if (!submission.consentAgreed) {
       throw new Error("Signer must consent to electronic signature under 15 U.S.C. § 7001");
+    }
+    if (submission.signatureType === "drawn" && !submission.signatureData.startsWith("data:image/png;base64,")) {
+      throw new Error("Drawn signatures must be submitted as a PNG data URL");
     }
 
     const originalHash = await sha256Hex(originalPdfBytes.buffer as ArrayBuffer);
@@ -153,17 +155,20 @@ export class NativeEsignService {
     });
     cy -= 14;
 
-    // Cryptographic Checksums
+    // The original digest is embedded in the certificate. The digest of the
+    // completed PDF is calculated only after the PDF is finalised; embedding a
+    // document's own final hash would change that document and make the value
+    // unverifiable.
     printLine("CRYPTOGRAPHIC INTEGRITY VERIFICATION", { size: 10, useBold: true, gap: 14 });
     printLine(`Original Document SHA-256:`, { size: 8.5, useBold: true, gap: 10 });
     printLine(originalHash, { size: 8, font, color: rgb(0.25, 0.25, 0.25), gap: 14 });
 
-    const partialBytes = await doc.save();
-    const finalHash = await sha256Hex(partialBytes.buffer as ArrayBuffer);
-    printLine(`Final Certified Document SHA-256:`, { size: 8.5, useBold: true, gap: 10 });
-    printLine(finalHash, { size: 8, font, color: rgb(0.25, 0.25, 0.25), gap: 18 });
-
-    printLine("Status: COMPLETED · TAMPER-EVIDENT RECORD SEALED", {
+    printLine("Completed-document SHA-256 is retained with the signed audit event.", {
+      size: 8.5,
+      color: rgb(0.25, 0.25, 0.25),
+      gap: 18,
+    });
+    printLine("Status: COMPLETED · FOLIO SIGNATURE RECORD", {
       size: 9.5,
       useBold: true,
       color: rgb(0.05, 0.5, 0.25),
@@ -171,6 +176,7 @@ export class NativeEsignService {
     });
 
     const signedPdfBytes = await doc.save();
+    const finalHash = await sha256Hex(signedPdfBytes.buffer as ArrayBuffer);
     const signedR2Key = `signed-documents/${firmId}/${clientId}/${documentId}-certified.pdf`;
 
     // 3. Persist to Cloudflare R2

@@ -122,15 +122,13 @@ export function EngagementsPanel({ clientId, focusEngagementId }: { clientId: st
         `/api/clients/${clientId}/engagements/${engagementId}/letter`,
         { method: "POST", body: JSON.stringify({}) },
       );
-      const sendResult = await api<{ status: string; sentVia: "docusign" | "local_stub" }>(
+      await api<{ status: string; sentVia: "docusign" }>(
         `/api/clients/${clientId}/signature-requests/${request.id}/send`,
         { method: "POST" },
       );
       setLetterStatus((prev) => ({
         ...prev,
-        [engagementId]: sendResult.sentVia === "docusign"
-          ? "Sent for signature via DocuSign."
-          : "Marked sent (DocuSign is not configured for this firm yet — no envelope was actually created).",
+        [engagementId]: "Sent for signature via the connected provider.",
       }));
     } catch (e) {
       setLetterStatus((prev) => ({ ...prev, [engagementId]: e instanceof Error ? e.message : "Could not send the engagement letter." }));
@@ -268,7 +266,7 @@ export function EngagementsPanel({ clientId, focusEngagementId }: { clientId: st
                     className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs"
                   >
                     <PenTool className="h-3.5 w-3.5" />
-                    {letterBusy === eng.id ? "Preparing…" : "⚡ Sign with Truepost E-Sign"}
+                    {letterBusy === eng.id ? "Preparing…" : "Sign internally with Folio"}
                   </Button>
                   <Button
                     size="sm"
@@ -277,7 +275,7 @@ export function EngagementsPanel({ clientId, focusEngagementId }: { clientId: st
                     onClick={() => sendEngagementLetter(eng.id)}
                     className="text-xs"
                   >
-                    Send via Email/Portal
+                    External delivery (optional)
                   </Button>
                   {letterStatus[eng.id] ? (
                     <span className="text-xs text-[var(--color-muted-foreground)]">{letterStatus[eng.id]}</span>
