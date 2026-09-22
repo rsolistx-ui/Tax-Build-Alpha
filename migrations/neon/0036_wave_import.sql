@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS wave_import_jobs (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   rolled_back_at TIMESTAMPTZ,
-  created_by TEXT NOT NULL,
+  created_by TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_wave_import_firm ON wave_import_jobs(firm_id);
 CREATE INDEX IF NOT EXISTS idx_wave_import_status ON wave_import_jobs(status);
