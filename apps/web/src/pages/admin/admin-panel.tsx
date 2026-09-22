@@ -774,9 +774,9 @@ export function AdminPanel() {
               <CardContent className="p-3.5">
                 <div className="flex items-center justify-between text-xs text-[var(--color-muted-foreground)] mb-1">
                   <span>Rule Directives</span>
-                  <Sparkles className="h-3.5 w-3.5 text-purple-500" />
+                  <Sparkles className="h-3.5 w-3.5 text-amber-500" />
                 </div>
-                <div className="text-2xl font-bold tracking-tight text-purple-600 dark:text-purple-400">
+                <div className="text-2xl font-bold tracking-tight text-amber-600 dark:text-amber-400">
                   {metrics.ruleRequests}
                 </div>
                 <div className="text-[10px] text-[var(--color-muted-foreground)] mt-0.5">Pending compilation</div>

@@ -884,7 +884,7 @@ function DispositionPanel({
     <div className="mt-3 rounded-md border border-[var(--color-border)] p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm font-medium">Bookkeeping disposition</p>
-        <Badge className={transaction.disposition === "unclassified" ? "bg-amber-100 text-amber-800" : "bg-stone-200 text-stone-700"}>
+        <Badge className={transaction.disposition === "unclassified" ? "bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300" : "bg-stone-200 text-stone-700 dark:bg-stone-800 dark:text-stone-300"}>
           {DISPOSITION_LABELS[transaction.disposition] ?? transaction.disposition}
         </Badge>
       </div>

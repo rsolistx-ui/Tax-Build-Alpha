@@ -81,7 +81,7 @@ export function CarryforwardPanel({ clientId }: { clientId: string }) {
         )}
         {cfs.length === 0 ? <p className="text-sm text-[var(--color-muted-foreground)]">No carryforwards yet.</p> : cfs.map((c: any) => (
           <div key={c.id} className="flex flex-wrap items-center gap-2 rounded-md border border-[var(--color-border)] px-3 py-2 text-sm">
-            <Badge className={c.status === "fully_used" ? "bg-stone-200 text-stone-500" : c.tax_year_expires ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"}>{c.status}</Badge>
+            <Badge className={c.status === "fully_used" ? "bg-stone-200 text-stone-700 dark:bg-stone-800 dark:text-stone-300" : c.tax_year_expires ? "bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300" : "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300"}>{c.status}</Badge>
             <span className="font-medium">{c.carryforward_type}</span>
             <span className="text-[var(--color-muted-foreground)]">gen {c.tax_year_generated}{c.tax_year_expires ? ` · expires ${c.tax_year_expires}` : ""}</span>
             <span className="ml-auto font-mono">${Number(c.remaining_amount).toLocaleString()} / ${Number(c.original_amount).toLocaleString()}</span>
