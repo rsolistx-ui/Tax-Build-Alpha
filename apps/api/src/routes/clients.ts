@@ -171,6 +171,25 @@ clientRoutes.patch("/:id", async (c) => {
   return c.json({ client: updated });
 });
 
+const pipelineStatusSchema = z.object({
+  pipelineStatus: z.enum(["prospect", "engaged", "active", "inactive"]),
+});
+
+clientRoutes.patch("/:id/pipeline-status", async (c) => {
+  const body = pipelineStatusSchema.parse(await c.req.json());
+  const db = createDb(c.env);
+  const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
+  const updated = await clients.updateClientPipelineStatus(db, c.req.param("id"), firm.id, body.pipelineStatus);
+  if (!updated) return c.json({ error: "Not found" }, 404);
+
+  await db.query(
+    "INSERT INTO audit_events (id, client_id, actor_user_id, action, after_json) VALUES ($1, $2, $3, 'client_pipeline_status_changed', $4::jsonb)",
+    [newId("aud"), updated.id, c.get("userId"), { pipelineStatus: body.pipelineStatus }],
+  );
+
+  return c.json({ client: updated });
+});
+
 clientRoutes.delete("/:id", async (c) => {
   const db = createDb(c.env);
   const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));

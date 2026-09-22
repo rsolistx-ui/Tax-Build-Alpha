@@ -2,6 +2,8 @@ import type { Db } from "../db";
 import { DEFAULT_CATEGORIES } from "../lib/defaults";
 import { newId } from "../lib/id";
 
+export type PipelineStatus = "prospect" | "engaged" | "active" | "inactive";
+
 export type ClientRow = {
   id: string;
   firm_id: string;
@@ -10,13 +12,14 @@ export type ClientRow = {
   notes: string | null;
   email: string | null;
   phone: string | null;
+  pipeline_status: PipelineStatus;
   created_at: string;
   updated_at: string;
 };
 
 export async function listClients(db: Db, firmId: string): Promise<ClientRow[]> {
   return db.query<ClientRow>(
-    `SELECT id, firm_id, name, legal_name, notes, email, phone, created_at, updated_at
+    `SELECT id, firm_id, name, legal_name, notes, email, phone, pipeline_status, created_at, updated_at
      FROM clients WHERE firm_id = $1 ORDER BY LOWER(name)`,
     [firmId],
   );
@@ -76,6 +79,19 @@ export async function updateClient(
      SET name = $1, legal_name = $2, notes = $3, email = $4, phone = $5, updated_at = NOW()
      WHERE id = $6 AND firm_id = $7`,
     [name, legalName, notes, email, phone, clientId, firmId],
+  );
+  return getClient(db, clientId, firmId);
+}
+
+export async function updateClientPipelineStatus(
+  db: Db,
+  clientId: string,
+  firmId: string,
+  pipelineStatus: PipelineStatus,
+): Promise<ClientRow | undefined> {
+  await db.query(
+    `UPDATE clients SET pipeline_status = $1, updated_at = NOW() WHERE id = $2 AND firm_id = $3`,
+    [pipelineStatus, clientId, firmId],
   );
   return getClient(db, clientId, firmId);
 }

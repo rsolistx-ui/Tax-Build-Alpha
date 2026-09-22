@@ -40,6 +40,17 @@ const updateInvoiceSchema = z.object({
   memo: z.string().max(500).optional(),
 });
 
+const createBillingRateSchema = z.object({
+  clientId: z.string().optional(),
+  serviceType: z.string().max(100).optional(),
+  name: z.string().min(1).max(200),
+  rateType: z.enum(['hourly', 'fixed', 'retainer']),
+  rate: z.number().min(0),
+  currency: z.string().length(3).optional(),
+  effectiveFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  effectiveTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+});
+
 const createPaymentSchema = z.object({
   invoiceId: z.string().optional(),
   amount: z.number().positive(),
@@ -324,6 +335,45 @@ billingRoutes.get("/aging", async (c) => {
   const aging = await service.getAgingReport(firm.id);
 
   return c.json({ aging });
+});
+
+// Create a billing rate (firm-wide when clientId is omitted, client-specific otherwise)
+billingRoutes.post("/billing-rates", async (c) => {
+  const db = createDb(c.env);
+  const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
+
+  const body = createBillingRateSchema.parse(await c.req.json());
+  if (body.clientId) {
+    const client = await getClient(db, body.clientId, firm.id);
+    if (!client) return c.json({ error: "Client not found" }, 404);
+  }
+
+  const service = new BillingService(db);
+  const rate = await service.createBillingRate(firm.id, body);
+  return c.json({ rate }, 201);
+});
+
+// List active billing rates (firm-wide plus any rates for ?clientId=)
+billingRoutes.get("/billing-rates", async (c) => {
+  const db = createDb(c.env);
+  const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
+
+  const service = new BillingService(db);
+  const rates = await service.listBillingRates(firm.id, c.req.query("clientId"));
+  return c.json({ rates });
+});
+
+// Deactivate a billing rate
+billingRoutes.delete("/billing-rates/:rateId", async (c) => {
+  const db = createDb(c.env);
+  const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
+
+  const service = new BillingService(db);
+  const rate = await service.getBillingRate(c.req.param("rateId"));
+  if (!rate || rate.firmId !== firm.id) return c.json({ error: "Billing rate not found" }, 404);
+
+  await service.deactivateBillingRate(rate.id);
+  return c.json({ ok: true });
 });
 
 // Client statement PDF

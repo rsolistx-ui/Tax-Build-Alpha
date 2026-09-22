@@ -93,6 +93,17 @@ export interface CreatePaymentInput {
   notes?: string;
 }
 
+export interface CreateBillingRateInput {
+  clientId?: string | null;
+  serviceType?: string | null;
+  name: string;
+  rateType: 'hourly' | 'fixed' | 'retainer';
+  rate: number;
+  currency?: string;
+  effectiveFrom: string;
+  effectiveTo?: string | null;
+}
+
 function mapInvoice(row: any): Invoice {
   return {
     id: row.id,
@@ -127,6 +138,22 @@ function mapInvoiceLine(row: any): InvoiceLine {
     unitPrice: Number(row.unit_price),
     lineTotal: Number(row.line_total),
     sortOrder: row.sort_order,
+  };
+}
+
+function mapBillingRate(row: any): BillingRate {
+  return {
+    id: row.id,
+    firmId: row.firm_id,
+    clientId: row.client_id,
+    serviceType: row.service_type,
+    name: row.name,
+    rateType: row.rate_type,
+    rate: Number(row.rate),
+    currency: row.currency,
+    isActive: row.is_active,
+    effectiveFrom: row.effective_from,
+    effectiveTo: row.effective_to,
   };
 }
 
@@ -418,6 +445,39 @@ export class BillingService {
       over90: Number(r.over90),
       totalDue: Number(r.total_due),
     }));
+  }
+
+  async createBillingRate(firmId: string, input: CreateBillingRateInput): Promise<BillingRate> {
+    const id = newId("brt");
+    await this.db.query(
+      `INSERT INTO billing_rates (id, firm_id, client_id, service_type, name, rate_type, rate, currency, effective_from, effective_to)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+      [id, firmId, input.clientId ?? null, input.serviceType ?? null, input.name, input.rateType,
+       input.rate, input.currency ?? 'USD', input.effectiveFrom, input.effectiveTo ?? null],
+    );
+    const rate = await this.getBillingRate(id);
+    if (!rate) throw new Error("Billing rate not found after creation");
+    return rate;
+  }
+
+  async getBillingRate(id: string): Promise<BillingRate | null> {
+    const [row] = await this.db.query<any>(`SELECT * FROM billing_rates WHERE id = $1`, [id]);
+    return row ? mapBillingRate(row) : null;
+  }
+
+  /** Firm-wide rates plus any client-specific rates, most specific and most recent first. */
+  async listBillingRates(firmId: string, clientId?: string): Promise<BillingRate[]> {
+    const rows = await this.db.query<any>(
+      `SELECT * FROM billing_rates
+       WHERE firm_id = $1 AND is_active = TRUE AND (client_id IS NULL OR client_id = $2)
+       ORDER BY (client_id IS NOT NULL) DESC, effective_from DESC`,
+      [firmId, clientId ?? null],
+    );
+    return rows.map(mapBillingRate);
+  }
+
+  async deactivateBillingRate(id: string): Promise<void> {
+    await this.db.query(`UPDATE billing_rates SET is_active = FALSE, updated_at = NOW() WHERE id = $1`, [id]);
   }
 }
 

@@ -4,6 +4,7 @@ import { ReliabilityEngineerService } from "./reliability-engineer";
 import { handleReminderCron } from "./reminders";
 import { TelegramNotifierService } from "./telegram-notifier";
 import { prepareMorningBrief } from "./morning-brief";
+import { WorkflowTemplateService } from "./workflow-templates";
 
 export type ScheduledOperationsResult = {
   ranAt: string;
@@ -12,6 +13,8 @@ export type ScheduledOperationsResult = {
   diagnosticsHealthy: boolean;
   pendingProfessionalReviews: number;
   morningRecommendationsCreated: number;
+  workflowSubscriptionsProcessed: number;
+  workflowWorkItemsCreated: number;
   notification: "sent" | "not_configured" | "failed";
 };
 
@@ -33,6 +36,7 @@ export async function runScheduledOperations(env: Env): Promise<ScheduledOperati
   ]);
   const morningBriefs = await Promise.all(firms.map((firm) => prepareMorningBrief(db, firm.id)));
   const morningRecommendationsCreated = morningBriefs.reduce((total, brief) => total + brief.recommendationsCreated, 0);
+  const workflowSummary = await new WorkflowTemplateService(db).runDueSubscriptions();
 
   const pendingProfessionalReviews = Number(pending[0]?.count ?? 0);
   const notifier = new TelegramNotifierService(env);
@@ -50,6 +54,8 @@ export async function runScheduledOperations(env: Env): Promise<ScheduledOperati
     diagnosticsHealthy: diagnostics.overallHealthy,
     pendingProfessionalReviews,
     morningRecommendationsCreated,
+    workflowSubscriptionsProcessed: workflowSummary.subscriptionsProcessed,
+    workflowWorkItemsCreated: workflowSummary.workItemsCreated,
     notification: !configured ? "not_configured" : status.success ? "sent" : "failed",
   };
 }

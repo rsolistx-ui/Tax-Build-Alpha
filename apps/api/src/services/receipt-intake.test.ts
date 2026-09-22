@@ -4,7 +4,7 @@ import type { Env } from "../env";
 import type { ClientRow } from "./clients";
 import { HttpError, ingestReceiptForClient, isSupportedReceiptUpload, applyDeterministicMarkdownRules } from "./receipt-intake";
 
-const client: ClientRow = { id: "cli_1", firm_id: "firm_1", name: "Acme", legal_name: null, notes: null, email: null, phone: null, created_at: "now", updated_at: "now" };
+const client: ClientRow = { id: "cli_1", firm_id: "firm_1", name: "Acme", legal_name: null, notes: null, email: null, phone: null, pipeline_status: "active", created_at: "now", updated_at: "now" };
 
 const untouchedDb: Db = {
   async query<T>(): Promise<T[]> {
