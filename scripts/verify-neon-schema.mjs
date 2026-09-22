@@ -32,6 +32,26 @@ async function runQuery(query) {
 
 const checks = [
   {
+    label: "time_entries table (time tracking tied to invoicing, migration 0056)",
+    query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'time_entries'`,
+  },
+  {
+    label: "uq_time_entries_running_per_client one-running-timer-per-client guard (migration 0056)",
+    query: `SELECT 1 FROM pg_indexes WHERE indexname = 'uq_time_entries_running_per_client'`,
+  },
+  {
+    label: "clients.pipeline_status column (prospect/engaged/active/inactive, migration 0057)",
+    query: `SELECT 1 FROM information_schema.columns WHERE table_name = 'clients' AND column_name = 'pipeline_status'`,
+  },
+  {
+    label: "client_service_subscriptions table (recurring workflow templates, migration 0058)",
+    query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'client_service_subscriptions'`,
+  },
+  {
+    label: "idx_client_service_subscriptions_due cron lookup index (migration 0058)",
+    query: `SELECT 1 FROM pg_indexes WHERE indexname = 'idx_client_service_subscriptions_due'`,
+  },
+  {
     label: "stripe_connect_oauth_states one-time Standard-account authorization table (migration 0055)",
     query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'stripe_connect_oauth_states'`,
   },
