@@ -126,8 +126,10 @@ adminRulesRoutes.post("/", async (c) => {
   return c.json({
     rule,
     ticketNumber,
-    status: "queued_in_engineering_pipeline",
-    pipelineMessage: "Your rule directive has been queued and validated against IRC § regulations. Our engineering pipeline has applied the preliminary rule to your compliance engine.",
+    status: rule.isActive ? "active" : "draft",
+    pipelineMessage: rule.isActive
+      ? "This scoped rule is active for future suggestions. Review the simulator before applying it retroactively."
+      : "This rule was saved as a draft. Review it in the simulator before activation.",
   }, 201);
 });
 
@@ -139,9 +141,24 @@ adminRulesRoutes.patch("/:id", async (c) => {
   const body = updateRuleSchema.parse(await c.req.json());
 
   const service = new AdminRulesService(db);
-  const rule = await service.updateRule(firm.id, ruleId, body);
+  const rule = await service.updateRule(firm.id, ruleId, { ...body, actorUserId: c.get("userId") });
   if (!rule) return c.json({ error: "Rule not found" }, 404);
   return c.json({ rule });
+});
+
+adminRulesRoutes.get("/:id/history", async (c) => {
+  const db = createDb(c.env); const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
+  const service = new AdminRulesService(db); const rule = await service.getRule(firm.id, c.req.param("id"));
+  if (!rule) return c.json({ error: "Rule not found" }, 404);
+  return c.json({ versions: await service.listRuleVersions(firm.id, rule.id) });
+});
+
+adminRulesRoutes.post("/:id/rollback/:versionId", async (c) => {
+  const db = createDb(c.env); const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
+  const service = new AdminRulesService(db);
+  const rule = await service.rollbackRule(firm.id, c.req.param("id"), c.req.param("versionId"), c.get("userId"));
+  if (!rule) return c.json({ error: "Rule or historical version not found" }, 404);
+  return c.json({ rule, message: "Rule restored from the selected recorded version." });
 });
 
 // Delete rule

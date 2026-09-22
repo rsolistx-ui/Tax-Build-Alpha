@@ -50,6 +50,9 @@ export type Env = {
   /** Telegram bot alerts for system status, outages, and client requests */
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_CHAT_ID?: string;
+  /** Twilio inbound MMS webhook credentials. Both are required before the public SMS endpoint is enabled. */
+  TWILIO_ACCOUNT_SID?: string;
+  TWILIO_AUTH_TOKEN?: string;
   /** Optional Teller bank connectivity. Worker secret only. */
   TELLER_CLIENT_ID?: string;
   TELLER_CLIENT_SECRET?: string;
@@ -72,6 +75,8 @@ export type Env = {
   /** Optional Google Calendar integration. Worker secrets only. */
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
+  /** 32-byte base64url key used only to encrypt Gmail refresh tokens at rest. */
+  GMAIL_TOKEN_ENCRYPTION_KEY?: string;
   /** DocuSign integration (optional, gated). Worker secrets only. */
   DOCUSIGN_CLIENT_ID?: string;
   DOCUSIGN_CLIENT_SECRET?: string;
@@ -83,4 +88,10 @@ export type Env = {
   TAURI_SYNC_SECRET?: string;
   /** Internal: sync event hooks (append-only table). Never exposed to clients. */
   SYNC_TABLE_SECRET?: string;
+  /**
+   * Upper limit for any future supervisor-initiated model work. The
+   * supervisor itself is deterministic; it should only ask a model to
+   * interpret new, unresolved evidence rather than polling an empty queue.
+   */
+  SUPERVISOR_LLM_DAILY_LIMIT?: string;
 };

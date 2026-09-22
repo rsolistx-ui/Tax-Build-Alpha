@@ -10,7 +10,15 @@
 import ExcelJS from "exceljs";
 import { sanitizeSpreadsheetCell } from "./excel-safety";
 import type { PnlReport } from "./reporting";
-import type { BankLedgerRow, ReceiptEvidenceRow, OpenItemRow, ExcludedNonbusinessRow, TransactionReviewRow } from "./reporting";
+import type {
+  BankLedgerRow,
+  ReceiptEvidenceRow,
+  OpenItemRow,
+  ExcludedNonbusinessRow,
+  TransactionReviewRow,
+  ReceiptAwaitingReviewRow,
+  OutstandingClientRequestRow,
+} from "./reporting";
 
 export type WorkbookInput = {
   clientName: string;
@@ -25,6 +33,8 @@ export type WorkbookInput = {
   bankLedger: BankLedgerRow[];
   receiptEvidence: ReceiptEvidenceRow[];
   openItems: OpenItemRow[];
+  receiptsAwaitingReview: ReceiptAwaitingReviewRow[];
+  outstandingClientRequests: OutstandingClientRequestRow[];
   excludedNonbusiness: ExcludedNonbusinessRow[];
   transactionReview: TransactionReviewRow[];
 };
@@ -43,7 +53,7 @@ export async function buildWorkbook(input: WorkbookInput): Promise<Uint8Array> {
   workbook.creator = "Folio";
   workbook.created = new Date(input.generatedAt);
 
-  const isDraft = !input.pnl.completeness.isComplete;
+  const isDraft = !input.pnl.completeness.isComplete || input.receiptsAwaitingReview.length > 0 || input.outstandingClientRequests.length > 0;
   const reportStatus = isDraft ? "DRAFT - ITEMS REQUIRE PROFESSIONAL REVIEW" : "FINAL";
 
   const summary = workbook.addWorksheet("SUMMARY");
@@ -65,6 +75,8 @@ export async function buildWorkbook(input: WorkbookInput): Promise<Uint8Array> {
     ["Unresolved item count", input.pnl.completeness.unresolvedTriageCount],
     ["Uncategorized item count", input.pnl.completeness.uncategorizedCount],
     ["Currency conflict count", input.pnl.completeness.currencyConflictCount],
+    ["Receipt review queue count", input.receiptsAwaitingReview.length],
+    ["Outstanding client request count", input.outstandingClientRequests.length],
     ["Excluded receipt / nonbusiness count", input.pnl.excludedFiledReceiptCount + input.excludedNonbusiness.length],
   ];
   for (const [label, value] of summaryRows) {
@@ -72,7 +84,7 @@ export async function buildWorkbook(input: WorkbookInput): Promise<Uint8Array> {
   }
   if (isDraft) {
     const warningRow = summary.addRow([
-      "DRAFT - ITEMS REQUIRE PROFESSIONAL REVIEW: this period has unresolved items (see the Open Items sheet) and is not yet complete books.",
+      "DRAFT - ITEMS REQUIRE PROFESSIONAL REVIEW: this packet has unresolved ledger items, receipt-review items, or outstanding client requests. See the exception sheets before relying on it as complete books.",
     ]);
     warningRow.font = { bold: true, color: { argb: "FFB00020" } };
     summary.mergeCells(warningRow.number, 1, warningRow.number, 2);
@@ -130,6 +142,18 @@ export async function buildWorkbook(input: WorkbookInput): Promise<Uint8Array> {
   addHeaderRow(openItems, ["Kind", "Date", "Transaction Id", "Receipt Id", "Description", "Detail"]);
   for (const row of input.openItems) {
     openItems.addRow(safeRow([row.kind, row.date, row.transactionId, row.receiptId, row.description, row.detail]));
+  }
+
+  const reviewQueue = workbook.addWorksheet("RECEIPT REVIEW QUEUE");
+  addHeaderRow(reviewQueue, ["Receipt Date", "Merchant", "Filename", "Receipt Status", "Validation Status", "Review Note", "Receipt Id"]);
+  for (const row of input.receiptsAwaitingReview) {
+    reviewQueue.addRow(safeRow([row.date, row.merchant, row.filename, row.status, row.validationStatus, row.notes, row.receiptId]));
+  }
+
+  const requests = workbook.addWorksheet("OUTSTANDING CLIENT REQUESTS");
+  addHeaderRow(requests, ["Request Type", "Title", "Status", "Due At", "Created At", "Request Id"]);
+  for (const row of input.outstandingClientRequests) {
+    requests.addRow(safeRow([row.requestType, row.title, row.status, row.dueAt, row.createdAt, row.requestId]));
   }
 
   const excluded = workbook.addWorksheet("EXCLUDED - NONBUSINESS");

@@ -202,6 +202,24 @@ Truepost Operations Desk`;
     });
   }
 
+  /** Confirms a completed, scoped rule activation without overstating its reach. */
+  async sendScopedRuleActivationConfirmation(payload: {
+    ticketNumber: string;
+    userName: string;
+    userEmail: string;
+    clientName?: string | null;
+    summary: string;
+  }): Promise<EmailDispatchResult> {
+    const firstName = payload.userName.split(" ")[0] || "there";
+    const scope = payload.clientName || "the selected client";
+    const subject = `[Truepost Directive #${payload.ticketNumber}] Active for future intake`;
+    const text = `Hi ${firstName},\n\nYour requested rule for ${scope} has been validated and is now active for future receipt and transaction suggestions.\n\nWhat changed: ${payload.summary}\n\nNothing historical was changed automatically. Existing records remain available for your review.\n\nBest regards,\nTruepost Operations Desk`;
+    return this.sendOutboundEmail({
+      to: [payload.userEmail], subject, text, html: `<p>${text.replace(/\n/g, "<br />")}</p>`,
+      ticketNumber: payload.ticketNumber, draftReply: text,
+    });
+  }
+
   /**
    * Notifies the platform admin when a user dictates or requests a custom rule.
    */

@@ -29,15 +29,16 @@ describe("TelegramNotifierService", () => {
     vi.restoreAllMocks();
   });
 
-  it("safely falls back to mock simulation when Telegram credentials are not set", async () => {
+  it("reports that delivery was skipped when Telegram credentials are not set", async () => {
     const service = new TelegramNotifierService(unconfiguredEnv);
-    const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     const result = await service.sendMessage("Test message");
 
-    expect(result.success).toBe(true);
+    expect(result.success).toBe(false);
     expect(result.simulated).toBe(true);
-    expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("[Telegram:Mock]"));
+    expect(result.error).toBe("Telegram is not configured");
+    expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("Delivery skipped"));
   });
 
   it("sends formatted message via Telegram Bot API when configured", async () => {

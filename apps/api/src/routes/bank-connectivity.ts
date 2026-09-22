@@ -11,6 +11,7 @@ import { newId } from "../lib/id";
 import type { Db } from "../db";
 import { TellerBankFeedProvider } from "../services/teller-provider";
 import { PlaidBankFeedProvider } from "../services/plaid-provider";
+import { isVerifiedPlaidWebhook } from "../services/plaid-webhook-security";
 import {
   BankConnectionService,
   BankAccountService,
@@ -19,6 +20,7 @@ import {
   BankFeedProvider,
 } from "../services/bank-feed";
 import { FolioNativeAccountingProvider } from "../services/folio-native-accounting";
+import { BankFeedReviewProjectionService } from "../services/bank-feed-review-projection";
 import type {
   BankConnection,
   BankAccount,
@@ -27,6 +29,7 @@ import type {
 } from "../services/bank-feed";
 
 export const bankConnectivityRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
+export const bankWebhookRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 bankConnectivityRoutes.use("*", requireSession);
 bankConnectivityRoutes.use("*", requireActiveBeta);
 
@@ -87,7 +90,6 @@ bankConnectivityRoutes.post("/connect/link-token", async (c) => {
     countryCodes: z.array(z.string()).default(['US']),
     language: z.string().default('en'),
     redirectUri: z.string().url().optional(),
-    webhookUrl: z.string().url().optional(),
   }).parse(await c.req.json());
 
   const provider = getProvider(c.env, body.provider);
@@ -100,7 +102,7 @@ bankConnectivityRoutes.post("/connect/link-token", async (c) => {
     countryCodes: body.countryCodes,
     language: body.language,
     redirectUri: body.redirectUri,
-    webhookUrl: body.webhookUrl,
+    webhookUrl: body.provider === "plaid" && c.env.APP_ORIGIN ? `${new URL(c.env.APP_ORIGIN).origin}/api/bank-connectivity/webhooks/plaid` : undefined,
   });
 
   return c.json(result);
@@ -134,6 +136,7 @@ bankConnectivityRoutes.post("/connect/exchange", async (c) => {
     clientId: body.clientId,
     provider: body.provider,
     providerConnectionId: result.accessToken,
+    providerItemId: result.itemId,
     institutionId: institutionId,
     institutionName: institutionName,
     institutionLogo: institutionLogo,
@@ -246,12 +249,9 @@ bankConnectivityRoutes.patch("/accounts/:accountId", async (c) => {
     name: z.string().optional(),
   }).parse(await c.req.json());
 
-  const accountService = new BankAccountService(createDb(c.env));
-  const account = await accountService.getAccount(c.req.param("accountId"));
+  const accountService = new BankAccountService(db);
+  const account = await accountService.getAccountForFirm(c.req.param("accountId"), firm.id);
   if (!account) return c.json({ error: "Not found" }, 404);
-
-  // Verify ownership via connection
-  // (In production, you'd check the connection's firm_id)
 
   const updated = await accountService.updateAccount(c.req.param("accountId"), body);
   return c.json({ account: updated });
@@ -284,6 +284,7 @@ bankConnectivityRoutes.post("/connections/:connectionId/sync", async (c) => {
 
   let totalNew = 0;
   let totalUpdated = 0;
+  let totalQueuedForReview = 0;
   const errors: string[] = [];
 
   // Get accounts to sync
@@ -298,40 +299,36 @@ bankConnectivityRoutes.post("/connections/:connectionId/sync", async (c) => {
       const cursorService = new BankSyncCursorService(createDb(c.env));
       const cursor = await cursorService.getCursor(connection.id, account.id);
 
-      // Sync transactions
-      const result = await provider.syncTransactions(
-        connection.providerConnectionId,
-        cursor?.cursor,
-        {
-          startDate: body.startDate,
-          endDate: body.endDate,
-          accountIds: [account.providerAccountId],
-          count: body.count,
-        },
-      );
-
-      // Upsert transactions
-      const transactions = result.transactions.map(txn => ({
-        ...txn,
-        connectionId: connection.id,
-        accountId: account.id,
-      }));
-
-      const result2 = await new BankTransactionService(createDb(c.env)).upsertTransactions(connection.id, transactions);
-      totalNew += result2.inserted;
-      totalUpdated += result2.updated;
-
-      // Save cursor
-      if (result.nextCursor) {
-        const cursorService = new BankSyncCursorService(createDb(c.env));
-        await cursorService.saveCursor({
-          connectionId: connection.id,
-          accountId: account.id,
-          cursor: result.nextCursor,
-          lastSyncAt: new Date(),
-          lastSuccessfulSyncAt: new Date(),
-        });
+      // Drain every incremental page, not only the first page. The bounded
+      // limit prevents one oversized backfill from monopolizing a request.
+      let nextCursor = cursor?.cursor;
+      let hasMore = true;
+      let pages = 0;
+      while (hasMore && pages < 20) {
+        const result = await provider.syncTransactions(
+          connection.providerConnectionId,
+          nextCursor,
+          {
+            startDate: body.startDate,
+            endDate: body.endDate,
+            accountIds: [account.providerAccountId],
+            count: body.count,
+          },
+        );
+        const transactions = result.transactions.map(txn => ({ ...txn, connectionId: connection.id, accountId: account.id }));
+        const result2 = await new BankTransactionService(createDb(c.env)).upsertTransactions(connection.id, transactions);
+        totalNew += result2.inserted;
+        totalUpdated += result2.updated;
+        nextCursor = result.nextCursor;
+        hasMore = result.hasMore;
+        pages += 1;
+        if (nextCursor) {
+          await cursorService.saveCursor({ connectionId: connection.id, accountId: account.id, cursor: nextCursor, lastSyncAt: new Date(), lastSuccessfulSyncAt: new Date() });
+        } else if (hasMore) {
+          throw new Error("Bank provider reported more transactions without a continuation cursor");
+        }
       }
+      if (hasMore) throw new Error("Bank sync reached its 20-page safety limit; retry sync to continue");
 
     } catch (error) {
       errors.push(`Account ${account.name}: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -390,6 +387,18 @@ bankConnectivityRoutes.post("/connections/:connectionId/sync", async (c) => {
     }
   }
 
+  // Provider transactions are evidence, not posted accounting entries. Project
+  // settled items into the canonical client review queue only after the sync is
+  // complete, using a durable link to prevent replay duplicates.
+  if (connection.clientId) {
+    try {
+      totalQueuedForReview = await new BankFeedReviewProjectionService(db)
+        .projectConnection(connection.id, connection.clientId);
+    } catch (error) {
+      errors.push(`Review queue: ${error instanceof Error ? error.message : "Unable to queue transactions"}`);
+    }
+  }
+
   await connectionService.updateConnection(connection.id, {
     lastSyncAt: new Date(),
     lastSuccessfulSyncAt: errors.length === 0 ? new Date() : undefined,
@@ -400,6 +409,7 @@ bankConnectivityRoutes.post("/connections/:connectionId/sync", async (c) => {
   return c.json({
     newTransactions: totalNew,
     updatedTransactions: totalUpdated,
+    queuedForReview: totalQueuedForReview,
     removedTransactions: 0,
     errors,
   });
@@ -427,6 +437,30 @@ bankConnectivityRoutes.get("/connections/:connectionId/transactions", async (c) 
   const transactionService = new BankTransactionService(createDb(c.env));
   const transactions = await new BankTransactionService(createDb(c.env)).getTransactions(connection.id, query);
   return c.json({ transactions });
+});
+
+// Provider webhooks are mounted independently in index.ts before the
+// authenticated bank API. A provider cannot supply a user session, so every
+// accepted request performs provider-specific signature verification.
+bankWebhookRoutes.post("/plaid", async (c) => {
+  if (!c.env.PLAID_CLIENT_ID || !c.env.PLAID_CLIENT_SECRET) return c.json({ error: "Plaid is not configured" }, 503);
+  const body = await c.req.text();
+  const provider = getPlaidProvider(c.env);
+  const verified = await isVerifiedPlaidWebhook({ body, verificationHeader: c.req.header("plaid-verification"), provider });
+  if (!verified) return c.json({ error: "Invalid Plaid webhook signature" }, 401);
+  const event = z.object({ item_id: z.string(), webhook_code: z.string().optional() }).safeParse(JSON.parse(body));
+  if (!event.success) return c.json({ error: "Invalid Plaid webhook payload" }, 400);
+  const db = createDb(c.env);
+  const status = event.data.webhook_code === "ITEM_LOGIN_REQUIRED" ? "needs_reauth" : "active";
+  await db.query(
+    `UPDATE bank_connections
+     SET status=$1, last_sync_at=CASE WHEN $1='active' THEN NULL ELSE last_sync_at END,
+         error_message=CASE WHEN $1='needs_reauth' THEN 'Bank connection needs to be re-authenticated.' ELSE NULL END,
+         updated_at=NOW()
+     WHERE provider='plaid' AND provider_item_id=$2`,
+    [status, event.data.item_id],
+  );
+  return c.json({ ok: true });
 });
 
 // Webhook endpoints

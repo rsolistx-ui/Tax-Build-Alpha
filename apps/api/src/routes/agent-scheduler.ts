@@ -16,7 +16,6 @@ agentSchedulerRoutes.use("*", requireActiveBeta);
 const scheduleSchema = z.object({
   clientId: z.string(),
   triggers: z.array(z.string()).optional(),
-  autonomy: z.enum(["autonomous", "approval_required"]).default("approval_required"),
 });
 
 agentSchedulerRoutes.post("/run", async (c) => {
@@ -30,10 +29,10 @@ agentSchedulerRoutes.post("/run", async (c) => {
 
   // 1. Uncategorized receipts → categorization recommendation
   const uncategorized = await db.query<{ id: string; merchant: string | null }>(
-    `SELECT r.id, r.merchant FROM receipts r
+    `SELECT r.id, r.extracted_merchant AS merchant FROM receipts r
      LEFT JOIN agent_tasks at ON at.source_type = 'receipt' AND at.source_id = r.id
      AND at.action_type = 'categorization_review' AND at.status = 'awaiting_approval'
-     WHERE r.client_id = $1 AND r.category_id IS NULL AND at.id IS NULL
+     WHERE r.client_id = $1 AND r.status IN ('review', 'filed') AND r.category_id IS NULL AND at.id IS NULL
      LIMIT 20`,
     [client.id],
   );
@@ -49,7 +48,7 @@ agentSchedulerRoutes.post("/run", async (c) => {
       `INSERT INTO agent_tasks (id, client_id, firm_id, source_type, source_id, action_type, status, autonomy, recommendation_json, confidence, created_at)
        VALUES ($1, $2, $3, 'receipt', $4, 'categorization_review', 'awaiting_approval', $5, $6::jsonb, $7, NOW())
        ON CONFLICT DO NOTHING RETURNING id`,
-      [newId("agt"), client.id, firm.id, row.id, body.autonomy,
+      [newId("agt"), client.id, firm.id, row.id, "approval_required",
        JSON.stringify({ merchant, category: categoryHint || "uncategorized", reason: categoryHint ? `Merchant memory: ${categoryHint}` : `No prior category for ${merchant}` }),
        confidence],
     );
@@ -57,21 +56,24 @@ agentSchedulerRoutes.post("/run", async (c) => {
   }
 
   // 2. Missing evidence → client request recommendation
-  const missingEvidence = await db.query<{ id: string; bank_txn_id: string | null }>(
-    `SELECT r.id, r.bank_txn_id FROM receipts r
-     LEFT JOIN agent_tasks at ON at.source_type = 'receipt' AND at.source_id = r.id
+  const missingEvidence = await db.query<{ id: string }>(
+    `SELECT bt.id FROM bank_transactions bt
+     LEFT JOIN agent_tasks at ON at.source_type = 'bank_transaction' AND at.source_id = bt.id
      AND at.action_type = 'missing_evidence_review' AND at.status = 'awaiting_approval'
-     WHERE r.client_id = $1 AND r.bank_txn_id IS NULL AND at.id IS NULL
+     WHERE bt.client_id = $1
+       AND bt.matched_receipt_id IS NULL
+       AND bt.triage IN ('unmatched', 'needs_review', 'likely_match', 'receipt_pending')
+       AND at.id IS NULL
      LIMIT 10`,
     [client.id],
   );
   for (const row of missingEvidence) {
     const [task] = await db.query<{ id: string }>(
       `INSERT INTO agent_tasks (id, client_id, firm_id, source_type, source_id, action_type, status, autonomy, recommendation_json, confidence, created_at)
-       VALUES ($1, $2, $3, 'receipt', $4, 'missing_evidence_review', 'awaiting_approval', $5, $6::jsonb, $7, NOW())
+       VALUES ($1, $2, $3, 'bank_transaction', $4, 'missing_evidence_review', 'awaiting_approval', $5, $6::jsonb, $7, NOW())
        ON CONFLICT DO NOTHING RETURNING id`,
-      [newId("agt"), client.id, firm.id, row.id, body.autonomy,
-       JSON.stringify({ receiptId: row.id, reason: "Receipt has no linked bank transaction — may be missing evidence" }),
+      [newId("agt"), client.id, firm.id, row.id, "approval_required",
+       JSON.stringify({ transactionId: row.id, reason: "Bank activity has no linked receipt and needs professional review before any client request is prepared." }),
        0.8],
     );
     if (task) created.push({ id: task.id, action_type: "missing_evidence_review", source_type: "receipt" });
@@ -79,7 +81,7 @@ agentSchedulerRoutes.post("/run", async (c) => {
 
   // 3. Extension due → notification recommendation
   const extensionsDue = await db.query<{ id: string; due_date: string }>(
-    `SELECT id, due_date FROM extensions WHERE client_id = $1 AND status = 'pending' AND due_date <= NOW() + INTERVAL '7 days'`,
+    `SELECT id, due_date FROM tax_extensions WHERE client_id = $1 AND status = 'pending' AND due_date <= NOW() + INTERVAL '7 days'`,
     [client.id],
   );
   for (const ext of extensionsDue) {
@@ -87,7 +89,7 @@ agentSchedulerRoutes.post("/run", async (c) => {
       `INSERT INTO agent_tasks (id, client_id, firm_id, source_type, source_id, action_type, status, autonomy, recommendation_json, confidence, created_at)
        VALUES ($1, $2, $3, 'extension', $4, 'extension_due_review', 'awaiting_approval', $5, $6::jsonb, $7, NOW())
        ON CONFLICT DO NOTHING RETURNING id`,
-      [newId("agt"), client.id, firm.id, ext.id, body.autonomy,
+      [newId("agt"), client.id, firm.id, ext.id, "approval_required",
        JSON.stringify({ extensionId: ext.id, dueDate: ext.due_date, reason: `Extension due ${ext.due_date} — recommend filing extension` }),
        0.95],
     );
@@ -158,7 +160,8 @@ agentSchedulerRoutes.get("/status/:clientId", async (c) => {
     pendingRecommendations: Number(pending?.count || 0),
     approvedToday: Number(approved?.count || 0),
     learnedRules: Number(rules?.count || 0),
-    autonomous: true,
-    pipeline: "active",
+    approvalRequired: true,
+    scheduled: false,
+    pipeline: "manual_run_only",
   });
 });

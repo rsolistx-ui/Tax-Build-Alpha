@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { createDb } from "../db";
 import type { Env } from "../env";
-import { requirePortalToken, type PortalVars } from "../middleware/portal";
+import { requireActivePortalEntitlement, requirePortalToken, type PortalVars } from "../middleware/portal";
 import { getClient } from "../services/clients";
 import { listEngagementsWithProgress } from "../services/engagements";
 import { getClientRequest, listClientRequests, markRequestViewed, respondToRequest } from "../services/client-requests";
@@ -19,6 +19,7 @@ import { isSupportedUpload, isValidTaxYear, MAX_UPLOAD_BYTES, sha256Hex, suggest
  */
 export const portalRoutes = new Hono<{ Bindings: Env; Variables: PortalVars }>();
 portalRoutes.use("*", requirePortalToken);
+portalRoutes.use("*", requireActivePortalEntitlement);
 
 portalRoutes.get("/me", async (c) => {
   const db = createDb(c.env);

@@ -32,7 +32,7 @@ describe("SmsReceiptIntakeService", () => {
     expect(client?.name).toBe("Beacon Dental");
   });
 
-  it("ingests receipt into R2 and matches open bank transaction", async () => {
+  it("places an SMS receipt in the review queue without silently changing the books", async () => {
     const db: Db = {
       query: vi.fn(async (sql: string) => {
         if (sql.includes("FROM client_requests")) return [];
@@ -62,17 +62,17 @@ describe("SmsReceiptIntakeService", () => {
     });
 
     expect(result.success).toBe(true);
-    expect(result.matchedBankTransactionId).toBe("bt_123");
+    expect(result.matchedBankTransactionId).toBeNull();
+    expect(result.satisfiedRequestId).toBeNull();
     expect(mockR2Put).toHaveBeenCalledTimes(1);
     expect(db.transaction).toHaveBeenCalledTimes(1);
 
     const transactionStatements = (db.transaction as any).mock.calls[0][0];
     // Statement 1: insert receipt
     expect(transactionStatements[0].query).toContain("INSERT INTO receipts");
-    // Statement 2: update bank transaction
-    expect(transactionStatements[1].query).toContain("UPDATE bank_transactions");
-    expect(transactionStatements[1].params[2]).toBe("bt_123");
-    // Statement 3: insert audit event
-    expect(transactionStatements[2].query).toContain("INSERT INTO audit_events");
+    expect(transactionStatements[0].query).toContain("'review'");
+    expect(transactionStatements).toHaveLength(2);
+    // Statement 2: immutable audit event, not an automatic bank/request update.
+    expect(transactionStatements[1].query).toContain("INSERT INTO audit_events");
   });
 });

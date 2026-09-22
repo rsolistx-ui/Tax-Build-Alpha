@@ -30,17 +30,20 @@ import { taxWorkpaperRoutes } from "./routes/tax-workpapers";
 import { taxOrganizerRoutes } from "./routes/tax-organizer";
 import { taxExtendedRoutes } from "./routes/tax-extended";
 import { docVersioningRoutes } from "./routes/doc-versioning";
+import { publicSigningRoutes } from "./routes/public-signing";
 import { signedDocumentRoutes } from "./routes/signed-documents";
 import { engagementLetterRoutes } from "./routes/engagement-letters";
 import { taxWorkbenchRoutes } from "./routes/tax-workbench";
 import { returnEngineRoutes } from "./routes/return-engine";
 import { docuSignRoutes } from "./routes/docu-sign";
 import { gmailRoutes } from "./routes/gmail";
+import { gmailOAuthRoutes } from "./routes/gmail-oauth";
 import { billingRoutes } from "./routes/billing";
 import { deadlineCalendarRoutes } from "./routes/deadline-calendar";
 import { quickbooksRoutes } from "./routes/quickbooks";
 import { accountingRoutes } from "./routes/accounting";
 import { stripeRoutes } from "./routes/stripe";
+import { stripeOAuthRoutes } from "./routes/stripe-oauth";
 import { googleCalendarRoutes } from "./routes/google-calendar";
 import { waveImportRoutes } from "./routes/wave-import";
 import { estimatesRoutes } from "./routes/estimates";
@@ -50,13 +53,16 @@ import { taxRadarAdvisoryRoutes } from "./routes/tax-radar-advisory";
 import { featureRequestRoutes } from "./routes/feature-requests";
 import { timeSavingsRoutes } from "./routes/time-savings";
 import { systemReliabilityRoutes } from "./routes/system-reliability";
-import { bankConnectivityRoutes } from "./routes/bank-connectivity";
+import { bankConnectivityRoutes, bankWebhookRoutes } from "./routes/bank-connectivity";
 import { supportRoutes } from "./routes/support";
 import { difAuditRoutes } from "./routes/dif-audit";
 import { taxAdvisoryRoutes } from "./routes/tax-advisory";
 import { intercompanyRoutes } from "./routes/intercompany";
 import { directUploadSmsRoutes } from "./routes/direct-upload-sms";
 import { turnstileRoutes } from "./routes/turnstile";
+import { runScheduledOperations } from "./services/scheduled-operations";
+import { runSupervisorHeartbeat } from "./services/supervisor-heartbeat";
+import { runBankFeedHeartbeat } from "./services/bank-feed-heartbeat";
 
 const app = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 
@@ -71,7 +77,10 @@ app.use(
       ].filter(Boolean));
       return allowed.has(origin) ? origin : c.env.APP_ORIGIN || "http://localhost:5173";
     },
-    allowHeaders: ["Content-Type", "Authorization"],
+    // The token is accepted only by owner routes after a real session check;
+    // listing it here permits the browser's preflight without making it a
+    // substitute for authentication.
+    allowHeaders: ["Content-Type", "Authorization", "X-Admin-Token"],
      allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     credentials: true,
   }),
@@ -91,11 +100,11 @@ app.use("*", async (c, next) => {
     "Content-Security-Policy",
     [
       "default-src 'self'",
-      "script-src 'self' https://challenges.cloudflare.com",
+      "script-src 'self' https://challenges.cloudflare.com https://cdn.plaid.com",
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       "font-src 'self' https://fonts.gstatic.com",
-      "img-src 'self' data:",
-      "frame-src 'self' https://challenges.cloudflare.com",
+      "img-src 'self' data: https://cdn.plaid.com",
+      "frame-src 'self' https://challenges.cloudflare.com https://cdn.plaid.com",
       "connect-src 'self' https://challenges.cloudflare.com",
       "object-src 'none'",
       "base-uri 'self'",
@@ -170,17 +179,20 @@ app.route("/api/clients", taxWorkpaperRoutes);
 app.route("/api/clients", taxOrganizerRoutes);
 app.route("/api/clients", taxExtendedRoutes);
 app.route("/api/clients", docVersioningRoutes);
+app.route("/api/signing", publicSigningRoutes);
 app.route("/api/clients", engagementLetterRoutes);
 app.route("/api/clients", taxWorkbenchRoutes);
 app.route("/api/clients", returnEngineRoutes);
 import { pushRoutes } from "./routes/push";
 import { feedbackRoutes } from "./routes/feedback";
 app.route("/api/docu-sign", docuSignRoutes);
+app.route("/api/gmail/oauth", gmailOAuthRoutes);
 app.route("/api/gmail", gmailRoutes);
 app.route("/api/billing", billingRoutes);
 app.route("/api/calendar", deadlineCalendarRoutes);
 app.route("/api/quickbooks", quickbooksRoutes);
 app.route("/api/accounting", accountingRoutes);
+app.route("/api/stripe/oauth", stripeOAuthRoutes);
 app.route("/api/stripe", stripeRoutes);
 app.route("/api/google-calendar", googleCalendarRoutes);
 app.route("/api/wave-import", waveImportRoutes);
@@ -194,6 +206,7 @@ app.route("/api/clients", taxRadarAdvisoryRoutes);
 app.route("/api/feature-requests", featureRequestRoutes);
 app.route("/api/time-savings", timeSavingsRoutes);
 app.route("/api/system", systemReliabilityRoutes);
+app.route("/api/bank-connectivity/webhooks", bankWebhookRoutes);
 app.route("/api/bank-connectivity", bankConnectivityRoutes);
 app.route("/api/support", supportRoutes);
 app.route("/api/clients", difAuditRoutes);
@@ -214,4 +227,21 @@ app.onError((err, c) => {
   return c.json(body, status);
 });
 
-export default app;
+const worker = Object.assign(app, {
+  scheduled(controller: ScheduledController, env: Env, executionCtx: ExecutionContext) {
+    const operation = controller.cron === "*/30 * * * *"
+      ? Promise.allSettled([runSupervisorHeartbeat(env), runBankFeedHeartbeat(env)]).then((results) => {
+          for (const result of results) {
+            if (result.status === "rejected") console.error("[scheduled-half-hourly] task failed", result.reason);
+          }
+        })
+      : runScheduledOperations(env);
+    executionCtx.waitUntil(
+      operation.catch((error) => {
+        console.error("[scheduled-operations]", { cron: controller.cron, error });
+      }),
+    );
+  },
+});
+
+export default worker;

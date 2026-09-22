@@ -18,7 +18,7 @@ export const AGENT_POLICY = {
 type AgentTaskInput = {
   firmId: string;
   clientId: string;
-  sourceType: "receipt" | "bank_import" | "client_request" | "gmail_message" | "engagement_letter" | "system_diagnostic";
+  sourceType: "receipt" | "bank_import" | "bank_transaction" | "client_request" | "gmail_message" | "engagement_letter" | "extension" | "system_diagnostic";
   sourceId: string;
   agentName: "intake_specialist" | "reconciliation_specialist" | "practice_coordinator" | "reliability_engineer";
   actionType: string;

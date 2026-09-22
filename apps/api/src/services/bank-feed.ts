@@ -6,6 +6,7 @@ export interface BankConnection {
   clientId?: string; // nullable: firm-level connections
   provider: 'plaid' | 'finicity' | 'mx' | 'akoya' | 'teller';
   providerConnectionId: string; // Plaid's access_token, Finicity's accountId, etc.
+  providerItemId?: string;
   institutionId: string;
   institutionName: string;
   institutionLogo?: string;
@@ -193,9 +194,9 @@ export class BankConnectionService {
     const now = new Date();
     const providerConnectionId = await encryptToken(connection.providerConnectionId, this.db);
     await this.db.query(
-      `INSERT INTO bank_connections (id, firm_id, client_id, provider, provider_connection_id, institution_id, institution_name, institution_logo, status, last_sync_at, last_successful_sync_at, error_message, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())`,
-      [id, connection.firmId, connection.clientId ?? null, connection.provider, providerConnectionId,
+      `INSERT INTO bank_connections (id, firm_id, client_id, provider, provider_connection_id, provider_item_id, institution_id, institution_name, institution_logo, status, last_sync_at, last_successful_sync_at, error_message, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW())`,
+      [id, connection.firmId, connection.clientId ?? null, connection.provider, providerConnectionId, connection.providerItemId ?? null,
        connection.institutionId, connection.institutionName, connection.institutionLogo ?? null,
        connection.status, connection.lastSyncAt?.toISOString() ?? null,
        connection.lastSuccessfulSyncAt?.toISOString() ?? null, connection.errorMessage ?? null],
@@ -264,6 +265,7 @@ export class BankConnectionService {
       clientId: row.client_id,
       provider: row.provider,
       providerConnectionId: decryptedId,
+      providerItemId: row.provider_item_id ?? undefined,
       institutionId: row.institution_id,
       institutionName: row.institution_name,
       institutionLogo: row.institution_logo,
@@ -327,23 +329,37 @@ export class BankAccountService {
     return row ? this.mapAccount(row) : null;
   }
 
+  async getAccountForFirm(id: string, firmId: string): Promise<BankAccount | null> {
+    const [row] = await this.db.query<any>(
+      `SELECT a.* FROM bank_accounts a
+       JOIN bank_connections c ON c.id = a.connection_id
+       WHERE a.id = $1 AND c.firm_id = $2`,
+      [id, firmId],
+    );
+    return row ? this.mapAccount(row) : null;
+  }
+
   async updateAccount(id: string, patch: Partial<BankAccount>): Promise<BankAccount | null> {
+    const allowed: Array<[keyof BankAccount, string]> = [
+      ["isVisible", "is_visible"],
+      ["status", "status"],
+      ["name", "name"],
+    ];
     const sets: string[] = [];
-    const params: any[] = [id];
-    let idx = 2;
-    for (const [key, value] of Object.entries(patch)) {
-      if (value !== undefined && key !== 'id' && key !== 'createdAt') {
-        const col = key.replace(/([A-Z])/g, '_$1').toLowerCase();
-        params.push(value instanceof Date ? value.toISOString() : value);
-        const colName = key.replace(/([A-Z])/g, '_$1').toLowerCase();
-        // Build SET clause - need to track position
+    const params: unknown[] = [id];
+    for (const [key, column] of allowed) {
+      if (patch[key] !== undefined) {
+        sets.push(`${column} = $${params.length + 1}`);
+        params.push(patch[key]);
       }
     }
-    // Simplified: just fetch and update
-    const [existing] = await this.db.query<any>(`SELECT * FROM bank_accounts WHERE id = $1`, [patch.id ?? '']);
-    if (!existing) return null;
-    // This is a simplified implementation - in production you'd build the dynamic query properly
-    return this.getAccount(patch.id ?? '');
+    if (!sets.length) return this.getAccount(id);
+    sets.push("updated_at = NOW()");
+    const [row] = await this.db.query<any>(
+      `UPDATE bank_accounts SET ${sets.join(", ")} WHERE id = $1 RETURNING *`,
+      params,
+    );
+    return row ? this.mapAccount(row) : null;
   }
 
   private mapAccount(row: any): BankAccount {

@@ -103,7 +103,7 @@ docuSignRoutes.post("/auth/token", async (c) => {
       [accessToken, firm.id],
     );
 
-    return c.json({ accessToken, expiresIn });
+    return c.json({ connected: true, expiresIn });
   } catch (error) {
     return c.json({ error: "DocuSign authentication failed", details: error instanceof Error ? error.message : String(error) }, 500);
   }
@@ -428,7 +428,7 @@ docuSignRoutes.post("/oauth/exchange", async (c) => {
       [firm.id, clientId, clientSecret, clientId, c.get("userId"), baseUrl, accountId ?? "", data.access_token, data.refresh_token, String(data.expires_in)],
     );
     await db.query(`DELETE FROM docu_sign_oauth_state WHERE id = $1`, [state]);
-    return c.json({ accessToken: data.access_token, refreshToken: data.refresh_token, expiresIn: data.expires_in, tokenType: data.token_type, scope: data.scope });
+    return c.json({ connected: true, expiresIn: data.expires_in, tokenType: data.token_type, scope: data.scope });
   } catch (error) {
     return c.json({ error: "Token exchange failed", details: error instanceof Error ? error.message : String(error) }, 500);
   }

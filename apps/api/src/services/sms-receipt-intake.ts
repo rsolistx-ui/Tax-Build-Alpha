@@ -97,7 +97,11 @@ export class SmsReceiptIntakeService {
   }
 
   /**
-   * Ingests an SMS receipt image into R2 and atomically matches/satisfies the account exception.
+   * Stores an inbound receipt as evidence awaiting professional review.
+   *
+   * A sender phone number and an amount hint are not enough evidence to
+   * silently satisfy a client request or change a bank transaction. The
+   * reviewer can make that link after the image is read and verified.
    */
   async ingestSmsReceipt(params: {
     clientId: string;
@@ -120,17 +124,14 @@ export class SmsReceiptIntakeService {
       });
     }
 
-    // 2. Find matching bank transaction or client request
-    const matched = await this.findPendingException(params.clientId, params.amountHint);
-
     const statements: { query: string; params: unknown[] }[] = [];
 
     // Insert receipt record
     statements.push({
       query: `INSERT INTO receipts (
                 id, firm_id, client_id, filename, r2_key, mime_type, file_size, status,
-                extracted_merchant, extracted_total, source, notes, created_at, updated_at
-              ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'filed', $8, $9, 'sms_drop', $10, NOW(), NOW())`,
+                extracted_merchant, extracted_total, source, notes, validation_status, created_at, updated_at
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'review', $8, $9, 'sms_drop', $10, 'manual_review_required', NOW(), NOW())`,
       params: [
         receiptId,
         params.firmId,
@@ -144,37 +145,6 @@ export class SmsReceiptIntakeService {
         `Received via SMS from ${params.senderPhone}`,
       ],
     });
-
-    // If a bank transaction was matched, update it to matched
-    if (matched?.bankTxnId) {
-      statements.push({
-        query: `UPDATE bank_transactions SET
-                  triage = 'matched',
-                  matched_receipt_id = $1,
-                  resolution_reason = $2,
-                  resolved_at = NOW(),
-                  reviewed_at = NOW()
-                WHERE id = $3 AND client_id = $4`,
-        params: [
-          receiptId,
-          `Automatically matched via SMS Mobile Receipt Drop from ${params.senderPhone}`,
-          matched.bankTxnId,
-          params.clientId,
-        ],
-      });
-    }
-
-    // If an open request was matched, mark it satisfied
-    if (matched?.requestId) {
-      statements.push({
-        query: `UPDATE client_requests SET
-                  status = 'satisfied',
-                  satisfied_at = NOW(),
-                  updated_at = NOW()
-                WHERE id = $1 AND client_id = $2`,
-        params: [matched.requestId, params.clientId],
-      });
-    }
 
     // Log immutable audit event
     const auditId = newId("audit");
@@ -194,8 +164,8 @@ export class SmsReceiptIntakeService {
           r2Key,
           filename: params.filename,
           fileSize: params.fileBytes.byteLength,
-          matchedBankTxnId: matched?.bankTxnId || null,
-          satisfiedRequestId: matched?.requestId || null,
+          matchedBankTxnId: null,
+          satisfiedRequestId: null,
           senderPhone: params.senderPhone,
         }),
       ],
@@ -203,19 +173,15 @@ export class SmsReceiptIntakeService {
 
     await this.db.transaction(statements);
 
-    const message = matched?.bankTxnId
-      ? `Receipt filed and automatically matched to bank transaction "${matched.description || matched.bankTxnId}".`
-      : matched?.requestId
-      ? `Receipt filed and satisfied client request "${matched.description}".`
-      : `Receipt filed into evidence vault for ${params.clientName}.`;
+    const message = `Receipt saved to the review queue for ${params.clientName}. A professional will verify and file it.`;
 
     return {
       success: true,
       clientId: params.clientId,
       clientName: params.clientName,
       receiptId,
-      matchedBankTransactionId: matched?.bankTxnId,
-      satisfiedRequestId: matched?.requestId,
+      matchedBankTransactionId: null,
+      satisfiedRequestId: null,
       r2Key,
       message,
     };

@@ -96,7 +96,7 @@ describe("NativeEsignService (DocuSign/HelloSign Killer)", () => {
     );
 
     expect(result.certificateId).toMatch(/^cert_/);
-    expect(result.signedR2Key).toContain("signed-documents/firm_1/cli_1/doc_1-certified.pdf");
+    expect(result.signedR2Key).toContain("signed-documents/firm_1/cli_1/doc_1/sigr_1-");
     expect(result.documentHash).toHaveLength(64);
     const completedDigest = await crypto.subtle.digest("SHA-256", result.signedPdfBytes);
     const completedHash = Array.from(new Uint8Array(completedDigest), (byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -107,8 +107,9 @@ describe("NativeEsignService (DocuSign/HelloSign Killer)", () => {
     expect(signedDoc.getPageCount()).toBe(2);
 
     // Verify audit event was logged to database
-    const auditCall = calls.find((c) => c.sql.includes("native_document_signed"));
+    const auditCall = calls.find((c) => c.sql.includes("INSERT INTO audit_events") && c.sql.includes("native_document_signed"));
     expect(auditCall).toBeDefined();
     expect(auditCall?.params[3]).toBe("bob@example.com");
+    expect(calls.some((c) => c.sql.includes("signature_evidence_events"))).toBe(true);
   });
 });

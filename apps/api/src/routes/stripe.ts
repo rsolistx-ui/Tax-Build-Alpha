@@ -20,25 +20,29 @@ stripeRoutes.use("*", requireActiveBeta);
 // ========== Stripe Connect Onboarding ==========
 
 stripeRoutes.get("/connect/status", async (c) => {
+  if (!c.env.STRIPE_SECRET_KEY || !c.env.STRIPE_PUBLISHABLE_KEY || !c.env.STRIPE_WEBHOOK_SECRET) {
+    return c.json({ configured: false, connected: false });
+  }
   const db = createDb(c.env);
   const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
 
   const stripeService = new StripeService(db, {
-    secretKey: c.env.STRIPE_SECRET_KEY!,
-    publishableKey: c.env.STRIPE_PUBLISHABLE_KEY!,
-    webhookSecret: c.env.STRIPE_WEBHOOK_SECRET!,
+    secretKey: c.env.STRIPE_SECRET_KEY,
+    publishableKey: c.env.STRIPE_PUBLISHABLE_KEY,
+    webhookSecret: c.env.STRIPE_WEBHOOK_SECRET,
     connectClientId: c.env.STRIPE_CONNECT_CLIENT_ID,
   });
 
   const account = await stripeService.getConnectAccount(firm.id);
   if (!account) {
-    return c.json({ connected: false });
+    return c.json({ configured: true, connected: false });
   }
 
   await stripeService.syncConnectAccount(firm.id);
   const updated = await stripeService.getConnectAccount(firm.id);
 
   return c.json({
+    configured: true,
     connected: true,
     chargesEnabled: updated?.chargesEnabled,
     payoutsEnabled: updated?.payoutsEnabled,

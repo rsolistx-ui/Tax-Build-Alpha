@@ -9,7 +9,6 @@ import { ensureFirm } from "../services/firm";
 import { getClient } from "../services/clients";
 import { newId } from "../lib/id";
 import {
-  getGmailAccessToken,
   createGmailDraft,
   sendGmailMessage,
   listGmailMessages,
@@ -18,6 +17,7 @@ import {
   searchGmailMessages,
   createGmailDraftBody,
 } from "../services/gmail";
+import { resolveGmailAccessToken } from "../services/gmail-oauth";
 import { getClientRequest, approveDraftRequest } from "../services/client-requests";
 import { addRequestMessage } from "../services/request-messages";
 import { gmailTriageAgentTaskStatement } from "../services/agent-supervisor";
@@ -26,38 +26,16 @@ export const gmailRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 gmailRoutes.use("*", requireSession);
 gmailRoutes.use("*", requireActiveBeta);
 
-const gmailConfigSchema = z.object({
-  clientId: z.string().min(1),
-  clientSecret: z.string().min(1),
-  refreshToken: z.string().min(1),
-});
-
-gmailRoutes.post("/config", async (c) => {
-  const db = createDb(c.env);
-  const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
-  
-  const config = gmailConfigSchema.parse(await c.req.json());
-  
-  await db.query(
-    `INSERT INTO gmail_config (firm_id, client_id, client_secret, refresh_token)
-     VALUES ($1, $2, $3, $4)
-     ON CONFLICT (firm_id) DO UPDATE SET
-       client_id = EXCLUDED.client_id,
-       client_secret = EXCLUDED.client_secret,
-       refresh_token = EXCLUDED.refresh_token,
-       updated_at = NOW()`,
-    [firm.id, config.clientId, config.clientSecret, config.refreshToken],
-  );
-
-  return c.json({ success: true });
-});
+gmailRoutes.post("/config", async (c) =>
+  c.json({ error: "Manual Gmail credential entry is disabled. Use the secure Google connection flow." }, 410),
+);
 
 gmailRoutes.get("/config", async (c) => {
   const db = createDb(c.env);
   const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
   
   const [config] = await db.query<any>(
-    `SELECT client_id, refresh_token FROM gmail_config WHERE firm_id = $1`,
+    `SELECT refresh_token_ciphertext, connected_at, granted_scope FROM gmail_config WHERE firm_id = $1`,
     [firm.id],
   );
 
@@ -65,10 +43,18 @@ gmailRoutes.get("/config", async (c) => {
     return c.json({ error: "Gmail not configured" }, 404);
   }
 
-  return c.json({
-    clientId: config.client_id,
-  });
+  return c.json({ connected: Boolean(config.refresh_token_ciphertext), connectedAt: config.connected_at, scope: config.granted_scope });
 });
+
+async function connectedAccessToken(env: Env, config: { refresh_token_ciphertext?: string | null; refresh_token_iv?: string | null }): Promise<string> {
+  return resolveGmailAccessToken({
+    clientId: env.GOOGLE_CLIENT_ID,
+    clientSecret: env.GOOGLE_CLIENT_SECRET,
+    encryptionKey: env.GMAIL_TOKEN_ENCRYPTION_KEY,
+    refreshTokenCiphertext: config.refresh_token_ciphertext,
+    refreshTokenIv: config.refresh_token_iv,
+  });
+}
 
 gmailRoutes.post("/auth/token", async (c) => {
   const db = createDb(c.env);
@@ -84,20 +70,10 @@ gmailRoutes.post("/auth/token", async (c) => {
   }
 
   try {
-    const { accessToken, expiresIn } = await getGmailAccessToken({
-      clientId: config.client_id,
-      clientSecret: config.client_secret,
-      refreshToken: config.refresh_token,
-    });
-
-    await db.query(
-      `UPDATE gmail_config SET access_token = $1, access_token_expires_at = NOW() + INTERVAL '${expiresIn} seconds' WHERE firm_id = $2`,
-      [accessToken, firm.id],
-    );
-
-    return c.json({ accessToken, expiresIn });
-  } catch (error) {
-    return c.json({ error: "Gmail authentication failed", details: error instanceof Error ? error.message : String(error) }, 500);
+    await connectedAccessToken(c.env, config);
+    return c.json({ connected: true });
+  } catch {
+    return c.json({ error: "Gmail authentication failed. Reconnect the firm Gmail account." }, 502);
   }
 });
 
@@ -114,7 +90,7 @@ gmailRoutes.get("/labels", async (c) => {
     return c.json({ error: "Gmail not configured" }, 404);
   }
 
-  const labels = await listGmailLabels(config.access_token);
+  const labels = await listGmailLabels(await connectedAccessToken(c.env, config));
   return c.json({ labels });
 });
 
@@ -134,7 +110,7 @@ gmailRoutes.get("/messages", async (c) => {
   const query = c.req.query("q");
   const maxResults = parseInt(c.req.query("maxResults") || "50", 10);
 
-  const result = await listGmailMessages(config.access_token, query, maxResults);
+  const result = await listGmailMessages(await connectedAccessToken(c.env, config), query, maxResults);
   return c.json(result);
 });
 
@@ -154,7 +130,7 @@ gmailRoutes.get("/messages/:messageId", async (c) => {
   const messageId = c.req.param("messageId");
   const format = (c.req.query("format") as "full" | "metadata" | "minimal" | "raw") || "full";
 
-  const message = await getGmailMessage(config.access_token, messageId, format);
+  const message = await getGmailMessage(await connectedAccessToken(c.env, config), messageId, format);
   return c.json(message);
 });
 
@@ -173,7 +149,7 @@ gmailRoutes.post("/search", async (c) => {
 
   const body = z.object({ query: z.string().min(1) }).parse(await c.req.json());
 
-  const messages = await searchGmailMessages(config.access_token, body.query);
+  const messages = await searchGmailMessages(await connectedAccessToken(c.env, config), body.query);
   return c.json({ messages });
 });
 
@@ -198,7 +174,7 @@ gmailRoutes.post("/drafts", async (c) => {
     references: z.string().optional(),
   }).parse(await c.req.json());
 
-  const draft = await createGmailDraft(config.access_token, {
+  const draft = await createGmailDraft(await connectedAccessToken(c.env, config), {
     to: body.to,
     subject: body.subject,
     body: body.body,
@@ -234,7 +210,7 @@ gmailRoutes.post("/auto-draft", async (c) => {
   }
 
   const professionalName = c.get("userName") || "Tax Professional";
-  const professionalEmail = c.get("userEmail");
+  if (!client.email) return c.json({ error: "This client needs an email address before a draft can be created." }, 409);
 
   const requests = await Promise.all(
     body.requestIds.map((id) => 
@@ -254,15 +230,15 @@ gmailRoutes.post("/auto-draft", async (c) => {
   const draftBody = createGmailDraftBody(clientName, requestTitles, undefined, `Best regards,\n${professionalName}`);
 
   try {
-    const draft = await createGmailDraft(config.access_token, {
-      to: professionalEmail,
-      subject: `Draft: ${requestTitles}`,
+    const draft = await createGmailDraft(await connectedAccessToken(c.env, config), {
+      to: client.email,
+      subject: `${requestTitles}`,
       body: draftBody,
     });
 
     return c.json({ draftId: draft.id, message: `Draft created with ${requests.length} requests` });
-  } catch (error) {
-    return c.json({ error: "Failed to create draft", details: error instanceof Error ? error.message : String(error) }, 500);
+  } catch {
+    return c.json({ error: "Failed to create draft. Reconnect Gmail and try again." }, 502);
   }
 });
 
@@ -286,7 +262,7 @@ gmailRoutes.post("/auto-draft/send", async (c) => {
   }
 
   const professionalName = c.get("userName") || "Tax Professional";
-  const professionalEmail = c.get("userEmail");
+  if (!client.email) return c.json({ error: "This client needs an email address before a message can be sent." }, 409);
 
   const requests = await Promise.all(
     body.requestIds.map((id) => 
@@ -306,16 +282,15 @@ gmailRoutes.post("/auto-draft/send", async (c) => {
   const messageBody = createGmailDraftBody(clientName, requestTitles, undefined, `Best regards,\n${professionalName}`);
 
   try {
-    const sent = await sendGmailMessage(config.access_token, {
-      to: professionalEmail,
-      subject: `Auto-draft: ${requestTitles}`,
+    const sent = await sendGmailMessage(await connectedAccessToken(c.env, config), {
+      to: client.email,
+      subject: `${requestTitles}`,
       body: messageBody,
-      from: professionalEmail,
     });
 
     return c.json({ messageId: sent.id, message: `Message sent with ${requests.length} requests` });
-  } catch (error) {
-    return c.json({ error: "Failed to send message", details: error instanceof Error ? error.message : String(error) }, 500);
+  } catch {
+    return c.json({ error: "Failed to send message. Reconnect Gmail and try again." }, 502);
   }
 });
 
@@ -323,8 +298,8 @@ gmailRoutes.post("/thread/:threadId", async (c) => {
   const db = createDb(c.env);
   const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
   
-  const [config] = await db.query<{ access_token: string }>(
-    `SELECT access_token FROM gmail_config WHERE firm_id = $1`,
+  const [config] = await db.query<{ refresh_token_ciphertext: string | null; refresh_token_iv: string | null }>(
+    `SELECT refresh_token_ciphertext, refresh_token_iv FROM gmail_config WHERE firm_id = $1`,
     [firm.id],
   );
 
@@ -335,10 +310,11 @@ gmailRoutes.post("/thread/:threadId", async (c) => {
   const threadId = c.req.param("threadId");
   if (!threadId) return c.json({ error: "Thread ID required" }, 400);
   
-  const messages = await listGmailMessages(config.access_token, `thread_id:${threadId}`);
+  const accessToken = await connectedAccessToken(c.env, config);
+  const messages = await listGmailMessages(accessToken, `thread_id:${threadId}`);
   
   const fullMessages = await Promise.all(
-    messages.messages.map((msg) => getGmailMessage(config.access_token, msg.id, "full"))
+    messages.messages.map((msg) => getGmailMessage(accessToken, msg.id, "full"))
   );
 
   const clientName = "Client";
@@ -359,8 +335,8 @@ gmailRoutes.get("/threads/search", async (c) => {
   const db = createDb(c.env);
   const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
   
-  const [config] = await db.query<{ access_token: string }>(
-    `SELECT access_token FROM gmail_config WHERE firm_id = $1`,
+  const [config] = await db.query<{ refresh_token_ciphertext: string | null; refresh_token_iv: string | null }>(
+    `SELECT refresh_token_ciphertext, refresh_token_iv FROM gmail_config WHERE firm_id = $1`,
     [firm.id],
   );
 
@@ -371,7 +347,7 @@ gmailRoutes.get("/threads/search", async (c) => {
   const query = c.req.query("q") || "";
   const maxResults = parseInt(c.req.query("maxResults") || "20", 10);
 
-  const messages = await searchGmailMessages(config.access_token, query);
+  const messages = await searchGmailMessages(await connectedAccessToken(c.env, config), query);
   const uniqueThreads = new Map<string, typeof messages[number]>();
 
   for (const msg of messages) {
@@ -411,11 +387,11 @@ gmailRoutes.post("/triage", async (c) => {
   const db = createDb(c.env);
   const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
 
-  const [config] = await db.query<{ access_token: string }>(
-    `SELECT access_token FROM gmail_config WHERE firm_id = $1`,
+  const [config] = await db.query<{ refresh_token_ciphertext: string | null; refresh_token_iv: string | null }>(
+    `SELECT refresh_token_ciphertext, refresh_token_iv FROM gmail_config WHERE firm_id = $1`,
     [firm.id],
   );
-  if (!config || !config.access_token) {
+  if (!config) {
     return c.json({ error: "Gmail is not connected for this firm yet." }, 404);
   }
 
@@ -433,9 +409,9 @@ gmailRoutes.post("/triage", async (c) => {
 
   let listResult: { messages: Array<{ id: string; threadId: string }> };
   try {
-    listResult = await listGmailMessages(config.access_token, "in:inbox", maxMessages);
-  } catch (error) {
-    return c.json({ error: "Could not reach Gmail. The connection may need to be re-authorized.", details: error instanceof Error ? error.message : String(error) }, 502);
+    listResult = await listGmailMessages(await connectedAccessToken(c.env, config), "in:inbox", maxMessages);
+  } catch {
+    return c.json({ error: "Could not reach Gmail. The connection may need to be re-authorized." }, 502);
   }
 
   let matched = 0;
@@ -445,7 +421,7 @@ gmailRoutes.post("/triage", async (c) => {
   for (const stub of listResult.messages) {
     let message;
     try {
-      message = await getGmailMessage(config.access_token, stub.id, "metadata");
+      message = await getGmailMessage(await connectedAccessToken(c.env, config), stub.id, "metadata");
     } catch {
       continue;
     }

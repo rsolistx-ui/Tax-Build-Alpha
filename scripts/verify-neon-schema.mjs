@@ -32,6 +32,114 @@ async function runQuery(query) {
 
 const checks = [
   {
+    label: "stripe_connect_oauth_states one-time Standard-account authorization table (migration 0055)",
+    query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'stripe_connect_oauth_states'`,
+  },
+  {
+    label: "idx_stripe_connect_oauth_states_active single-use Stripe state lookup (migration 0055)",
+    query: `SELECT 1 FROM pg_indexes WHERE indexname = 'idx_stripe_connect_oauth_states_active'`,
+  },
+  {
+    label: "bank_connections.provider_item_id webhook identity column (migration 0054)",
+    query: `SELECT 1 FROM information_schema.columns WHERE table_name = 'bank_connections' AND column_name = 'provider_item_id'`,
+  },
+  {
+    label: "idx_bank_connections_plaid_item provider item lookup (migration 0054)",
+    query: `SELECT 1 FROM pg_indexes WHERE indexname = 'idx_bank_connections_plaid_item'`,
+  },
+  {
+    label: "wave_import_jobs.source_storage_key durable R2 source reference (migration 0053)",
+    query: `SELECT 1 FROM information_schema.columns WHERE table_name = 'wave_import_jobs' AND column_name = 'source_storage_key'`,
+  },
+  {
+    label: "idx_wave_import_jobs_source_storage_key Wave source lookup (migration 0053)",
+    query: `SELECT 1 FROM pg_indexes WHERE indexname = 'idx_wave_import_jobs_source_storage_key'`,
+  },
+  {
+    label: "firm_rules dictated-rule scope columns (migration 0052)",
+    query: `SELECT 1 FROM information_schema.columns WHERE table_name='firm_rules' AND column_name='dictated_prompt'`,
+  },
+  {
+    label: "feature_requests Neon-compatible intake table (migration 0052)",
+    query: `SELECT 1 FROM information_schema.tables WHERE table_name='feature_requests'`,
+  },
+  {
+    label: "firm_rule_versions immutable policy-history table (migration 0051)",
+    query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'firm_rule_versions'`,
+  },
+  {
+    label: "firm_rule_versions history lookup index (migration 0051)",
+    query: `SELECT 1 FROM pg_indexes WHERE indexname = 'firm_rule_versions_rule_created_idx'`,
+  },
+  {
+    label: "signature_access_links recipient-bound hashed signing-link table (migration 0050)",
+    query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'signature_access_links'`,
+  },
+  {
+    label: "signature_access_links active-link lookup index (migration 0050)",
+    query: `SELECT 1 FROM pg_indexes WHERE indexname = 'signature_access_links_active_idx'`,
+  },
+  {
+    label: "signature_evidence_events append-only native signing evidence ledger (migration 0048)",
+    query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'signature_evidence_events'`,
+  },
+  {
+    label: "signature evidence mutation guard trigger (migration 0048)",
+    query: `SELECT 1 FROM pg_trigger WHERE tgname = 'signature_evidence_no_update' AND NOT tgisinternal`,
+  },
+  {
+    label: "signature_requests.updated_at lifecycle timestamp (migration 0049)",
+    query: `SELECT 1 FROM information_schema.columns WHERE table_name = 'signature_requests' AND column_name = 'updated_at'`,
+  },
+  {
+    label: "gmail_config encrypted refresh-token columns (migration 0043)",
+    query: `SELECT 1 FROM information_schema.columns WHERE table_name = 'gmail_config' AND column_name = 'refresh_token_ciphertext'`,
+  },
+  {
+    label: "gmail_oauth_states one-time OAuth state table (migration 0043)",
+    query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'gmail_oauth_states'`,
+  },
+  {
+    label: "supervisor_heartbeat_runs durable cron execution ledger (migration 0044)",
+    query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'supervisor_heartbeat_runs'`,
+  },
+  {
+    label: "vendors table for Wave contact migration (migration 0045)",
+    query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'vendors'`,
+  },
+  {
+    label: "bills table for Wave payable migration (migration 0045)",
+    query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'bills'`,
+  },
+  {
+    label: "migration_import_records idempotency ledger (migration 0045)",
+    query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'migration_import_records'`,
+  },
+  {
+    label: "invoices table for native billing and Wave invoice migration (migration 0033)",
+    query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'invoices'`,
+  },
+  {
+    label: "invoice_lines table for native billing and Wave invoice migration (migration 0033)",
+    query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'invoice_lines'`,
+  },
+  {
+    label: "clients.email contact column for migration and communications (migration 0046)",
+    query: `SELECT 1 FROM information_schema.columns WHERE table_name = 'clients' AND column_name = 'email'`,
+  },
+  {
+    label: "clients.phone contact column for migration and communications (migration 0046)",
+    query: `SELECT 1 FROM information_schema.columns WHERE table_name = 'clients' AND column_name = 'phone'`,
+  },
+  {
+    label: "bank_transaction_provider_links replay-safe live-feed projection ledger (migration 0047)",
+    query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'bank_transaction_provider_links'`,
+  },
+  {
+    label: "idx_bank_provider_links_connection for live-feed review projection (migration 0047)",
+    query: `SELECT 1 FROM pg_indexes WHERE indexname = 'idx_bank_provider_links_connection'`,
+  },
+  {
     label: "idx_categories_client_lower_name (case-insensitive category name uniqueness)",
     query: `SELECT 1 FROM pg_indexes WHERE indexname = 'idx_categories_client_lower_name'`,
   },
@@ -252,6 +360,14 @@ const checks = [
   {
     label: "uq_requests_active_bank_txn is a partial unique index enforcing race-safe exception-request idempotency (migration 0012)",
     query: `SELECT 1 FROM pg_indexes WHERE indexname = 'uq_requests_active_bank_txn'`,
+  },
+  {
+    label: "document_upload_sessions table (resumable R2 evidence intake, migration 0042)",
+    query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'document_upload_sessions'`,
+  },
+  {
+    label: "idx_document_upload_sessions_expiry (expired multipart upload lookup, migration 0042)",
+    query: `SELECT 1 FROM pg_indexes WHERE indexname = 'idx_document_upload_sessions_expiry'`,
   },
 ];
 

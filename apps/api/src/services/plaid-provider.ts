@@ -137,6 +137,14 @@ interface PlaidLinkTokenCreateRequest {
   };
 }
 
+export type PlaidWebhookVerificationKey = JsonWebKey & {
+  alg: "ES256";
+  crv: "P-256";
+  kid: string;
+  kty: "EC";
+  use: "sig";
+};
+
 export class PlaidBankFeedProvider implements BankFeedProvider {
   readonly providerName = 'plaid' as const;
   readonly supportedInstitutionsUrl = 'https://cdn.plaid.com/institutions/current';
@@ -242,6 +250,14 @@ export class PlaidBankFeedProvider implements BankFeedProvider {
       itemId: response.item_id,
       accounts,
     };
+  }
+
+  async getWebhookVerificationKey(keyId: string): Promise<PlaidWebhookVerificationKey> {
+    const response = await this.request<{ key: PlaidWebhookVerificationKey }>("/webhook_verification_key/get", {
+      method: "POST",
+      body: JSON.stringify({ key_id: keyId }),
+    });
+    return response.key;
   }
 
   async getAccounts(accessToken: string): Promise<ProviderAccount[]> {

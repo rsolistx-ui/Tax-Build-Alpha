@@ -6,11 +6,10 @@ import path from "node:path";
 const repoRoot = path.resolve(import.meta.dirname, "..", "..");
 
 /**
- * Product-direction cleanup gate: Folio must not have any active
- * Wave-named/Wave-specific navigation, route, worksheet, or user-facing
- * copy. Historical decisions (README changelog-style prose, this file
- * itself) are allowed to mention the name Wave when explaining why it was
- * removed; active source is not.
+ * Product-direction cleanup gate: Truepost must not depend on Wave as an
+ * operating workflow or expose it as product branding. The small, explicit
+ * migration adapter is allowed to name its source format so a practitioner
+ * can leave Wave without manually rebuilding their books.
  */
 const SCAN_DIRS = [
   path.join(repoRoot, "apps", "api", "src"),
@@ -23,6 +22,9 @@ const EXCLUDE_DIR_NAMES = new Set(["node_modules", "dist", ".git"]);
 const ALLOWED_WAVE_FILES = new Set([
   "apps/api/src/routes/wave-import.ts",
   "apps/api/src/services/wave-import.ts",
+  "apps/api/src/services/wave-safe-import.ts",
+  "apps/api/src/services/wave-safe-import.test.ts",
+  "apps/api/src/services/wave-safe-import.integration.test.ts",
   "apps/api/src/index.ts", // routes registration
   "apps/web/src/components/accounting-import-modal.tsx",
 ].map(p => p.replace(/\//g, path.sep)));
@@ -37,7 +39,7 @@ function walk(dir, out) {
   }
 }
 
-test("no active Wave-specific operating workflow remains in API or web source", () => {
+test("Wave references are limited to the explicit one-way migration adapter", () => {
   const files = [];
   for (const dir of SCAN_DIRS) walk(dir, files);
   assert.ok(files.length > 0, "expected to find source files to scan");

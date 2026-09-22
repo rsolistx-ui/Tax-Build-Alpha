@@ -7,11 +7,12 @@ import { requireSession } from "../middleware/session";
 import { ensureFirm } from "../services/firm";
 import { getClient } from "../services/clients";
 import { listVersions, createVersion, listSignatureRequests, createSignatureRequest } from "../services/doc-versioning";
-import { storeWebhookEvent } from "../services/docusign";
 import { newId } from "../lib/id";
 import { getValidDocuSignConfig, createDocuSignEnvelope, voidDocuSignEnvelope } from "../services/docu-sign";
 import { signDocumentToken } from "../lib/signed-url";
 import { NativeEsignService } from "../services/native-esign";
+import { IRS_EFILE_SIGNATURE_PROVIDER_MESSAGE, isIrsEfileAuthorization } from "../services/tax-signature-policy";
+import { issueSigningAccessLink } from "../services/signature-access";
 
 export const docVersioningRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 docVersioningRoutes.use("*", requireSession);
@@ -87,7 +88,9 @@ docVersioningRoutes.get("/:clientId/signature-vault", async (c) => {
       ipAddress: meta.ipAddress || null,
       sourceUrl: r.document_id ? `/api/clients/${client.id}/documents/${r.document_id}/source` : null,
       tamperEvidentStatus: r.status === "signed" ? "Sealed & Tamper-Evident" : "Pending Signature",
-      complianceNotice: "15 U.S.C. § 7001 (ESIGN) & UETA Compliant · 7-Yr Statutory Vault",
+      complianceNotice: isIrsEfileAuthorization(r.form_type)
+        ? "Tax e-file authorization is completed in the firm's validated e-file provider."
+        : "Ordinary-document signature record with certificate and integrity evidence.",
     };
   });
 
@@ -99,7 +102,7 @@ docVersioningRoutes.post("/:clientId/signature-requests", async (c) => {
   const body = z.object({
     engagementId: z.string().optional(),
     documentId: z.string().optional(),
-    formType: z.string().default("8879"),
+    formType: z.string().default("document"),
     recipients: z.array(z.any()).default([]),
     tabs: z.array(z.object({
       type: z.enum(["signHere","initialHere","dateSigned","text","checkbox"]),
@@ -130,6 +133,9 @@ docVersioningRoutes.post("/:clientId/signature-requests/:requestId/send", async 
   const [req] = await db.query<any>(`SELECT * FROM signature_requests WHERE id=$1 AND firm_id=$2 AND client_id=$3`, [c.req.param("requestId"), firm.id, client.id]);
   if (!req) return c.json({ error: "Signature request not found" }, 404);
   if (req.status !== "pending") return c.json({ error: `Request already ${req.status}` }, 400);
+  if (isIrsEfileAuthorization(req.form_type)) {
+    return c.json({ error: IRS_EFILE_SIGNATURE_PROVIDER_MESSAGE, code: "IRS_EFILE_PROVIDER_REQUIRED" }, 409);
+  }
 
   let sentVia: "docusign" = "docusign";
   let config: Awaited<ReturnType<typeof getValidDocuSignConfig>> = null;
@@ -233,13 +239,10 @@ docVersioningRoutes.post("/:clientId/signature-requests/:requestId/complete", as
   const [req] = await db.query<any>(`SELECT * FROM signature_requests WHERE id=$1 AND firm_id=$2 AND client_id=$3`, [c.req.param("requestId"), firm.id, client.id]);
   if (!req) return c.json({ error: "Signature request not found" }, 404);
   if (req.status !== "sent") return c.json({ error: `Request must be sent before completing, currently ${req.status}` }, 400);
-  const body = z.object({ signedAt: z.string().optional(), recipientName: z.string().optional(), kbaPassed: z.boolean().optional(), ipAddress: z.string().optional() }).parse(await c.req.json().catch(() => ({})));
-  await db.query(`UPDATE signature_requests SET status='signed', signed_at=NOW() WHERE id=$1`, [req.id]);
-  await db.query(`UPDATE docu_sign_envelopes SET status='completed' WHERE signature_request_id=$1`, [req.id]);
-  const evidence = { requestId: req.id, formType: req.form_type, recipientName: body.recipientName ?? null, signedAt: body.signedAt ?? new Date().toISOString(), kbaPassed: body.kbaPassed ?? null, ipAddress: body.ipAddress ?? null };
-  await db.query(`INSERT INTO audit_events (id, firm_id, client_id, event, actor_user_id, metadata, created_at) VALUES ($1,$2,$3,$4,$5,$6::jsonb,NOW())`,
-    [crypto.randomUUID(), firm.id, client.id, "signature_request_signed", c.get("userId"), JSON.stringify(evidence)]);
-  return c.json({ requestId: req.id, status: "signed", evidence });
+  return c.json({
+    error: "A signature request cannot be completed from an authenticated staff session. Completion must come from a verified provider callback or the native ordinary-document signing flow.",
+    code: "SIGNATURE_COMPLETION_REQUIRES_VERIFIED_EVIDENCE",
+  }, 409);
 });
 docVersioningRoutes.post("/:clientId/signature-requests/:requestId/sign-native", async (c) => {
   const db = createDb(c.env);
@@ -253,9 +256,9 @@ docVersioningRoutes.post("/:clientId/signature-requests/:requestId/sign-native",
   );
   if (!req) return c.json({ error: "Signature request not found" }, 404);
   if (req.status === "signed") return c.json({ error: "Document is already signed" }, 400);
-  if (/^887(?:8|9)(?:[-\s]|$)/i.test(req.form_type ?? "")) {
+  if (isIrsEfileAuthorization(req.form_type)) {
     return c.json({
-      error: "Native signing is not enabled for IRS Forms 8878 or 8879. Remote tax-signature authorization requires the IRS identity-verification, record, and retention controls before it can be offered.",
+      error: IRS_EFILE_SIGNATURE_PROVIDER_MESSAGE,
     }, 409);
   }
 
@@ -269,6 +272,16 @@ docVersioningRoutes.post("/:clientId/signature-requests/:requestId/sign-native",
 
   if (!body.consentAgreed) {
     return c.json({ error: "Signer must agree to ESIGN consent under 15 U.S.C. § 7001" }, 400);
+  }
+  const recipientEmails = Array.isArray(req.recipients)
+    ? req.recipients.map((recipient: { email?: string }) => recipient.email?.trim().toLowerCase()).filter(Boolean)
+    : [];
+  if (recipientEmails.length > 0 && !recipientEmails.includes(body.signerEmail.trim().toLowerCase())) {
+    return c.json({ error: "The signer email must match a recipient on this signature request." }, 403);
+  }
+  const sessionEmail = (c.get("userEmail") || "").trim().toLowerCase();
+  if (!sessionEmail || body.signerEmail.trim().toLowerCase() !== sessionEmail) {
+    return c.json({ error: "Staff cannot sign for a client. Create the recipient's secure signing link instead." }, 403);
   }
 
   let pdfBytes: Uint8Array | null = null;
@@ -328,28 +341,24 @@ docVersioningRoutes.post("/:clientId/signature-requests/:requestId/sign-native",
     status: "signed",
   });
 });
-docVersioningRoutes.post("/:clientId/docusign/webhook", async (c) => {
-  const db = createDb(c.env);
-  const raw = await c.req.json().catch(() => ({}));
-  const envelopeId = (raw as any)?.envelopeId ?? (raw as any)?.envelope_id ?? (raw as any)?.envelopeId;
-  const status = (raw as any)?.envelopeStatus ?? (raw as any)?.status ?? (raw as any)?.envelope_status ?? "unknown";
-  await storeWebhookEvent(db, envelopeId ?? "unknown", (raw as any)?.event ?? "webhook", raw);
-  if (envelopeId) {
-    const [envelopeRow] = await db.query<any>(`SELECT signature_request_id FROM docu_sign_envelopes WHERE envelope_id=$1`, [envelopeId]);
-    const requestId = envelopeRow?.signature_request_id;
-    if (status === "completed") {
-      await db.query(`UPDATE docu_sign_envelopes SET status='completed' WHERE envelope_id=$1`, [envelopeId]);
-      if (requestId) await db.query(`UPDATE signature_requests SET status='signed', signed_at=NOW() WHERE id=$1`, [requestId]);
-    } else if (status === "declined") {
-      await db.query(`UPDATE docu_sign_envelopes SET status='declined' WHERE envelope_id=$1`, [envelopeId]);
-      if (requestId) await db.query(`UPDATE signature_requests SET status='declined' WHERE id=$1`, [requestId]);
-    } else if (status === "voided") {
-      await db.query(`UPDATE docu_sign_envelopes SET status='voided' WHERE envelope_id=$1`, [envelopeId]);
-      if (requestId) await db.query(`UPDATE signature_requests SET status='voided' WHERE id=$1`, [requestId]);
-    }
-  }
-  return c.json({ ok: true });
+docVersioningRoutes.post("/:clientId/signature-requests/:requestId/native-link", async (c) => {
+  const db = createDb(c.env); const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
+  const client = await getClient(db, c.req.param("clientId"), firm.id); if (!client) return c.json({ error: "Client not found" }, 404);
+  const [req] = await db.query<any>(`SELECT * FROM signature_requests WHERE id=$1 AND firm_id=$2 AND client_id=$3`, [c.req.param("requestId"), firm.id, client.id]);
+  if (!req) return c.json({ error: "Signature request not found" }, 404);
+  if (req.status === "signed" || req.status === "voided") return c.json({ error: `Request is ${req.status}` }, 409);
+  if (isIrsEfileAuthorization(req.form_type)) return c.json({ error: IRS_EFILE_SIGNATURE_PROVIDER_MESSAGE, code: "IRS_EFILE_PROVIDER_REQUIRED" }, 409);
+  const recipients = Array.isArray(req.recipients) ? req.recipients : [];
+  const recipient = recipients.find((item: any) => item?.email && item?.name) as { email: string; name?: string } | undefined;
+  if (!recipient) return c.json({ error: "Add the client's name and email before creating a secure signing link." }, 400);
+  const link = await issueSigningAccessLink(db, { firmId: firm.id, clientId: client.id, requestId: req.id, recipientEmail: recipient.email, recipientName: recipient.name, issuedByUserId: c.get("userId") });
+  await db.query(`UPDATE signature_requests SET status='sent', sent_at=COALESCE(sent_at,NOW()) WHERE id=$1`, [req.id]);
+  const origin = c.env.APP_ORIGIN || new URL(c.req.url).origin;
+  return c.json({ signingUrl: `${origin}/sign#token=${encodeURIComponent(link.token)}`, expiresAt: link.expiresAt, recipient: { name: recipient.name || null, email: recipient.email } }, 201);
 });
+docVersioningRoutes.post("/:clientId/docusign/webhook", (c) =>
+  c.json({ error: "This legacy webhook route is disabled. Configure the verified provider endpoint instead." }, 410),
+);
 docVersioningRoutes.get("/:clientId/documents/:docId/signed-url", async (c) => {
   const db = createDb(c.env); const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
   const client = await getClient(db, c.req.param("clientId"), firm.id); if (!client) return c.json({ error: "Client not found" }, 404);

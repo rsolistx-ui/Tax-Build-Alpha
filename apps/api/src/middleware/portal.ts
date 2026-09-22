@@ -2,6 +2,7 @@ import { createMiddleware } from "hono/factory";
 import type { Env } from "../env";
 import { createDb } from "../db";
 import { resolvePortalToken } from "../services/portal";
+import { computeAccessDecision, type EntitlementRow } from "../services/beta";
 
 export type PortalVars = {
   portalFirmId: string;
@@ -27,5 +28,29 @@ export const requirePortalToken = createMiddleware<{ Bindings: Env; Variables: P
   c.set("portalFirmId", resolved.firmId);
   c.set("portalClientId", resolved.clientId);
   c.set("portalLinkId", resolved.linkId);
+  await next();
+});
+
+/**
+ * A portal token proves which client may access the portal; it does not keep
+ * a firm's subscription alive. This separate gate makes expiry apply equally
+ * to staff, desktop, and client-facing magic-link workflows.
+ */
+export const requireActivePortalEntitlement = createMiddleware<{ Bindings: Env; Variables: PortalVars }>(async (c, next) => {
+  const db = createDb(c.env);
+  const [row] = await db.query<{ status: string | null; expires_at: string | null }>(
+    `SELECT be.status, be.expires_at
+     FROM firms f
+     LEFT JOIN beta_entitlements be ON be.user_id = f.owner_user_id
+     WHERE f.id = $1`,
+    [c.get("portalFirmId")],
+  );
+  const entitlement: EntitlementRow | null = row?.status && row.expires_at
+    ? { status: row.status as EntitlementRow["status"], expiresAt: row.expires_at }
+    : null;
+  const decision = computeAccessDecision(entitlement, new Date());
+  if (!decision.allowed) {
+    return c.json({ error: "Client portal access is currently unavailable", code: decision.reason }, 403);
+  }
   await next();
 });

@@ -117,7 +117,9 @@ internalRoutes.post("/smoke-cleanup", async (c) => {
 });
 
 /**
- * Daily reminder cron: runs at 09:00 UTC (configured in wrangler.toml).
+ * Internal manual reminder run. The deployed weekday schedule is owned by
+ * scheduled-operations.ts; this route remains useful for a controlled smoke
+ * check and requires the internal token.
  * Scans every firm for client_requests in 'requested' or 'viewed' status
  * whose next_reminder_at has arrived, posts a system reminder message,
  * and exponentially backs off the next reminder (5d → 10d → 20d → 40d, capped at 30d).

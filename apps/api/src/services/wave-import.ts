@@ -43,11 +43,13 @@ export interface WaveFieldMapping {
 
 export class WaveImportService {
   private db: Db;
+  private storage: R2Bucket;
   private accounting: FolioNativeAccountingProvider;
   private billing: BillingService;
 
-  constructor(db: Db) {
+  constructor(db: Db, storage: R2Bucket) {
     this.db = db;
+    this.storage = storage;
     this.accounting = new FolioNativeAccountingProvider(db);
     this.billing = new BillingService(db);
   }
@@ -117,13 +119,18 @@ export class WaveImportService {
   ): Promise<string> {
     const jobId = newId("wvj");
     const totalRows = await this.countCsvRows(options.file);
+    const storageKey = `imports/wave/${firmId}/${jobId}/source.csv`;
+    const bytes = await options.file.arrayBuffer();
+    await this.storage.put(storageKey, bytes, {
+      httpMetadata: { contentType: options.file.type || "text/csv" },
+      customMetadata: { filename: options.file.name, firmId, jobId, sourceType: options.sourceType },
+    });
     
     await this.db.query(
-      `INSERT INTO wave_import_jobs (id, firm_id, client_id, source_type, source_filename, total_rows, field_mapping, options, created_by, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'pending')`,
+      `INSERT INTO wave_import_jobs (id, firm_id, client_id, source_type, source_filename, source_storage_key, total_rows, field_mapping, options, created_by, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'pending')`,
       [
-        jobId, firmId, options.clientId ?? null, options.sourceType, options.file.name,
-        totalRows,
+        jobId, firmId, options.clientId ?? null, options.sourceType, options.file.name, storageKey, totalRows,
         JSON.stringify(options.fieldMapping ?? WaveImportService.DEFAULT_MAPPINGS[options.sourceType] ?? []),
         JSON.stringify(options.options ?? {}),
         userId,
@@ -141,7 +148,8 @@ export class WaveImportService {
       [jobId],
     );
 
-    const file = await this.getFileFromStorage(job.source_filename); // Would need R2 integration
+    if (!job.source_storage_key) throw new Error("This import was created before durable source storage was enabled. Upload the CSV again to process it.");
+    const file = await this.getFileFromStorage(job.source_storage_key, job.source_filename);
     const csvText = await file.text();
     const rows = this.parseCsv(csvText);
     
@@ -457,9 +465,10 @@ export class WaveImportService {
     return Math.max(0, text.trim().split('\n').length - 1);
   }
 
-  private async getFileFromStorage(filename: string): Promise<File> {
-    // Would integrate with R2 - placeholder
-    throw new Error("R2 file retrieval not implemented");
+  private async getFileFromStorage(storageKey: string, filename: string): Promise<File> {
+    const object = await this.storage.get(storageKey);
+    if (!object) throw new Error("The original import file is no longer available. Upload it again to start a new migration.");
+    return new File([await object.arrayBuffer()], filename, { type: object.httpMetadata?.contentType || "text/csv" });
   }
 
   async getJob(jobId: string) {

@@ -55,6 +55,14 @@ export type GmailSendResponse = {
   internalDate: string;
 };
 
+/** RFC 4648 base64url encoding for Gmail's raw-message API. */
+function base64UrlEncode(value: string): string {
+  const bytes = new TextEncoder().encode(value);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
 export async function getGmailAccessToken(config: GmailConfig): Promise<{ accessToken: string; expiresIn: number }> {
   const formData = new URLSearchParams({
     "client_id": config.clientId,
@@ -183,9 +191,7 @@ export async function createGmailDraft(
   const raw = headers
     .map((h) => `${h.name}: ${h.value}`)
     .join("\r\n")
-    .concat("\r\n\r\n", body)
-    .replace(/[^a-zA-Z0-9+/=]/g, "")
-    .replace(/=/g, "");
+    .concat("\r\n\r\n", body);
 
   const response = await fetch("https://www.googleapis.com/gmail/v1/users/me/drafts", {
     method: "POST",
@@ -193,7 +199,7 @@ export async function createGmailDraft(
       "Authorization": `Bearer ${accessToken}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ message: { raw } }),
+    body: JSON.stringify({ message: { raw: base64UrlEncode(raw) } }),
   });
 
   if (!response.ok) {
@@ -236,9 +242,7 @@ export async function sendGmailMessage(
   const raw = headers
     .map((h) => `${h.name}: ${h.value}`)
     .join("\r\n")
-    .concat("\r\n\r\n", body)
-    .replace(/[^a-zA-Z0-9+/=]/g, "")
-    .replace(/=/g, "");
+    .concat("\r\n\r\n", body);
 
   const response = await fetch("https://www.googleapis.com/gmail/v1/users/me/messages/send", {
     method: "POST",
@@ -246,7 +250,7 @@ export async function sendGmailMessage(
       "Authorization": `Bearer ${accessToken}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ raw }),
+    body: JSON.stringify({ raw: base64UrlEncode(raw) }),
   });
 
   if (!response.ok) {

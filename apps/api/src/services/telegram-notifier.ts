@@ -12,12 +12,27 @@ export interface TelegramDispatchResult {
   error?: string;
 }
 
+function formatAlertTimestamp(date = new Date()): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    month: "2-digit",
+    day: "2-digit",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+    timeZone: "America/Chicago",
+  }).formatToParts(date);
+  const value = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? "";
+  return `${value("month")}/${value("day")}/${value("year")} ${value("hour")}:${value("minute")} ${value("dayPeriod")}`;
+}
+
 export class TelegramNotifierService {
   constructor(private env: Env) {}
 
   /**
    * Dispatches an arbitrary formatted message to the configured Telegram chat.
-   * If credentials are not set, safely logs a mock message without throwing.
+   * If credentials are not set, it does not pretend a notification was sent.
+   * The caller receives an explicit simulated result and an actionable log.
    */
   async sendMessage(
     text: string,
@@ -27,8 +42,8 @@ export class TelegramNotifierService {
     const chatId = this.env.TELEGRAM_CHAT_ID?.trim();
 
     if (!botToken || !chatId) {
-      console.log(`[Telegram:Mock] Chat: ${chatId || "(unset)"}\n${text}`);
-      return { success: true, simulated: true };
+      console.warn("[Telegram] Delivery skipped: TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are required.");
+      return { success: false, simulated: true, error: "Telegram is not configured" };
     }
 
     try {
@@ -78,7 +93,7 @@ export class TelegramNotifierService {
     const icon = status.healthy ? "🟢" : "🔴";
     const header = status.healthy ? "<b>Truepost System Healthy</b>" : "<b>Truepost System Incident</b>";
     const latency = status.latencyMs ? `\n⚡ <i>Latency: ${status.latencyMs}ms</i>` : "";
-    const text = `${icon} ${header}\n\n${status.details}${latency}\n🕒 <code>${new Date().toLocaleString("en-US", { hour12: true })}</code>`;
+    const text = `${icon} ${header}\n\n${status.details}${latency}\n🕒 <code>${formatAlertTimestamp()}</code>`;
     return this.sendMessage(text);
   }
 
@@ -91,7 +106,7 @@ export class TelegramNotifierService {
   }): Promise<TelegramDispatchResult> {
     const cat = payload.category ? ` [${payload.category.toUpperCase()}]` : "";
     const action = payload.action || "Client Request Update";
-    const text = `📬 <b>Truepost Client Activity</b>\n\n<b>Client:</b> ${escapeHtml(payload.clientName)}\n<b>Action:</b> ${action}${cat}\n<b>Details:</b> ${escapeHtml(payload.title)}\n🕒 <code>${new Date().toLocaleString("en-US", { hour12: true })}</code>`;
+    const text = `📬 <b>Truepost Client Activity</b>\n\n<b>Client:</b> ${escapeHtml(payload.clientName)}\n<b>Action:</b> ${action}${cat}\n<b>Details:</b> ${escapeHtml(payload.title)}\n🕒 <code>${formatAlertTimestamp()}</code>`;
     return this.sendMessage(text);
   }
 
@@ -103,13 +118,13 @@ export class TelegramNotifierService {
     clientName?: string | null;
   }): Promise<TelegramDispatchResult> {
     const client = payload.clientName ? `\n<b>Target Client:</b> ${escapeHtml(payload.clientName)}` : "";
-    const text = `⚙️ <b>New Rule Directive Submitted</b>\n\n<b>Author:</b> ${escapeHtml(payload.userName)}\n<b>Title:</b> ${escapeHtml(payload.title)}${client}\n<b>Directive:</b>\n<i>${escapeHtml(payload.directiveText)}</i>\n🕒 <code>${new Date().toLocaleString("en-US", { hour12: true })}</code>`;
+    const text = `⚙️ <b>New Rule Directive Submitted</b>\n\n<b>Author:</b> ${escapeHtml(payload.userName)}\n<b>Title:</b> ${escapeHtml(payload.title)}${client}\n<b>Directive:</b>\n<i>${escapeHtml(payload.directiveText)}</i>\n🕒 <code>${formatAlertTimestamp()}</code>`;
     return this.sendMessage(text);
   }
 
   /** Alert when an unhandled exception or system component fails. */
   async notifyError(component: string, error: string): Promise<TelegramDispatchResult> {
-    const text = `🚨 <b>Truepost Critical Outage Alert</b>\n\n<b>Component:</b> ${escapeHtml(component)}\n<b>Error:</b>\n<code>${escapeHtml(error.slice(0, 500))}</code>\n🕒 <code>${new Date().toLocaleString("en-US", { hour12: true })}</code>`;
+    const text = `🚨 <b>Truepost Critical Outage Alert</b>\n\n<b>Component:</b> ${escapeHtml(component)}\n<b>Error:</b>\n<code>${escapeHtml(error.slice(0, 500))}</code>\n🕒 <code>${formatAlertTimestamp()}</code>`;
     return this.sendMessage(text);
   }
 }

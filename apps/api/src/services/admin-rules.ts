@@ -42,6 +42,7 @@ export interface UpdateRuleInput {
   priority?: number;
   effectiveFrom?: string | null;
   dictatedPrompt?: string | null;
+  actorUserId?: string | null;
 }
 
 export interface TestRuleResult {
@@ -146,6 +147,7 @@ export class AdminRulesService {
       ]
     );
 
+    await this.recordVersion(firmId, rule, "created", input.createdByUserId ?? null);
     if (input.createdByUserId) {
       await insertWorkAuditEvent(this.db, {
         firmId,
@@ -209,6 +211,7 @@ export class AdminRulesService {
     if (updates.length === 0) return existing;
     updates.push(`updated_at = NOW()`);
 
+    await this.recordVersion(firmId, existing, "updated", input.actorUserId ?? null);
     const [updated] = await this.db.query<FirmRule>(
       `UPDATE firm_rules
        SET ${updates.join(", ")}
@@ -221,6 +224,26 @@ export class AdminRulesService {
       params
     );
     return updated || null;
+  }
+
+  async listRuleVersions(firmId: string, ruleId: string) {
+    return this.db.query<{ id: string; action: string; snapshot: FirmRule; actorUserId: string | null; createdAt: string }>(
+      `SELECT id, action, snapshot, actor_user_id AS "actorUserId", created_at AS "createdAt"
+       FROM firm_rule_versions WHERE firm_id=$1 AND rule_id=$2 ORDER BY created_at DESC`, [firmId, ruleId],
+    );
+  }
+
+  async rollbackRule(firmId: string, ruleId: string, versionId: string, actorUserId: string): Promise<FirmRule | null> {
+    const existing = await this.getRule(firmId, ruleId); if (!existing) return null;
+    const [version] = await this.db.query<{ snapshot: FirmRule }>(`SELECT snapshot FROM firm_rule_versions WHERE id=$1 AND firm_id=$2 AND rule_id=$3`, [versionId, firmId, ruleId]);
+    if (!version?.snapshot) return null;
+    await this.recordVersion(firmId, existing, "rollback", actorUserId);
+    const snapshot = version.snapshot;
+    return this.updateRule(firmId, ruleId, { title: snapshot.title, markdownContent: snapshot.markdownContent, ruleType: snapshot.ruleType, clientId: snapshot.clientId, isActive: snapshot.isActive, priority: snapshot.priority, effectiveFrom: snapshot.effectiveFrom, dictatedPrompt: snapshot.dictatedPrompt, actorUserId: null });
+  }
+
+  private async recordVersion(firmId: string, rule: FirmRule, action: "created" | "updated" | "rollback", actorUserId: string | null): Promise<void> {
+    await this.db.query(`INSERT INTO firm_rule_versions (id, firm_id, rule_id, action, snapshot, actor_user_id) VALUES ($1,$2,$3,$4,$5::jsonb,$6)`, [newId("rver"), firmId, rule.id, action, JSON.stringify(rule), actorUserId]);
   }
 
   async deleteRule(firmId: string, ruleId: string): Promise<boolean> {

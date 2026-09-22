@@ -33,10 +33,9 @@ betaRoutes.get("/redeem-check", async (c) => {
   return c.json({ valid: true, redeemed: !!row.redeemed_by, created_at: row.created_at });
 });
 
-betaRoutes.post("/generate-token", async (c) => {
+betaRoutes.post("/generate-token", requireSession, requireOwner, async (c) => {
   const db = createDb(c.env);
   const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
-  if (!isOwnerEmail(c.env, c.get("userEmail"))) return c.json({ error: "owner only" }, 403);
   const token = crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "").slice(0, 16); // 64 hex chars
   await db.query(`CREATE TABLE IF NOT EXISTS beta_access_tokens (token TEXT PRIMARY KEY, firm_id TEXT REFERENCES firms(id) ON DELETE CASCADE, created_by TEXT NOT NULL, created_at TIMESTAMPTZ DEFAULT NOW(), redeemed_by TEXT, redeemed_at TIMESTAMPTZ)`, []);
   await db.query(`INSERT INTO beta_access_tokens (token, firm_id, created_by) VALUES ($1,$2,$3) ON CONFLICT (token) DO NOTHING`, [token, firm.id, c.get("userId")]);

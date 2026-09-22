@@ -40,6 +40,7 @@ async function postMessage(status: string) {
   queryMock.mockImplementation(async (sql: string) => {
     if (sql.includes("FROM client_portal_links WHERE token_hash")) return [LINK_ROW];
     if (sql.startsWith("UPDATE client_portal_links SET last_used_at")) return [];
+    if (sql.includes("FROM firms f") && sql.includes("beta_entitlements")) return [{ status: "active", expires_at: new Date(Date.now() + 86_400_000).toISOString() }];
     if (sql.includes("FROM client_requests WHERE id = $1 AND firm_id = $2")) return [requestRow(status)];
     if (sql.startsWith("INSERT INTO request_messages")) return [];
     if (sql.includes("FROM request_messages WHERE id = $1")) return [{ id: "rmsg_1", body: "hi" }];
@@ -74,5 +75,20 @@ describe("POST /requests/:requestId/messages closed-request guard", () => {
   it("still accepts a new message on a nonterminal (requested) request", async () => {
     const res = await postMessage("requested");
     expect(res.status).toBe(201);
+  });
+});
+
+describe("portal entitlement gate", () => {
+  it("denies a valid portal token when the owning firm's trial has expired", async () => {
+    queryMock.mockImplementation(async (sql: string) => {
+      if (sql.includes("FROM client_portal_links WHERE token_hash")) return [LINK_ROW];
+      if (sql.startsWith("UPDATE client_portal_links SET last_used_at")) return [];
+      if (sql.includes("FROM firms f") && sql.includes("beta_entitlements")) return [{ status: "active", expires_at: new Date(Date.now() - 1_000).toISOString() }];
+      return [];
+    });
+    const { portalRoutes } = await import("./portal");
+    const res = await portalRoutes.request("/me", { headers: { authorization: "Bearer test-token" } }, testEnv);
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toMatchObject({ code: "BETA_EXPIRED" });
   });
 });

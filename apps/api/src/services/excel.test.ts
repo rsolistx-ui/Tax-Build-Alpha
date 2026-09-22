@@ -40,6 +40,8 @@ function baseInput(overrides: Partial<WorkbookInput> = {}): WorkbookInput {
     bankLedger: [],
     receiptEvidence: [],
     openItems: [],
+    receiptsAwaitingReview: [],
+    outstandingClientRequests: [],
     excludedNonbusiness: [],
     transactionReview: [],
     ...overrides,
@@ -113,6 +115,21 @@ describe("buildWorkbook", () => {
       if (row.getCell(1).value === "Report status") statusValue = row.getCell(2).value;
     });
     expect(statusValue).toBe("FINAL");
+  });
+
+  it("marks a packet DRAFT when a receipt or client request still needs action", async () => {
+    const wb = await readWorkbook(await buildWorkbook(baseInput({
+      receiptsAwaitingReview: [{
+        receiptId: "rec_review", date: null, merchant: null, filename: "blurry.jpg", status: "review", validationStatus: "manual_review_required", notes: "Unreadable",
+      }],
+      outstandingClientRequests: [{
+        requestId: "req_1", requestType: "missing_receipt", title: "Need clearer image", status: "requested", dueAt: null, createdAt: "2026-09-20T00:00:00.000Z",
+      }],
+    })));
+    const summary = wb.getWorksheet("SUMMARY")!;
+    expect(cellText(summary, 10, 2)).toBe("DRAFT - ITEMS REQUIRE PROFESSIONAL REVIEW");
+    expect(wb.getWorksheet("RECEIPT REVIEW QUEUE")!.rowCount).toBe(2);
+    expect(wb.getWorksheet("OUTSTANDING CLIENT REQUESTS")!.rowCount).toBe(2);
   });
 });
 

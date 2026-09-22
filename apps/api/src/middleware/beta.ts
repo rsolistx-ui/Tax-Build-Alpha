@@ -33,10 +33,7 @@ export function isValidAdminMasterToken(env: Env, tokenHeader?: string | null): 
  * Everyone else needs an active entitlement evaluated strictly against Neon server time.
  */
 export const requireActiveBeta = createMiddleware<{ Bindings: Env; Variables: AuthedVars }>(async (c, next) => {
-  if (
-    isOwnerEmail(c.env, c.get("userEmail")) ||
-    isValidAdminMasterToken(c.env, c.req.header("x-admin-token"))
-  ) {
+  if (isOwnerEmail(c.env, c.get("userEmail"))) {
     await next();
     return;
   }
@@ -78,17 +75,18 @@ export const requireOwner = createMiddleware<{ Bindings: Env; Variables: AuthedV
   const tokenHeader = c.req.header("x-admin-token");
   const hasValidToken = isValidAdminMasterToken(c.env, tokenHeader);
 
-  // If ADMIN_MASTER_TOKEN is configured in the environment, require the 64-hex token
+  // A token is an additional factor, never an identity or an elevation path.
+  // The caller must first hold a real session for the configured owner/power
+  // user email. This makes a stolen token insufficient on its own.
+  if (!isOwnerEmail(c.env, c.get("userEmail"))) {
+    return c.json({ error: "Owner access required", code: "OWNER_REQUIRED" }, 403);
+  }
+
   if (c.env.ADMIN_MASTER_TOKEN && !hasValidToken) {
     return c.json({
       error: "Admin master security token required",
       code: "MASTER_TOKEN_REQUIRED",
     }, 403);
-  }
-
-  // If token is valid, or if no master token is set, ensure the user is an owner or power user
-  if (!hasValidToken && !isOwnerEmail(c.env, c.get("userEmail"))) {
-    return c.json({ error: "Owner access required", code: "OWNER_REQUIRED" }, 403);
   }
 
   await next();

@@ -677,6 +677,87 @@ export type OpenItemRow = {
   detail: string;
 };
 
+export type ReceiptAwaitingReviewRow = {
+  receiptId: string;
+  date: string | null;
+  merchant: string | null;
+  filename: string;
+  status: "uploaded" | "extracting" | "review" | "failed";
+  validationStatus: string;
+  notes: string | null;
+};
+
+/** Evidence is never silently omitted from a close: any unfiled receipt is a visible exception. */
+export async function getReceiptsAwaitingReview(
+  db: Db,
+  clientId: string,
+  startDate: string | null,
+  endDate: string | null,
+): Promise<ReceiptAwaitingReviewRow[]> {
+  const rows = await db.query<{
+    id: string;
+    extracted_date: string | null;
+    extracted_merchant: string | null;
+    filename: string;
+    status: ReceiptAwaitingReviewRow["status"];
+    validation_status: string | null;
+    notes: string | null;
+  }>(
+    `SELECT id, extracted_date, extracted_merchant, filename, status, validation_status, notes
+     FROM receipts
+     WHERE client_id = $1
+       AND status IN ('uploaded', 'extracting', 'review', 'failed')
+       AND ($2::date IS NULL OR extracted_date IS NULL OR extracted_date >= $2::date)
+       AND ($3::date IS NULL OR extracted_date IS NULL OR extracted_date <= $3::date)
+     ORDER BY created_at ASC, id`,
+    [clientId, startDate, endDate],
+  );
+  return rows.map((row) => ({
+    receiptId: row.id,
+    date: row.extracted_date ? String(row.extracted_date) : null,
+    merchant: row.extracted_merchant,
+    filename: row.filename,
+    status: row.status,
+    validationStatus: row.validation_status ?? "pending",
+    notes: row.notes,
+  }));
+}
+
+export type OutstandingClientRequestRow = {
+  requestId: string;
+  requestType: string;
+  title: string;
+  status: "requested" | "viewed" | "responded";
+  dueAt: string | null;
+  createdAt: string;
+};
+
+/** Requests awaiting firm action or client evidence are part of close completeness. */
+export async function getOutstandingClientRequests(db: Db, clientId: string): Promise<OutstandingClientRequestRow[]> {
+  const rows = await db.query<{
+    id: string;
+    request_type: string;
+    title: string;
+    status: OutstandingClientRequestRow["status"];
+    due_at: string | null;
+    created_at: string;
+  }>(
+    `SELECT id, request_type, title, status, due_at, created_at
+     FROM client_requests
+     WHERE client_id = $1 AND status IN ('requested', 'viewed', 'responded')
+     ORDER BY due_at ASC NULLS LAST, created_at ASC, id`,
+    [clientId],
+  );
+  return rows.map((row) => ({
+    requestId: row.id,
+    requestType: row.request_type,
+    title: row.title,
+    status: row.status,
+    dueAt: row.due_at ? String(row.due_at) : null,
+    createdAt: String(row.created_at),
+  }));
+}
+
 const UNRESOLVED_TRIAGE_STATES = new Set(["unmatched", "needs_review", "likely_match", "receipt_pending"]);
 
 /**

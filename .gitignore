@@ -22,4 +22,6 @@ src-tauri/gen
 .git-credentials
 .netrc
 *.token
+# Never keep an administrator access token in the repository tree.
+Truepost Admin Hex Key.txt
 !apps/web/public/download/Truepost_0.1.0_x64-setup.exe

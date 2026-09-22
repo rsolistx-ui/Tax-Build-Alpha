@@ -124,7 +124,7 @@ export class NativeEsignService {
     };
 
     // Header Banner
-    printLine("FOLIO PRACTICE OS — CERTIFICATE OF COMPLETION", { size: 13, useBold: true, gap: 18 });
+    printLine("TRUEPOST — CERTIFICATE OF COMPLETION", { size: 13, useBold: true, gap: 18 });
     printLine(`Certificate ID: ${certificateId}`, { size: 9, color: rgb(0.4, 0.4, 0.4), gap: 14 });
     printLine("This document has been electronically signed pursuant to the United States Electronic Signatures in", { size: 8.5, color: rgb(0.3, 0.3, 0.3), gap: 10 });
     printLine("Global and National Commerce Act (ESIGN, 15 U.S.C. § 7001 et seq.) and Uniform Electronic Transactions Act (UETA).", { size: 8.5, color: rgb(0.3, 0.3, 0.3), gap: 20 });
@@ -168,7 +168,7 @@ export class NativeEsignService {
       color: rgb(0.25, 0.25, 0.25),
       gap: 18,
     });
-    printLine("Status: COMPLETED · FOLIO SIGNATURE RECORD", {
+    printLine("Status: COMPLETED · TRUEPOST SIGNATURE RECORD", {
       size: 9.5,
       useBold: true,
       color: rgb(0.05, 0.5, 0.25),
@@ -177,7 +177,9 @@ export class NativeEsignService {
 
     const signedPdfBytes = await doc.save();
     const finalHash = await sha256Hex(signedPdfBytes.buffer as ArrayBuffer);
-    const signedR2Key = `signed-documents/${firmId}/${clientId}/${documentId}-certified.pdf`;
+    // A request-specific immutable object key prevents a later signing event
+    // from overwriting the evidence attached to an earlier request.
+    const signedR2Key = `signed-documents/${firmId}/${clientId}/${documentId}/${requestId}-${finalHash.slice(0, 16)}.pdf`;
 
     // 3. Persist to Cloudflare R2
     if (this.env.RECEIPTS) {
@@ -193,6 +195,19 @@ export class NativeEsignService {
        SET r2_key = $1, status = 'confirmed', content_type = 'application/pdf', updated_at = NOW()
        WHERE id = $2 AND client_id = $3`,
       [signedR2Key, documentId, clientId],
+    );
+
+    await this.db.query(
+      `INSERT INTO signature_evidence_events
+        (id, firm_id, client_id, signature_request_id, event_type, document_id,
+         certificate_id, original_hash, final_hash, signed_r2_key, signer_email,
+         signer_name, signer_ip, signer_user_agent)
+       VALUES ($1,$2,$3,$4,'native_document_signed',$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+      [
+        newId("sev"), firmId, clientId, requestId, documentId, certificateId,
+        originalHash, finalHash, signedR2Key, submission.signerEmail,
+        submission.signerName, submission.ipAddress, submission.userAgent,
+      ],
     );
 
     // 5. Update signature request status

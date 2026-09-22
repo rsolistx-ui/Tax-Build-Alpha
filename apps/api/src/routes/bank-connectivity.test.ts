@@ -54,4 +54,14 @@ describe("bankConnectivityRoutes", () => {
     expect(body.plaid.environment).toBe("sandbox");
     expect(body.teller.available).toBe(false);
   });
+
+  it("keeps Plaid's webhook receiver public but closed when Plaid is not configured", async () => {
+    const { bankWebhookRoutes } = await import("./bank-connectivity");
+    const res = await bankWebhookRoutes.request(
+      "/plaid",
+      { method: "POST", body: "{}" },
+      { ...testEnv, PLAID_CLIENT_ID: undefined, PLAID_CLIENT_SECRET: undefined },
+    );
+    expect(res.status).toBe(503);
+  });
 });

@@ -6,6 +6,7 @@ import { requireSession } from "../middleware/session";
 import { requireActiveBeta } from "../middleware/beta";
 import { ensureFirm } from "../services/firm";
 import { ReliabilityEngineerService } from "../services/reliability-engineer";
+import { getActivationReadiness } from "../services/activation-readiness";
 
 export const systemReliabilityRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 systemReliabilityRoutes.use("*", requireSession);
@@ -16,6 +17,16 @@ systemReliabilityRoutes.get("/diagnostics", async (c) => {
   const service = new ReliabilityEngineerService(db, c.env);
   const report = await service.runDiagnostics();
   return c.json(report);
+});
+
+systemReliabilityRoutes.get("/activation-readiness", (c) => {
+  const capabilities = getActivationReadiness(c.env);
+  return c.json({
+    ready: capabilities.filter((capability) => capability.state === "ready").length,
+    setupRequired: capabilities.filter((capability) => capability.state === "setup_required").length,
+    partnerRequired: capabilities.filter((capability) => capability.state === "partner_required").length,
+    capabilities,
+  });
 });
 
 systemReliabilityRoutes.post("/self-heal", async (c) => {

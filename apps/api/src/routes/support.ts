@@ -8,6 +8,7 @@ import { ensureFirm } from "../services/firm";
 import { EmailDispatcherService } from "../services/email-dispatcher";
 import { insertWorkAuditEvent } from "../services/work-audit";
 import { newId } from "../lib/id";
+import { activateSafeScopedRule } from "../services/scoped-rule-automation";
 
 export const supportRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 supportRoutes.use("*", requireSession);
@@ -182,7 +183,7 @@ supportRoutes.post("/request-rule", async (c) => {
     clientName: body.clientName,
   });
 
-  // 3. Store in client_rule_requests for admin to compile
+  // 3. Persist the original instruction before attempting controlled activation.
   await db.query(
     `INSERT INTO client_rule_requests (id, firm_id, client_id, client_name, requested_by, user_email, directive_text, rule_type, status, created_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending_review', NOW())`,
@@ -198,10 +199,47 @@ supportRoutes.post("/request-rule", async (c) => {
     ],
   );
 
+  // 4. Narrow, non-tax client rules may activate immediately for *future*
+  // intake suggestions. They are never retroactively applied here and they
+  // cannot change code, escape the client scope, or make a tax conclusion.
+  const automation = await activateSafeScopedRule({
+    db,
+    env: c.env,
+    firmId: firm.id,
+    clientId: body.clientId,
+    clientName: body.clientName,
+    directiveText: body.directiveText,
+    ruleType: body.ruleType,
+    actorUserId: c.get("userId"),
+  });
+
+  if (automation.status === "activated") {
+    await db.query(
+      `UPDATE client_rule_requests
+       SET status = 'activated', ai_notes = $1, resolved_at = NOW()
+       WHERE id = $2 AND firm_id = $3`,
+      [automation.summary, ticketNumber, firm.id],
+    );
+    await emailDispatcher.sendScopedRuleActivationConfirmation({
+      ticketNumber,
+      userName,
+      userEmail,
+      clientName: body.clientName,
+      summary: automation.summary,
+    }).catch((error) => console.error("[rule-activation-confirmation]", error));
+  } else {
+    await db.query(
+      `UPDATE client_rule_requests SET ai_notes = $1 WHERE id = $2 AND firm_id = $3`,
+      [automation.reason, ticketNumber, firm.id],
+    );
+  }
+
   return c.json({
     ok: true,
     ticketNumber,
-    status: "pending_review",
-    message: "Your custom rule directive has been queued with the Truepost Operations Desk. An automated confirmation has been sent to your email.",
+    status: automation.status,
+    message: automation.status === "activated"
+      ? "Your client-scoped rule is active for future intake suggestions. A confirmation has been sent to your email."
+      : "Your directive is safely queued for practitioner review. An automated confirmation has been sent to your email.",
   });
 });

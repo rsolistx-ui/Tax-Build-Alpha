@@ -1,0 +1,55 @@
+import { createDb } from "../db";
+import type { Env } from "../env";
+import { ReliabilityEngineerService } from "./reliability-engineer";
+import { handleReminderCron } from "./reminders";
+import { TelegramNotifierService } from "./telegram-notifier";
+import { prepareMorningBrief } from "./morning-brief";
+
+export type ScheduledOperationsResult = {
+  ranAt: string;
+  remindersSent: number;
+  firmsWithReminders: number;
+  diagnosticsHealthy: boolean;
+  pendingProfessionalReviews: number;
+  morningRecommendationsCreated: number;
+  notification: "sent" | "not_configured" | "failed";
+};
+
+/**
+ * A deliberately bounded weekday operations run. It performs only reversible,
+ * evidence-preserving work: reminders already due, diagnostics, and a count
+ * of work awaiting a professional. It never files, classifies, changes books,
+ * or sends a client-facing message without the existing request workflow.
+ */
+export async function runScheduledOperations(env: Env): Promise<ScheduledOperationsResult> {
+  const db = createDb(env);
+  const [reminders, diagnostics, firms, pending] = await Promise.all([
+    handleReminderCron(env),
+    new ReliabilityEngineerService(db, env).runDiagnostics(),
+    db.query<{ id: string }>(`SELECT id FROM firms`),
+    db.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM agent_tasks WHERE status = 'awaiting_approval'`,
+    ),
+  ]);
+  const morningBriefs = await Promise.all(firms.map((firm) => prepareMorningBrief(db, firm.id)));
+  const morningRecommendationsCreated = morningBriefs.reduce((total, brief) => total + brief.recommendationsCreated, 0);
+
+  const pendingProfessionalReviews = Number(pending[0]?.count ?? 0);
+  const notifier = new TelegramNotifierService(env);
+  const configured = Boolean(env.TELEGRAM_BOT_TOKEN?.trim() && env.TELEGRAM_CHAT_ID?.trim());
+  const status = await notifier.notifySystemHealth({
+    healthy: diagnostics.overallHealthy,
+    details: `Weekday operations completed. ${reminders.remindersSent} reminder${reminders.remindersSent === 1 ? "" : "s"} staged; ${morningRecommendationsCreated} new review recommendation${morningRecommendationsCreated === 1 ? "" : "s"}; ${pendingProfessionalReviews} item${pendingProfessionalReviews === 1 ? "" : "s"} awaiting professional review.`,
+    latencyMs: diagnostics.checks.postgres.latencyMs,
+  });
+
+  return {
+    ranAt: new Date().toISOString(),
+    remindersSent: reminders.remindersSent,
+    firmsWithReminders: reminders.firms,
+    diagnosticsHealthy: diagnostics.overallHealthy,
+    pendingProfessionalReviews,
+    morningRecommendationsCreated,
+    notification: !configured ? "not_configured" : status.success ? "sent" : "failed",
+  };
+}
