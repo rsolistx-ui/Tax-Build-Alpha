@@ -10,7 +10,7 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg'],
+      includeAssets: ['favicon.ico', 'apple-touch-icon.png'],
       manifest: {
         name: 'Truepost Practice OS',
         short_name: 'Truepost',
@@ -74,22 +74,25 @@ export default defineConfig({
         categories: ['business', 'finance', 'productivity'],
         shortcuts: [
           {
-            name: 'Scan Receipt',
-            short_name: 'Scan',
-            description: 'Scan a receipt with camera',
-            url: '/receipts/scan',
+            name: 'Clients',
+            short_name: 'Clients',
+            description: 'Open a client to upload a receipt or review work',
+            url: '/clients',
             icons: [{ src: '/icons/scan-shortcut.png', sizes: '192x192' }]
           },
           {
-            name: 'New Invoice',
-            short_name: 'Invoice',
-            description: 'Create a new invoice',
-            url: '/billing/new',
+            name: 'Work Queue',
+            short_name: 'Queue',
+            description: 'See work awaiting review across all clients',
+            url: '/work-queue',
             icons: [{ src: '/icons/invoice-shortcut.png', sizes: '192x192' }]
           },
         ],
       },
       workbox: {
+        // generateSW writes its own sw.js and never runs public/sw.js, so push
+        // notification handling is injected here instead of living there.
+        importScripts: ['/push-handlers.js'],
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
         // The initial experience is the dashboard and intake shell. The
         // receipt workspace and HEIC converter are lazy routes, so avoid
