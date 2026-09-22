@@ -32,13 +32,13 @@ export function PwaInstallBanner() {
         {showIOSHint && !deferred ? (
           <>
             <Share className="h-4 w-4 shrink-0" />
-            <span className="flex-1">Install Folio: tap Share then Add to Home Screen for camera capture on iOS.</span>
+            <span className="flex-1">Install Truepost: tap Share then Add to Home Screen for camera capture on iOS.</span>
             <Button variant="ghost" size="icon" onClick={() => { localStorage.setItem("pwa-ios-dismissed", "1"); setShowIOSHint(false); }} aria-label="Dismiss"><X className="h-4 w-4" /></Button>
           </>
         ) : (
           <>
             <Download className="h-4 w-4 shrink-0" />
-            <span className="flex-1">Install Folio for one-tap receipt capture.</span>
+            <span className="flex-1">Install Truepost for one-tap receipt capture.</span>
             <Button size="sm" onClick={async () => { await deferred?.prompt(); setDeferred(null); }}>Install</Button>
             <Button variant="ghost" size="icon" onClick={() => setDismissed(true)} aria-label="Dismiss"><X className="h-4 w-4" /></Button>
           </>

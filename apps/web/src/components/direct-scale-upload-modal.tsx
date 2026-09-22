@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Upload,
   Smartphone,
@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
+import { useDialogFocus } from "@/hooks/use-dialog-focus";
 
 export function DirectScaleUploadModal({
   isOpen,
@@ -27,13 +28,10 @@ export function DirectScaleUploadModal({
   onUploadSuccess?: () => void;
 }) {
   const [activeTab, setActiveTab] = useState<"scale_upload" | "sms_drop">("scale_upload");
-
-  // Direct R2 Upload state
-  const [uploadFile, setUploadFile] = useState<File | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState<number>(0);
-  const [uploadSuccessMessage, setUploadSuccessMessage] = useState<string | null>(null);
-  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [largeFile, setLargeFile] = useState<File | null>(null);
+  const [largeUploadProgress, setLargeUploadProgress] = useState(0);
+  const [largeUploadBusy, setLargeUploadBusy] = useState(false);
+  const [largeUploadMessage, setLargeUploadMessage] = useState<string | null>(null);
 
   // SMS Drop Simulator state
   const [senderPhone, setSenderPhone] = useState(clientPhone || "+1 (555) 234-5678");
@@ -45,57 +43,18 @@ export function DirectScaleUploadModal({
     message: string;
     matchedBankTransactionId?: string | null;
   } | null>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useDialogFocus(isOpen, () => {
+    if (!largeUploadBusy && !simulatingSms) onClose();
+  });
+  const resumeKey = `truepost:direct-upload:${clientId}`;
+
+  useEffect(() => {
+    if (!isOpen) return;
+    closeButtonRef.current?.focus();
+  }, [isOpen]);
 
   if (!isOpen) return null;
-
-  async function handleDirectR2Upload() {
-    if (!uploadFile) return;
-    setUploading(true);
-    setUploadProgress(15);
-    setUploadError(null);
-    setUploadSuccessMessage(null);
-
-    try {
-      // Step 1: Initialize ticket and R2 key
-      const init = await api<{
-        documentId: string;
-        targetKey: string;
-        directStreamUrl: string;
-      }>(`/api/clients/${clientId}/documents/direct-upload-init`, {
-        method: "POST",
-        body: JSON.stringify({
-          filename: uploadFile.name,
-          mimeType: uploadFile.type || "application/pdf",
-          fileSize: uploadFile.size,
-          category: "statements",
-        }),
-      });
-
-      setUploadProgress(45);
-
-      // Step 2: Stream binary directly to Cloudflare R2
-      const res = await fetch(init.directStreamUrl, {
-        method: "PUT",
-        headers: {
-          "Content-Type": uploadFile.type || "application/octet-stream",
-        },
-        body: uploadFile,
-      });
-
-      if (!res.ok) {
-        throw new Error(`Direct R2 upload stream failed with status ${res.status}`);
-      }
-
-      setUploadProgress(100);
-      setUploadSuccessMessage(`Successfully uploaded ${uploadFile.name} directly to Cloudflare R2 (${(uploadFile.size / (1024 * 1024)).toFixed(1)} MB).`);
-      setUploadFile(null);
-      onUploadSuccess?.();
-    } catch (e: any) {
-      setUploadError(e?.message || "Direct R2 stream upload failed.");
-    } finally {
-      setUploading(false);
-    }
-  }
 
   async function handleSimulateSmsDrop() {
     setSimulatingSms(true);
@@ -129,11 +88,91 @@ export function DirectScaleUploadModal({
     }
   }
 
+  async function sha256(value: ArrayBuffer): Promise<string> {
+    const digest = await crypto.subtle.digest("SHA-256", value);
+    return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  }
+
+  async function uploadLargeDocument() {
+    if (!largeFile) return;
+    setLargeUploadBusy(true);
+    setLargeUploadProgress(0);
+    setLargeUploadMessage(null);
+    let sessionId: string | null = null;
+    try {
+      const finalHash = await sha256(await largeFile.arrayBuffer());
+      const saved = (() => {
+        try {
+          return JSON.parse(window.localStorage.getItem(resumeKey) || "null") as { sessionId: string; filename: string; sizeBytes: number; sha256: string } | null;
+        } catch {
+          return null;
+        }
+      })();
+      let partSizeBytes: number;
+      let completedParts = new Set<number>();
+      if (saved && saved.filename === largeFile.name && saved.sizeBytes === largeFile.size && saved.sha256 === finalHash) {
+        try {
+          const status = await api<{ sessionId: string; partSizeBytes: number; completedParts: number[]; status: string }>(`/api/clients/${clientId}/documents/direct-upload/${saved.sessionId}`);
+          if (status.status !== "completed") {
+            sessionId = status.sessionId;
+            partSizeBytes = status.partSizeBytes;
+            completedParts = new Set(status.completedParts);
+          } else {
+            window.localStorage.removeItem(resumeKey);
+          }
+        } catch {
+          window.localStorage.removeItem(resumeKey);
+        }
+      }
+      if (!sessionId) {
+        const started = await api<{ sessionId: string; partSizeBytes: number }>(`/api/clients/${clientId}/documents/direct-upload-init`, {
+          method: "POST",
+          body: JSON.stringify({ filename: largeFile.name, contentType: largeFile.type, sizeBytes: largeFile.size, sha256: finalHash }),
+        });
+        sessionId = started.sessionId;
+        partSizeBytes = started.partSizeBytes;
+        window.localStorage.setItem(resumeKey, JSON.stringify({ sessionId, filename: largeFile.name, sizeBytes: largeFile.size, sha256: finalHash }));
+      }
+      const partCount = Math.ceil(largeFile.size / partSizeBytes!);
+      setLargeUploadProgress(Math.round((completedParts.size / partCount) * 100));
+      for (let index = 0; index < partCount; index += 1) {
+        if (completedParts.has(index + 1)) continue;
+        const part = largeFile.slice(index * partSizeBytes!, Math.min((index + 1) * partSizeBytes!, largeFile.size));
+        const partBytes = await part.arrayBuffer();
+        await api(`/api/clients/${clientId}/documents/direct-upload-stream/${sessionId}/${index + 1}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/octet-stream", "x-truepost-part-sha256": await sha256(partBytes) },
+          body: partBytes,
+        });
+        setLargeUploadProgress(Math.round(((index + 1) / partCount) * 100));
+      }
+      await api(`/api/clients/${clientId}/documents/direct-upload-complete/${sessionId}`, { method: "POST" });
+      window.localStorage.removeItem(resumeKey);
+      setLargeUploadMessage("Document secured and placed in Documents for professional review.");
+      setLargeFile(null);
+      onUploadSuccess?.();
+    } catch (error) {
+      setLargeUploadMessage(`${error instanceof Error ? error.message : "Large-document upload did not complete."} Keep this browser and select the same file to resume within 24 hours.`);
+    } finally {
+      setLargeUploadBusy(false);
+    }
+  }
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+      onMouseDown={() => {
+        if (!largeUploadBusy && !simulatingSms) onClose();
+      }}
+    >
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="evidence-intake-title"
+        aria-describedby="evidence-intake-description"
         className="w-full max-w-xl rounded-xl border border-[var(--color-border)] bg-[var(--color-card)] shadow-2xl overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-100"
-        onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-[var(--color-border)] px-5 py-4 bg-[var(--color-muted)]/30">
@@ -142,17 +181,21 @@ export function DirectScaleUploadModal({
               <Cloud className="h-5 w-5" />
             </div>
             <div>
-              <h3 className="text-base font-bold text-[var(--color-foreground)]">
-                Direct R2 Scale Upload &amp; SMS Receipt Drop
+              <h3 id="evidence-intake-title" className="text-base font-bold text-[var(--color-foreground)]">
+                Evidence intake tools
               </h3>
-              <p className="text-xs text-[var(--color-muted-foreground)]">
+              <p id="evidence-intake-description" className="text-xs text-[var(--color-muted-foreground)]">
                 Enterprise document intake for {clientName}
               </p>
             </div>
           </div>
           <button
+            ref={closeButtonRef}
+            data-dialog-autofocus
             type="button"
             onClick={onClose}
+            disabled={largeUploadBusy || simulatingSms}
+            aria-label="Close evidence intake tools"
             className="rounded-md p-1 text-[var(--color-muted-foreground)] hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)]"
           >
             <X className="h-4 w-4" />
@@ -160,9 +203,13 @@ export function DirectScaleUploadModal({
         </div>
 
         {/* Tab Selector */}
-        <div className="flex border-b border-[var(--color-border)] px-5 pt-3 gap-4 text-xs font-semibold">
+        <div role="tablist" aria-label="Evidence intake method" className="flex border-b border-[var(--color-border)] px-5 pt-3 gap-4 text-xs font-semibold">
           <button
             type="button"
+            role="tab"
+            id="evidence-upload-tab"
+            aria-controls="evidence-upload-panel"
+            aria-selected={activeTab === "scale_upload"}
             onClick={() => setActiveTab("scale_upload")}
             className={`pb-2.5 border-b-2 transition-colors flex items-center gap-1.5 ${
               activeTab === "scale_upload"
@@ -170,10 +217,14 @@ export function DirectScaleUploadModal({
                 : "border-transparent text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)]"
             }`}
           >
-            <Upload className="h-3.5 w-3.5" /> Direct R2 Scale Upload (Up to 100MB)
+            <Upload className="h-3.5 w-3.5" /> Large-document intake
           </button>
           <button
             type="button"
+            role="tab"
+            id="evidence-sms-tab"
+            aria-controls="evidence-sms-panel"
+            aria-selected={activeTab === "sms_drop"}
             onClick={() => setActiveTab("sms_drop")}
             className={`pb-2.5 border-b-2 transition-colors flex items-center gap-1.5 ${
               activeTab === "sms_drop"
@@ -181,119 +232,40 @@ export function DirectScaleUploadModal({
                 : "border-transparent text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)]"
             }`}
           >
-            <Smartphone className="h-3.5 w-3.5" /> SMS Direct-Drop Webhook
+            <Smartphone className="h-3.5 w-3.5" /> SMS intake test
           </button>
         </div>
 
         {/* Body Content */}
         <div className="p-5 space-y-4">
           {activeTab === "scale_upload" ? (
-            <div className="space-y-4">
-              <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3 text-xs text-emerald-900 dark:text-emerald-200 space-y-1">
-                <div className="font-semibold flex items-center gap-1.5">
-                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-                  Bypasses Worker Memory Limits
-                </div>
-                <p className="text-[11px] text-[var(--color-muted-foreground)] leading-relaxed">
-                  Large bank PDF statements, full-year scanned organizers, and high-resolution batch receipts stream directly into your Cloudflare R2 bucket with zero memory buffering and zero 413 errors.
-                </p>
+            <div id="evidence-upload-panel" role="tabpanel" aria-labelledby="evidence-upload-tab" className="space-y-4">
+              <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-950 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-100 space-y-1">
+                <div className="font-semibold flex items-center gap-1.5"><Cloud className="h-3.5 w-3.5 text-[#0c4eb3]" /> Resumable evidence intake</div>
+                <p className="text-[11px] text-[var(--color-muted-foreground)] leading-relaxed">Upload a supported document up to 100 MB. Each 5 MB part is checksum-verified before R2 accepts it. If a connection drops, choose the same file again within 24 hours and Truepost resumes verified parts. The document appears only after the upload completes and always starts in professional review.</p>
               </div>
-
-              {/* File Drop Area */}
-              <div className="rounded-lg border-2 border-dashed border-[var(--color-border)] p-6 text-center hover:bg-[var(--color-muted)]/40 transition-colors">
-                <Upload className="h-8 w-8 mx-auto text-[var(--color-muted-foreground)] mb-2" />
-                {uploadFile ? (
-                  <div className="space-y-1">
-                    <p className="text-xs font-bold text-[var(--color-foreground)]">{uploadFile.name}</p>
-                    <p className="text-[11px] text-[var(--color-muted-foreground)]">
-                      {(uploadFile.size / (1024 * 1024)).toFixed(2)} MB · {uploadFile.type || "Document"}
-                    </p>
-                  </div>
-                ) : (
-                  <div>
-                    <p className="text-xs font-medium text-[var(--color-foreground)]">
-                      Drag &amp; drop large files or click to browse
-                    </p>
-                    <p className="text-[11px] text-[var(--color-muted-foreground)] mt-1">
-                      PDF, ZIP, CSV, TIFF up to 100MB
-                    </p>
-                  </div>
-                )}
-                <input
-                  type="file"
-                  id="direct-scale-file"
-                  className="hidden"
-                  onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
-                />
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="mt-3 text-xs"
-                  onClick={() => document.getElementById("direct-scale-file")?.click()}
-                >
-                  Select Large File
-                </Button>
-              </div>
-
-              {/* Progress Bar */}
-              {uploading && (
-                <div className="space-y-1.5">
-                  <div className="flex justify-between text-xs font-medium">
-                    <span>Streaming to R2 Bucket...</span>
-                    <span>{uploadProgress}%</span>
-                  </div>
-                  <div className="h-2 w-full rounded-full bg-[var(--color-muted)] overflow-hidden">
-                    <div
-                      className="h-full bg-emerald-600 transition-all duration-300"
-                      style={{ width: `${uploadProgress}%` }}
-                    />
-                  </div>
-                </div>
-              )}
-
-              {uploadSuccessMessage && (
-                <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-800 dark:text-emerald-300 flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 shrink-0" />
-                  <span>{uploadSuccessMessage}</span>
-                </div>
-              )}
-
-              {uploadError && (
-                <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-800 dark:text-rose-300 flex items-center gap-2">
-                  <AlertCircle className="h-4 w-4 shrink-0" />
-                  <span>{uploadError}</span>
-                </div>
-              )}
-
+              <label className="block space-y-1.5 text-xs font-semibold text-[var(--color-muted-foreground)]">Document to secure
+                <input type="file" disabled={largeUploadBusy} accept=".pdf,.png,.jpg,.jpeg,.heic,.docx,.xlsx,.csv,application/pdf,image/png,image/jpeg,image/heic,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" onChange={(event) => { setLargeFile(event.target.files?.[0] ?? null); setLargeUploadMessage(null); setLargeUploadProgress(0); }} className="mt-1 block w-full rounded-md border border-[var(--color-border)] bg-[var(--color-card)] p-2 text-xs font-normal" />
+              </label>
+              {largeFile ? <p className="text-xs text-[var(--color-muted-foreground)]">{largeFile.name} · {(largeFile.size / 1024 / 1024).toFixed(1)} MB</p> : null}
+              {largeUploadBusy ? <div className="space-y-1"><div className="h-1.5 overflow-hidden rounded-full bg-[var(--color-muted)]"><div className="h-full bg-[#0c4eb3] transition-[width]" style={{ width: `${largeUploadProgress}%` }} /></div><p className="text-xs text-[var(--color-muted-foreground)]">Securing document… {largeUploadProgress}%</p></div> : null}
+              {largeUploadMessage ? <p role="status" className="rounded-md bg-[var(--color-muted)] p-2 text-xs text-[var(--color-foreground)]">{largeUploadMessage}</p> : null}
               <div className="flex items-center justify-end gap-2 pt-2 border-t border-[var(--color-border)]">
-                <Button size="sm" variant="ghost" onClick={onClose} disabled={uploading}>
+                <Button size="sm" variant="ghost" onClick={onClose}>
                   Close
                 </Button>
-                <Button
-                  size="sm"
-                  onClick={handleDirectR2Upload}
-                  disabled={!uploadFile || uploading}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs"
-                >
-                  {uploading ? (
-                    <>
-                      <RefreshCw className="h-3 w-3 animate-spin mr-1.5" /> Streaming...
-                    </>
-                  ) : (
-                    "Upload Directly to R2"
-                  )}
-                </Button>
+                <Button size="sm" onClick={() => void uploadLargeDocument()} disabled={!largeFile || largeUploadBusy}>{largeUploadBusy ? "Uploading…" : "Secure document"}</Button>
               </div>
             </div>
           ) : (
-            <div className="space-y-4">
+            <div id="evidence-sms-panel" role="tabpanel" aria-labelledby="evidence-sms-tab" className="space-y-4">
               <div className="rounded-lg border border-indigo-500/20 bg-indigo-500/5 p-3 text-xs text-indigo-900 dark:text-indigo-200 space-y-1">
                 <div className="font-semibold flex items-center gap-1.5">
                   <Smartphone className="h-3.5 w-3.5 text-indigo-600" />
-                  Client SMS Inbound Webhook
+                  Internal SMS intake test
                 </div>
                 <p className="text-[11px] text-[var(--color-muted-foreground)] leading-relaxed">
-                  Clients text photo receipts directly to your firm's SMS number. Truepost automatically matches the MMS image to open missing receipt requests, marks them satisfied, and clears the bank exception.
+                  This is an internal test for a carrier-authenticated SMS intake. Production SMS remains unavailable until Twilio credentials and webhook validation are configured. Incoming images are routed to professional review; they never silently clear a bank exception or client request.
                 </p>
               </div>
 
@@ -376,7 +348,7 @@ export function DirectScaleUploadModal({
                       <RefreshCw className="h-3 w-3 animate-spin mr-1.5" /> Ingesting MMS...
                     </>
                   ) : (
-                    "Simulate Inbound SMS Drop"
+                    "Run internal intake test"
                   )}
                 </Button>
               </div>

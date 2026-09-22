@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback, Fragment } from 'react';
 import { HyperFormula } from 'hyperformula';
+import { HYPERFORMULA_LICENSE_KEY } from '@/lib/hyperformula-license';
 import { TAX_FUNCTIONS, TaxFunctionRegistry } from '@/lib/tax-functions';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -90,7 +91,7 @@ export function TaxWorkpaper({ clientId, taxYear }: { clientId: string; taxYear:
 
     const hfSheets: Record<string, string[][]> = {};
     sheetNames.forEach(name => { hfSheets[name] = [['']]; });
-    const hf = HyperFormula.buildFromSheets(hfSheets, { licenseKey: 'gpl-v3' });
+    const hf = HyperFormula.buildFromSheets(hfSheets, { licenseKey: HYPERFORMULA_LICENSE_KEY });
     hfRef.current = hf;
 
     const newSheets = new Map<string, WorkpaperSheet>();

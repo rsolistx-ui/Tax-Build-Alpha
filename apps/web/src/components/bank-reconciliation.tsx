@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { formatDateTime } from "@/lib/formatters";
+import { BankFeedConnect } from "@/components/bank-feed-connect";
 
 type Mapping = {
   date: string;
@@ -447,13 +448,10 @@ export function BankReconciliation({
                 Folio maps the file, normalizes transactions, blocks duplicate reimports, and prepares receipt matches before you review them.
               </CardDescription>
             </div>
-            <span className="hidden items-center gap-1.5 rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 sm:inline-flex">
-              <Link2 className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
-              Direct Feed Ready (Plaid / Live Sync)
-            </span>
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
+          <BankFeedConnect clientId={clientId} onConnected={() => void loadTransactions()} />
           <label className="flex cursor-pointer flex-col items-center justify-center rounded-[var(--radius-lg)] border border-dashed border-[var(--color-border)] bg-[var(--color-muted)]/40 px-6 py-10 text-center hover:bg-[var(--color-muted)]/70">
             <Upload className="mb-3 h-5 w-5 text-[var(--color-muted-foreground)]" />
             <span className="text-sm font-medium">{busy ? "Reading bank file…" : file ? file.name : "Choose a bank CSV"}</span>

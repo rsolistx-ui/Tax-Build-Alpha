@@ -1,5 +1,5 @@
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
-import { Bot, Building2, Calendar, ClipboardList, Clock, FolderKanban, Headphones, LayoutDashboard, Lightbulb, LogOut, Map, Sparkles, Users, Search } from "lucide-react";
+import { Bot, Building2, Calendar, ClipboardList, Clock, FolderKanban, Headphones, LayoutDashboard, Lightbulb, LogOut, Map, Sparkles, Users, Search, Settings } from "lucide-react";
 import { useEffect, useState } from "react";
 import { authClient } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
@@ -47,12 +47,6 @@ export function AppShell({
 
   useEffect(() => {
     setTourOpen(shouldShowWelcomeTour());
-    try {
-      if (!localStorage.getItem("folio_vip_onboarding_shown")) {
-        setVipOnboardingOpen(true);
-        localStorage.setItem("folio_vip_onboarding_shown", "true");
-      }
-    } catch {}
   }, []);
 
   async function signOut() {
@@ -209,6 +203,9 @@ export function AppShell({
               </span>
             ) : null}
             <span className="text-sm text-[var(--color-muted-foreground)]">{userName}</span>
+            <Button asChild variant="ghost" size="icon" aria-label="Connections and settings" title="Connections and settings">
+              <Link to="/connections"><Settings className="h-4 w-4" /></Link>
+            </Button>
             <ThemeToggle />
             <Button variant="ghost" size="icon" onClick={signOut} aria-label="Sign out">
               <LogOut className="h-4 w-4" />

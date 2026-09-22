@@ -176,8 +176,6 @@ export function LoginPage() {
         setError("Master security token must be exactly 64 hexadecimal characters.");
         return;
       }
-      // Save master token into session storage
-      setAdminToken(trimmedToken);
     }
 
     // 3. Authenticate User Credentials
@@ -185,15 +183,13 @@ export function LoginPage() {
     setLoading(false);
 
     if (err) {
-      // If BetterAuth credentials failed, but a valid 64-hex master token is entered,
-      // allow fallback to the admin workspace via constant-time token
-      if (trimmedToken.length === 64) {
-        navigate("/");
-        return;
-      }
       setError(err.message || "Sign in failed. Check your email and password.");
       return;
     }
+
+    // A master token is an additional owner-console factor only. It cannot
+    // create a browser session or recover a forgotten password by itself.
+    if (trimmedToken) setAdminToken(trimmedToken);
 
     navigate("/");
   }
@@ -274,7 +270,7 @@ export function LoginPage() {
             </div>
             <CardDescription className="text-xs">
               {loginMode === "password"
-                ? "Enter your firm email, password, and optional master token."
+                ? "Enter your firm email and password. Owners may add their console token after signing in."
                 : "Enter the 6-digit Fast-Pass pairing code generated on your invite or primary PC."}
             </CardDescription>
           </CardHeader>
@@ -324,7 +320,7 @@ export function LoginPage() {
                   >
                     <span className="flex items-center gap-1.5">
                       <KeyRound className="h-3.5 w-3.5 text-emerald-600" />
-                      <span>Master Security Token (64-Char Superadmin)</span>
+                      <span>Owner Console Token (64 characters)</span>
                     </span>
                     {showSuperuserField ? (
                       <ChevronUp className="h-3.5 w-3.5" />
@@ -336,7 +332,7 @@ export function LoginPage() {
                   {showSuperuserField ? (
                     <div className="mt-2.5 space-y-1.5 border-t border-[var(--color-border)] pt-2">
                       <Label htmlFor="masterToken" className="text-[11px] text-[var(--color-muted-foreground)]">
-                        64-Hexadecimal Token (Indefinite Superadmin Access)
+                        64-hexadecimal token for owner-console actions
                       </Label>
                       <Input
                         id="masterToken"
@@ -347,7 +343,7 @@ export function LoginPage() {
                         className="font-mono text-xs tracking-wider h-8"
                       />
                       <p className="text-[10px] text-[var(--color-muted-foreground)]">
-                        Bypasses license expiry and unlocks backend engineering directives.
+                        This is a second factor for protected owner actions; it never replaces your password.
                       </p>
                     </div>
                   ) : null}

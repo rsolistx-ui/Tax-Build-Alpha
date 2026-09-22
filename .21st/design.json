@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "project": {
+    "name": "folio",
+    "productType": "evidence-first practice operations workspace",
+    "stack": ["React", "Vite", "Tailwind CSS", "Radix primitives"]
+  },
+  "sources": {
+    "tokens": [],
+    "components": [],
+    "assets": [],
+    "instructions": []
+  },
+  "design": {
+    "colorMode": "adaptive light and dark",
+    "colors": {"identity":"Truepost blue", "base":"ink, paper, slate", "states":"semantic success, warning, destructive"},
+    "typography": {"role":"operational clarity, tabular financial values"},
+    "spacing": {"rhythm":"compact daily work, generous sectional separation"},
+    "radius": {"controls":"6-8px", "identity and notices":"12px"},
+    "shadows": {"use":"reserved for temporary notices and identity mark"},
+    "motion": {"use":"functional state changes only"},
+    "density": "calm operational"
+  },
+  "components": {
+    "installed": [],
+    "preferredPrimitives": [],
+    "patterns": []
+  },
+  "constraints": {
+    "must": ["Keep evidence, review, reconciliation, and close packet findable within one daily flow.", "Use the supplied TP mark as compact brand identity.", "Preserve all specialist capabilities without presenting 21 peer tabs."],
+    "avoid": ["Generic AI SaaS gradients, decorative glass, fabricated live metrics, and card-grid dashboards."]
+  },
+  "decisions": ["Evidence Ledger workspace: six daily close destinations; specialist tools nest in a native select control; blue is reserved for identity and intentional action."],
+  "evidence": [],
+  "generatedAt": "2026-09-21T04:48:30.896Z"
+}

@@ -1,4 +1,5 @@
 import { FunctionArgumentType, FunctionPlugin, HyperFormula, type ImplementedFunctions } from 'hyperformula';
+import { HYPERFORMULA_LICENSE_KEY } from './hyperformula-license';
 
 export interface TaxFunctionRegistry {
   name: string;
@@ -457,7 +458,7 @@ export function createTaxFunctionEngine(): HyperFormula {
   return HyperFormula.buildFromSheets(
     { 'TaxFunctions': [['']] },
     {
-      licenseKey: 'gpl-v3',
+      licenseKey: HYPERFORMULA_LICENSE_KEY,
       useColumnIndex: false,
     }
   );

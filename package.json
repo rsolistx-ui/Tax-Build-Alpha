@@ -16,6 +16,8 @@
     "auth:migrate:remote": "npm run db:migrate:remote -w @folio/api",
     "db:migrate:neon": "node scripts/neon-migrate.mjs",
     "db:verify:neon": "node scripts/verify-neon-schema.mjs",
+    "license:hyperformula": "powershell -ExecutionPolicy Bypass -File scripts/set-hyperformula-license.ps1",
+    "smoke:plaid:sandbox": "node scripts/smoke-plaid-sandbox.mjs",
     "deploy:api": "npm run build -w @folio/web && npm run deploy -w @folio/api",
     "deploy:web": "npm run build -w @folio/web",
     "deploy:production": "powershell -ExecutionPolicy Bypass -File scripts/bootstrap-production.ps1",

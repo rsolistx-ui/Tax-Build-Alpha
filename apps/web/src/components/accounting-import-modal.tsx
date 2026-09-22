@@ -4,7 +4,6 @@ import {
   FileSpreadsheet,
   CheckCircle2,
   AlertTriangle,
-  RotateCcw,
   X,
   Loader2,
   ShieldCheck,
@@ -13,6 +12,7 @@ import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
+import { useDialogFocus } from "@/hooks/use-dialog-focus";
 
 type SourceType =
   | "transactions"
@@ -27,16 +27,11 @@ interface ClientOption {
   name: string;
 }
 
-interface ImportJobResult {
-  jobId: string;
-  status: "completed" | "failed" | "partial";
-  totalRows: number;
-  processedRows: number;
-  failedRows: number;
-  created: Record<string, number>;
-  updated: Record<string, number>;
-  skipped: Record<string, number>;
-  errors: Array<{ row: number; message: string; data?: any }>;
+interface MigrationProof {
+  sourceRowCount: number;
+  duplicateCandidateCount: number;
+  readyForMappedImport: boolean;
+  findings: Array<{ row: number | null; severity: "error" | "warning"; message: string }>;
 }
 
 interface AccountingImportModalProps {
@@ -57,20 +52,18 @@ export function AccountingImportModal({
   const [clients, setClients] = useState<ClientOption[]>([]);
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
-  const [stage, setStage] = useState<"select" | "processing" | "result">("select");
-  const [result, setResult] = useState<ImportJobResult | null>(null);
+  const [stage, setStage] = useState<"select" | "processing" | "proof" | "applying">("select");
+  const [proof, setProof] = useState<MigrationProof | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [rollingBack, setRollingBack] = useState(false);
-  const [rollbackDone, setRollbackDone] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useDialogFocus(isOpen, onClose);
 
   useEffect(() => {
     if (isOpen) {
       void loadClients();
       setStage("select");
-      setResult(null);
+      setProof(null);
       setError(null);
-      setRollbackDone(false);
       if (defaultClientId) setSelectedClientId(defaultClientId);
     }
   }, [isOpen, defaultClientId]);
@@ -84,7 +77,7 @@ export function AccountingImportModal({
     }
   }
 
-  function handleFileDrop(e: React.DragEvent<HTMLDivElement>) {
+  function handleFileDrop(e: React.DragEvent<HTMLElement>) {
     e.preventDefault();
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       const dropped = e.dataTransfer.files[0];
@@ -100,7 +93,7 @@ export function AccountingImportModal({
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!file) {
-      setError("Please select an exported CSV file to import.");
+      setError("Please select an exported CSV file to assess.");
       return;
     }
 
@@ -111,54 +104,46 @@ export function AccountingImportModal({
     try {
       const formData = new FormData();
       formData.append("file", file);
-      formData.append(
-        "options",
-        JSON.stringify({
-          sourceType,
-          clientId: selectedClientId || undefined,
-          options: {
-            skipDuplicates: true,
-            dryRun: false,
-            createMissingClients: true,
-            defaultClientId: selectedClientId || undefined,
-          },
-        })
-      );
-
-      // 1. Create import job via legacy migration endpoint
-      const jobRes = await api<{ jobId: string }>("/api/wave-import/jobs", {
+      formData.append("sourceType", sourceType);
+      const response = await api<{ proof: MigrationProof }>("/api/wave-import/proof", {
         method: "POST",
         body: formData,
       });
-
-      // 2. Process import
-      const processRes = await api<{ result: ImportJobResult }>(
-        `/api/wave-import/jobs/${jobRes.jobId}/process`,
-        { method: "POST" }
-      );
-
-      setResult(processRes.result);
-      setStage("result");
-      onSuccess?.();
+      setProof(response.proof);
+      setStage("proof");
     } catch (err: any) {
-      setError(err?.message || "Failed to import file. Please verify CSV formatting.");
+      setError(err?.message || "Failed to assess file. Please verify CSV formatting.");
       setStage("select");
     } finally {
       setLoading(false);
     }
   }
 
-  async function handleRollback() {
-    if (!result?.jobId) return;
-    setRollingBack(true);
+  async function applyImport() {
+    if (!file) {
+      setError("Select an exported CSV file to import.");
+      return;
+    }
+    if (sourceType === "transactions" && !selectedClientId) {
+      setError("Select the client whose books will receive these transactions.");
+      return;
+    }
+    setStage("applying");
+    setLoading(true);
+    setError(null);
     try {
-      await api(`/api/wave-import/jobs/${result.jobId}/rollback`, { method: "POST" });
-      setRollbackDone(true);
+      const formData = new FormData();
+      formData.append("file", file);
+      if (selectedClientId) formData.append("clientId", selectedClientId);
+      if (sourceType !== "transactions") formData.append("sourceType", sourceType);
+      await api(sourceType === "transactions" ? "/api/wave-import/transactions/apply" : "/api/wave-import/apply", { method: "POST", body: formData });
       onSuccess?.();
-    } catch (err: any) {
-      setError(err?.message || "Failed to rollback import.");
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not apply this migration.");
+      setStage("proof");
     } finally {
-      setRollingBack(false);
+      setLoading(false);
     }
   }
 
@@ -166,10 +151,12 @@ export function AccountingImportModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
-      <Card className="relative w-full max-w-lg border border-[var(--color-border)] bg-[var(--color-card)] shadow-2xl">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="csv-migration-title" aria-describedby="csv-migration-description" className="w-full max-w-lg">
+      <Card className="relative w-full border border-[var(--color-border)] bg-[var(--color-card)] shadow-2xl">
         <button
           type="button"
           onClick={onClose}
+          data-dialog-autofocus
           className="absolute right-4 top-4 rounded-md p-1 text-[var(--color-muted-foreground)] hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)]"
           aria-label="Close"
         >
@@ -182,9 +169,9 @@ export function AccountingImportModal({
               <UploadCloud className="h-5 w-5" />
             </span>
             <div>
-              <CardTitle className="text-base">1-Click Accounting CSV Migration</CardTitle>
-              <CardDescription className="text-xs">
-                Import historical books and transactions into Folio's verified accounting engine.
+              <CardTitle id="csv-migration-title" className="text-base">CSV Migration Proof</CardTitle>
+              <CardDescription id="csv-migration-description" className="text-xs">
+                Analyze a source export before any data is written. Nothing in this step changes the books.
               </CardDescription>
             </div>
           </div>
@@ -241,7 +228,8 @@ export function AccountingImportModal({
               ) : null}
 
               {/* Drag and Drop Zone */}
-              <div
+              <button
+                type="button"
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={handleFileDrop}
                 onClick={() => fileInputRef.current?.click()}
@@ -277,12 +265,12 @@ export function AccountingImportModal({
                     }
                   }}
                 />
-              </div>
+              </button>
 
               <div className="flex items-center justify-between pt-2">
                 <span className="inline-flex items-center gap-1.5 text-xs text-[var(--color-muted-foreground)]">
                   <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
-                  Duplicates automatically skipped
+                  Read-only assessment — no rows written
                 </span>
                 <div className="flex gap-2">
                   <Button type="button" variant="outline" size="sm" onClick={onClose}>
@@ -290,7 +278,7 @@ export function AccountingImportModal({
                   </Button>
                   <Button type="submit" size="sm" disabled={!file || loading}>
                     {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
-                    Import CSV
+                    Analyze CSV
                   </Button>
                 </div>
               </div>
@@ -298,20 +286,20 @@ export function AccountingImportModal({
           ) : stage === "processing" ? (
             <div className="py-12 text-center space-y-3">
               <Loader2 className="h-8 w-8 animate-spin mx-auto text-emerald-600" />
-              <h3 className="text-sm font-semibold">Migrating Accounting Data...</h3>
+              <h3 className="text-sm font-semibold">Analyzing source export…</h3>
               <p className="text-xs text-[var(--color-muted-foreground)] max-w-sm mx-auto">
-                Parsing columns, mapping accounts, and writing immutable double-entry records.
+                Checking the header, required values, and duplicate candidates. No accounting data is being written.
               </p>
             </div>
-          ) : (
+          ) : stage === "proof" ? (
             <div className="space-y-4">
               <div className="rounded-lg bg-emerald-50 dark:bg-emerald-950/40 p-4 border border-emerald-200 dark:border-emerald-800">
                 <div className="flex items-center gap-2 text-emerald-800 dark:text-emerald-300">
                   <CheckCircle2 className="h-5 w-5 shrink-0" />
                   <div>
-                    <h3 className="text-sm font-semibold">Import Complete</h3>
+                    <h3 className="text-sm font-semibold">Migration proof complete</h3>
                     <p className="text-xs">
-                      Successfully processed {result?.processedRows ?? 0} rows.
+                      No source rows were written to Truepost.
                     </p>
                   </div>
                 </div>
@@ -320,66 +308,55 @@ export function AccountingImportModal({
               <div className="grid grid-cols-3 gap-2 text-center">
                 <div className="rounded border border-[var(--color-border)] p-2 bg-[var(--color-muted)]">
                   <div className="text-xs text-[var(--color-muted-foreground)]">Total Rows</div>
-                  <div className="text-lg font-bold">{result?.totalRows ?? 0}</div>
+                  <div className="text-lg font-bold">{proof?.sourceRowCount ?? 0}</div>
                 </div>
                 <div className="rounded border border-[var(--color-border)] p-2 bg-[var(--color-muted)]">
-                  <div className="text-xs text-[var(--color-muted-foreground)]">Imported</div>
-                  <div className="text-lg font-bold text-emerald-600">
-                    {result ? Object.values(result.created).reduce((a, b) => a + b, 0) : 0}
-                  </div>
+                  <div className="text-xs text-[var(--color-muted-foreground)]">Duplicate candidates</div>
+                  <div className="text-lg font-bold text-amber-600">{proof?.duplicateCandidateCount ?? 0}</div>
                 </div>
                 <div className="rounded border border-[var(--color-border)] p-2 bg-[var(--color-muted)]">
-                  <div className="text-xs text-[var(--color-muted-foreground)]">Skipped</div>
-                  <div className="text-lg font-bold text-[var(--color-muted-foreground)]">
-                    {result ? Object.values(result.skipped).reduce((a, b) => a + b, 0) : 0}
-                  </div>
+                  <div className="text-xs text-[var(--color-muted-foreground)]">Ready for mapping</div>
+                  <div className="text-lg font-bold text-emerald-600">{proof?.readyForMappedImport ? "Yes" : "No"}</div>
                 </div>
               </div>
 
-              {result?.errors && result.errors.length > 0 ? (
+              {proof?.findings && proof.findings.length > 0 ? (
                 <div className="rounded-md border border-amber-200 bg-amber-50 p-2.5 dark:border-amber-800 dark:bg-amber-950/30">
                   <p className="text-xs font-semibold text-amber-800 dark:text-amber-300">
-                    Notice: {result.errors.length} rows were skipped due to formatting:
+                    Review before import: {proof.findings.length} finding{proof.findings.length === 1 ? "" : "s"}.
                   </p>
                   <ul className="mt-1 max-h-24 overflow-y-auto text-[11px] text-amber-700 dark:text-amber-400 space-y-0.5">
-                    {result.errors.slice(0, 5).map((e, idx) => (
+                    {proof.findings.slice(0, 5).map((finding, idx) => (
                       <li key={idx}>
-                        Row {e.row}: {e.message}
+                        {finding.row ? `Row ${finding.row}: ` : ""}{finding.message}
                       </li>
                     ))}
                   </ul>
                 </div>
               ) : null}
 
-              {rollbackDone ? (
-                <p className="text-center text-xs text-amber-600 font-medium">
-                  ✓ Import successfully rolled back.
-                </p>
-              ) : null}
-
               <div className="flex items-center justify-between pt-2 border-t border-[var(--color-border)]">
-                {!rollbackDone ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleRollback}
-                    disabled={rollingBack}
-                    className="text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50"
-                  >
-                    {rollingBack ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
-                    Rollback this import
-                  </Button>
-                ) : <span />}
-
-                <Button size="sm" onClick={onClose}>
-                  Done
+                <Button size="sm" variant="outline" onClick={() => setStage("select")}>
+                  Analyze another file
                 </Button>
+                <div className="flex gap-2">
+                  <Button size="sm" variant="outline" onClick={onClose}>Done</Button>
+                  <Button size="sm" disabled={!proof?.readyForMappedImport || loading || (sourceType === "transactions" && !selectedClientId)} onClick={() => void applyImport()}>
+                    {sourceType === "transactions" ? "Apply reviewed transaction migration" : "Import as draft records"}
+                  </Button>
+                </div>
               </div>
+            </div>
+          ) : (
+            <div className="py-12 text-center space-y-3">
+              <Loader2 className="h-8 w-8 animate-spin mx-auto text-[#0c4eb3]" />
+              <h3 className="text-sm font-semibold">Writing reviewed migration records…</h3>
+              <p className="text-xs text-[var(--color-muted-foreground)] max-w-sm mx-auto">Transactions remain unreviewed. Invoices and bills are imported as drafts and are never sent or posted automatically.</p>
             </div>
           )}
         </CardContent>
       </Card>
+      </div>
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import {
    ArrowLeft,
@@ -24,46 +24,60 @@ import {
    ClipboardList,
    FileStack,
    Bot,
+   ChevronDown,
+   FileCheck2,
+   ReceiptText,
+   SlidersHorizontal,
  } from "lucide-react";
 import { api, apiUrl } from "@/lib/api";
-import { AnalyticsDashboard } from "@/components/analytics-dashboard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/empty-state";
-import { ReceiptReview, type ReviewReceipt } from "@/components/receipt-review";
-import { BankReconciliation } from "@/components/bank-reconciliation";
-import { PnlPanel } from "@/components/pnl-panel";
-import { DrilldownPanel } from "@/components/drilldown-panel";
+import type { ReviewReceipt } from "@/components/receipt-review";
 import type { Pnl, DrilldownState, DrilldownEntry, DrilldownBankEntry, IncomeDrilldownEntry } from "@/types/pnl";
 import { buildDrilldownPath } from "@/types/pnl";
 import { cn } from "@/lib/utils";
 import { presetRange, REPORTING_PERIOD_OPTIONS, type ReportingPeriodPreset } from "@/lib/reporting-period";
-import { ExportCenter } from "@/components/export-center";
 import { ClientOverview } from "@/components/client-overview";
-import { TaxReadinessPanel } from "@/components/tax-readiness-panel";
-import { DocumentsPanel } from "@/components/documents-panel";
-import { EngagementsPanel } from "@/components/engagements-panel";
-import { RequestsPanel } from "@/components/requests-panel";
-import { AgentPanel } from "@/components/agent-panel";
-import { TaxWorkpaper } from "@/components/tax-workpaper";
-import { CarryforwardPanel, StateModsPanel, M3Panel, PriorYearPanel, ExtensionsPanel, OrganizerPanel, DiagnosticsPanel } from "@/components/tax-extended-panels";
 import { convertHeicToJpeg, createCaptureInput } from "@/lib/image-utils";
 import { enqueueReceipt, drainQueue, registerSyncListener, queueCount } from "@/lib/offline-queue";
 import { subscribePush, unsubscribePush } from "@/lib/push";
 import { Bell, Wifi, Sparkles, Smartphone, Mic, CreditCard, Calendar as CalendarIcon, ShieldCheck, ShieldAlert, TrendingUp, Network, Cloud } from "lucide-react";
-import { TaxBridgePanel } from "@/components/tax-bridge-panel";
 import { MagicMobileLinkModal } from "@/components/magic-mobile-link-modal";
 import { VoiceRuleDictationModal } from "@/components/voice-rule-dictation-modal";
-import { BillingPanel } from "@/components/billing-panel";
-import { DeadlineCalendarPanel } from "@/components/deadline-calendar-panel";
-import { EsignVaultPanel } from "@/components/esign-vault-panel";
 import { ClientRuleRequestModal } from "@/components/client-rule-request-modal";
-import { DifAuditScannerPanel } from "@/components/dif-audit-scanner-panel";
-import { TaxAdvisoryRoadmapPanel } from "@/components/tax-advisory-roadmap-panel";
-import { IntercompanyMirrorPanel } from "@/components/intercompany-mirror-panel";
 import { DirectScaleUploadModal } from "@/components/direct-scale-upload-modal";
 import { getAdminToken } from "@/lib/api";
+
+// The overview remains immediate; specialised workspaces load only when the
+// practitioner opens them. This keeps a normal Monday-morning client view
+// fast without removing any capability.
+const ReceiptReview = lazy(() => import("@/components/receipt-review").then((module) => ({ default: module.ReceiptReview })));
+const BankReconciliation = lazy(() => import("@/components/bank-reconciliation").then((module) => ({ default: module.BankReconciliation })));
+const PnlPanel = lazy(() => import("@/components/pnl-panel").then((module) => ({ default: module.PnlPanel })));
+const DrilldownPanel = lazy(() => import("@/components/drilldown-panel").then((module) => ({ default: module.DrilldownPanel })));
+const ExportCenter = lazy(() => import("@/components/export-center").then((module) => ({ default: module.ExportCenter })));
+const TaxReadinessPanel = lazy(() => import("@/components/tax-readiness-panel").then((module) => ({ default: module.TaxReadinessPanel })));
+const DocumentsPanel = lazy(() => import("@/components/documents-panel").then((module) => ({ default: module.DocumentsPanel })));
+const EngagementsPanel = lazy(() => import("@/components/engagements-panel").then((module) => ({ default: module.EngagementsPanel })));
+const RequestsPanel = lazy(() => import("@/components/requests-panel").then((module) => ({ default: module.RequestsPanel })));
+const AgentPanel = lazy(() => import("@/components/agent-panel").then((module) => ({ default: module.AgentPanel })));
+const TaxWorkpaper = lazy(() => import("@/components/tax-workpaper").then((module) => ({ default: module.TaxWorkpaper })));
+const CarryforwardPanel = lazy(() => import("@/components/tax-extended-panels").then((module) => ({ default: module.CarryforwardPanel })));
+const StateModsPanel = lazy(() => import("@/components/tax-extended-panels").then((module) => ({ default: module.StateModsPanel })));
+const M3Panel = lazy(() => import("@/components/tax-extended-panels").then((module) => ({ default: module.M3Panel })));
+const PriorYearPanel = lazy(() => import("@/components/tax-extended-panels").then((module) => ({ default: module.PriorYearPanel })));
+const ExtensionsPanel = lazy(() => import("@/components/tax-extended-panels").then((module) => ({ default: module.ExtensionsPanel })));
+const OrganizerPanel = lazy(() => import("@/components/tax-extended-panels").then((module) => ({ default: module.OrganizerPanel })));
+const DiagnosticsPanel = lazy(() => import("@/components/tax-extended-panels").then((module) => ({ default: module.DiagnosticsPanel })));
+const TaxBridgePanel = lazy(() => import("@/components/tax-bridge-panel").then((module) => ({ default: module.TaxBridgePanel })));
+const BillingPanel = lazy(() => import("@/components/billing-panel").then((module) => ({ default: module.BillingPanel })));
+const DeadlineCalendarPanel = lazy(() => import("@/components/deadline-calendar-panel").then((module) => ({ default: module.DeadlineCalendarPanel })));
+const EsignVaultPanel = lazy(() => import("@/components/esign-vault-panel").then((module) => ({ default: module.EsignVaultPanel })));
+const DifAuditScannerPanel = lazy(() => import("@/components/dif-audit-scanner-panel").then((module) => ({ default: module.DifAuditScannerPanel })));
+const TaxAdvisoryRoadmapPanel = lazy(() => import("@/components/tax-advisory-roadmap-panel").then((module) => ({ default: module.TaxAdvisoryRoadmapPanel })));
+const IntercompanyMirrorPanel = lazy(() => import("@/components/intercompany-mirror-panel").then((module) => ({ default: module.IntercompanyMirrorPanel })));
 
 type Category = {
   id: string;
@@ -125,6 +139,11 @@ type BatchFile = {
 type Tab = "overview" | "folders" | "upload" | "review" | "bank" | "pnl" | "tax-bridge" | "tax-readiness" | "dif-audit" | "advisory" | "intercompany" | "workpaper" | "documents" | "esign" | "engagements" | "requests" | "export" | "agent" | "analytics" | "billing" | "deadlines";
 
 const VALID_TABS: Tab[] = ["overview", "folders", "upload", "review", "bank", "pnl", "tax-bridge", "tax-readiness", "dif-audit", "advisory", "intercompany", "workpaper", "documents", "esign", "engagements", "requests", "export", "agent", "analytics", "billing", "deadlines"];
+
+function formatCurrency(amount: number | undefined, currency = "USD"): string {
+  if (typeof amount !== "number" || !Number.isFinite(amount)) return "—";
+  return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(amount);
+}
 
 export function ClientWorkspacePage() {
   const { clientId = "" } = useParams();
@@ -227,6 +246,7 @@ export function ClientWorkspacePage() {
       ]);
       setProfile(profileResult.profile);
       setEditingProfile(false);
+      setMessage("Client profile saved.");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save the client profile");
     }
@@ -267,7 +287,7 @@ export function ClientWorkspacePage() {
   }
 
   useEffect(() => {
-    if (tab === "pnl") void loadPnl();
+    if (tab === "pnl" || tab === "overview") void loadPnl();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, clientId, pnlRange.startDate, pnlRange.endDate, review.length]);
 
@@ -317,8 +337,7 @@ export function ClientWorkspacePage() {
     }
     setBatchRunning(false);
     await load();
-    const succeeded = items.length; // reported per-run below from live state instead
-    void succeeded;
+    setMessage(`${items.length} file${items.length === 1 ? "" : "s"} processed. Review any exceptions before filing.`);
   }
 
   async function startBatchUpload() {
@@ -367,10 +386,25 @@ export function ClientWorkspacePage() {
       { id: "tax-bridge" as const, label: "Tax Bridge & 1099", icon: Sparkles },
       { id: "billing" as const, label: "Billing & Invoices", icon: CreditCard },
       { id: "deadlines" as const, label: "Deadlines", icon: CalendarIcon },
-      { id: "export" as const, label: "Export", icon: FileDown },
+      { id: "export" as const, label: "Close Packet", icon: FileDown },
     ],
     [review.length],
   );
+
+  const dailyTabs = useMemo(
+    () => tabs.filter((item) => ["overview", "upload", "review", "bank", "pnl", "export"].includes(item.id)),
+    [tabs],
+  );
+  const specialistTools = useMemo(
+    () => tabs.filter((item) => !dailyTabs.some((daily) => daily.id === item.id)),
+    [dailyTabs, tabs],
+  );
+  const activeTool = tabs.find((item) => item.id === tab);
+
+  function changeTab(nextTab: Tab) {
+    setTab(nextTab);
+    setError(null);
+  }
 
   function navigateToDeepLink(deepLink: string) {
     const query = deepLink.split("?")[1] ?? "";
@@ -378,7 +412,7 @@ export function ClientWorkspacePage() {
     const nextTab = params.get("tab");
     const focus = params.get("focus");
     const taxYear = params.get("taxYear");
-    if (nextTab && (VALID_TABS as string[]).includes(nextTab)) setTab(nextTab as Tab);
+    if (nextTab && (VALID_TABS as string[]).includes(nextTab)) changeTab(nextTab as Tab);
     if (focus) setSearchParams({ focus }, { replace: true });
     // Kept in component state rather than the URL so a subsequent same-page
     // navigation cannot be silently overwritten by the mount-only URL clear.
@@ -387,17 +421,26 @@ export function ClientWorkspacePage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-3">
+      <header className="client-workspace-masthead">
         <Link to="/" className="inline-flex w-fit items-center gap-1.5 text-sm text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)]">
           <ArrowLeft className="h-3.5 w-3.5" /> All clients
         </Link>
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">{client?.name ?? "Workspace"}</h1>
-          <p className="text-sm text-[var(--color-muted-foreground)]">
-            Source evidence · line-item review · bank reconciliation · auditable P&amp;L
-          </p>
+        <div className="mt-4 flex flex-col justify-between gap-5 lg:flex-row lg:items-end">
+          <div className="flex min-w-0 items-start gap-3">
+            <img src="/icons/icon-192.png" alt="" className="mt-0.5 h-10 w-10 shrink-0 rounded-xl bg-[#082f79] object-cover p-1 shadow-[0_10px_24px_rgba(8,47,121,0.2)]" />
+            <div className="min-w-0">
+              <h1 className="text-2xl font-semibold tracking-[-0.025em] text-[var(--color-foreground)] sm:text-3xl">{client?.name ?? "Workspace"}</h1>
+              <p className="mt-1 max-w-2xl text-sm leading-6 text-[var(--color-muted-foreground)]">
+                A single place to collect evidence, resolve exceptions, reconcile books, and prepare the close.
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--color-muted-foreground)]">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--color-border)] bg-[var(--color-card)] px-3 py-1.5"><ReceiptText className="h-3.5 w-3.5 text-[#0c4eb3]" /> {review.length} awaiting review</span>
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--color-border)] bg-[var(--color-card)] px-3 py-1.5"><FileCheck2 className="h-3.5 w-3.5 text-[var(--color-success)]" /> Evidence-led close</span>
+          </div>
         </div>
-      </div>
+      </header>
 
       <Card>
         <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
@@ -460,38 +503,70 @@ export function ClientWorkspacePage() {
         </CardContent>
       </Card>
 
-      {error ? <p className="text-sm text-[var(--color-destructive)]">{error}</p> : null}
-
-      <div className="flex flex-wrap gap-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] p-1">
-        {tabs.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            onClick={() => setTab(item.id)}
-            className={cn(
-              "inline-flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2 text-sm text-[var(--color-muted-foreground)] sm:flex-none",
-              tab === item.id && "bg-[var(--color-muted)] font-medium text-[var(--color-foreground)]",
-            )}
-          >
-            <item.icon className="h-3.5 w-3.5" /> {item.label}
-            {"count" in item && item.count ? <Badge className="bg-stone-200 text-stone-700">{item.count}</Badge> : null}
-          </button>
-        ))}
+      <div aria-live="polite" aria-atomic="true" className="pointer-events-none fixed inset-x-4 bottom-5 z-50 flex justify-center sm:inset-x-auto sm:right-6 sm:justify-end">
+        {message ? <div className="workspace-toast pointer-events-auto" role="status"><CheckCircle2 className="h-4 w-4 shrink-0 text-[var(--color-success)]" /><span>{message}</span></div> : null}
+        {error ? <div className="workspace-toast workspace-toast-error pointer-events-auto" role="alert"><AlertTriangle className="h-4 w-4 shrink-0" /><span>{error}</span><button type="button" onClick={() => setError(null)} className="ml-1 text-xs font-semibold underline underline-offset-2">Dismiss</button></div> : null}
       </div>
 
+      <nav className="workspace-navigation" aria-label="Client workspace">
+        <div className="workspace-daily-nav" role="tablist" aria-label="Daily close flow">
+          {dailyTabs.map((item) => (
+            <button
+              key={item.id}
+              id={`workspace-tab-${item.id}`}
+              type="button"
+              role="tab"
+              aria-selected={tab === item.id}
+              aria-controls="workspace-panel"
+              tabIndex={tab === item.id ? 0 : -1}
+              onClick={() => changeTab(item.id)}
+              onKeyDown={(event) => {
+                const index = dailyTabs.findIndex((candidate) => candidate.id === item.id);
+                const nextIndex = event.key === "ArrowRight" ? (index + 1) % dailyTabs.length : event.key === "ArrowLeft" ? (index - 1 + dailyTabs.length) % dailyTabs.length : event.key === "Home" ? 0 : event.key === "End" ? dailyTabs.length - 1 : null;
+                if (nextIndex === null) return;
+                event.preventDefault();
+                const next = dailyTabs[nextIndex];
+                changeTab(next.id);
+                requestAnimationFrame(() => document.getElementById(`workspace-tab-${next.id}`)?.focus());
+              }}
+              className={cn("workspace-nav-button", tab === item.id && "workspace-nav-button-active")}
+            >
+              <item.icon className="h-3.5 w-3.5" aria-hidden="true" /> {item.label}
+              {"count" in item && item.count ? <span className="workspace-count">{item.count}</span> : null}
+            </button>
+          ))}
+        </div>
+        <label className="workspace-tools-select">
+          <span className="sr-only">Open a specialist tool</span>
+          <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
+          <select value={dailyTabs.some((item) => item.id === tab) ? "" : tab} onChange={(event) => event.target.value && changeTab(event.target.value as Tab)}>
+            <option value="">{dailyTabs.some((item) => item.id === tab) ? "More tools" : activeTool?.label}</option>
+            {specialistTools.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+          </select>
+          <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+        </label>
+      </nav>
+
+      <section id="workspace-panel" role="tabpanel" aria-labelledby={`workspace-tab-${dailyTabs.some((item) => item.id === tab) ? tab : "overview"}`} tabIndex={0}>
       {tab === "overview" ? (
         <>
           <ClientOverview clientId={clientId} onNavigate={navigateToDeepLink} />
           <div className="pt-4">
             <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] p-4 space-y-3">
-              <h3 className="text-sm font-semibold flex items-center gap-2"><BarChart3 className="h-4 w-4" /> Analytics Dashboard</h3>
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-muted)] p-3"><div className="text-xs text-[var(--color-muted-foreground)]">Income</div><div className="text-xl font-bold">$9,700</div></div>
-                <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-muted)] p-3"><div className="text-xs text-[var(--color-muted-foreground)]">Expenses</div><div className="text-xl font-bold">$5,600</div></div>
-                <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-muted)] p-3"><div className="text-xs text-[var(--color-muted-foreground)]">Net Profit</div><div className="text-xl font-bold text-emerald-600">$4,100</div></div>
-                <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-muted)] p-3"><div className="text-xs text-[var(--color-muted-foreground)]">Receipts</div><div className="text-xl font-bold">39</div></div>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-semibold flex items-center gap-2"><BarChart3 className="h-4 w-4" /> Current-month cash summary</h3>
+                  <p className="mt-1 text-xs text-[var(--color-muted-foreground)]">Calculated from filed evidence and resolved bank activity. It is not an accrual report.</p>
+                </div>
+                <Button type="button" variant="outline" size="sm" onClick={() => changeTab("pnl")}>Open P&amp;L</Button>
               </div>
-              <p className="text-xs text-[var(--color-muted-foreground)]">Live stats — updated from client workspace. Full interactive charts available in Milestone 7 Tax Workbench.</p>
+              <div className="workspace-balance-strip">
+                <div><div className="text-xs text-[var(--color-muted-foreground)]">Income</div><div className="mt-1 text-xl font-semibold tabular-nums">{formatCurrency(pnl?.income, pnl?.currency)}</div></div>
+                <div><div className="text-xs text-[var(--color-muted-foreground)]">Expenses</div><div className="mt-1 text-xl font-semibold tabular-nums">{formatCurrency(pnl?.expenses, pnl?.currency)}</div></div>
+                <div><div className="text-xs text-[var(--color-muted-foreground)]">Net</div><div className="mt-1 text-xl font-semibold tabular-nums text-[var(--color-success)]">{formatCurrency(pnl?.net, pnl?.currency)}</div></div>
+                <button type="button" onClick={() => changeTab("review")} className="text-left"><div className="text-xs text-[var(--color-muted-foreground)]">Needs review</div><div className="mt-1 text-xl font-semibold tabular-nums">{review.length}</div></button>
+              </div>
+              <p className="text-xs text-[var(--color-muted-foreground)]">{pnl?.note ?? "Loading source-backed cash summary…"}</p>
             </div>
           </div>
         </>
@@ -548,34 +623,12 @@ export function ClientWorkspacePage() {
       {tab === "requests" ? <RequestsPanel clientId={clientId} focusRequestId={focusId} /> : null}
 
       {tab === "analytics" ? (
-        <div className="space-y-4">
-          <AnalyticsDashboard
-            clientId={clientId}
-            stats={[
-               { label: "Receipts Processed", value: review.length + folderReceipts.length },
-               { label: "Bank Transactions", value: batch.length + folderReceipts.length },
-               { label: "Tax Readiness", value: profile?.taxPrepRequired ? "Required" : "Not set" },
-               { label: "Open Requests", value: 2 },
-             ]}
-            monthlyData={[
-              { month: "Jan", income: 4200, expenses: 1850, receipts: 12 },
-              { month: "Feb", income: 5100, expenses: 2100, receipts: 18 },
-              { month: "Mar", income: 3800, expenses: 1650, receipts: 9 },
-            ]}
-            categoryBreakdown={[
-               { name: "Travel", expenses: 780 },
-               { name: "Supplies", expenses: 420 },
-               { name: "Food", expenses: 310 },
-               { name: "Hotel", expenses: 240 },
-             ]}
-            activities={[
-               { date: "2026-09-10", description: "Batch receipt upload — 14 files" },
-               { date: "2026-09-09", description: "Bank CSV import — 23 transactions" },
-               { date: "2026-09-08", description: "Client request — missing W-2 (approved by you)" },
-               { date: "2026-09-07", description: "Agent: merchant memory — 'Stinson Hotel' → Travel" },
-            ]}
-          />
-        </div>
+        <EmptyState
+          icon={BarChart3}
+          title="Analytics requires verified source data"
+          description="Truepost will not fabricate trends, activity, or live status. Use the P&L for the current evidence-backed report while portfolio analytics is connected to a verified data source."
+          action={<Button type="button" variant="secondary" onClick={() => changeTab("pnl")}>Open evidence-backed P&amp;L</Button>}
+        />
       ) : null}
 
       {tab === "agent" ? <AgentPanel clientId={clientId} /> : null}
@@ -634,7 +687,7 @@ export function ClientWorkspacePage() {
                   icon={Folder}
                   title="No filed evidence in this folder yet"
                   description="Approved receipts filed under this category will appear here with their date, merchant, total, and source link."
-                  action={<Button variant="secondary" onClick={() => setTab("upload")}><Upload className="h-4 w-4" /> Upload receipts</Button>}
+                  action={<Button variant="secondary" onClick={() => changeTab("upload")}><Upload className="h-4 w-4" /> Upload receipts</Button>}
                 />
               ) : (
                 <div className="overflow-x-auto">
@@ -889,7 +942,7 @@ export function ClientWorkspacePage() {
             icon={Inbox}
             title="Review inbox is clear"
             description="New extractions land here with their source document, line items, validation checks, and confidence signals."
-            action={<Button variant="secondary" onClick={() => setTab("upload")}>Upload something</Button>}
+            action={<Button variant="secondary" onClick={() => changeTab("upload")}>Upload something</Button>}
           />
         ) : (
           <ReceiptReview clientId={clientId} categories={categories} receipts={review} onReload={load} initialSelectedId={focusId} />
@@ -901,12 +954,13 @@ export function ClientWorkspacePage() {
           clientId={clientId}
           onReceiptAdded={() => void load()}
           onOpenReview={() => {
-            setTab("review");
+            changeTab("review");
             void load();
           }}
           focusTransactionId={focusId}
         />
       ) : null}
+      </section>
 
       {tab === "pnl" ? (
         <div className="space-y-4">
@@ -978,15 +1032,15 @@ export function ClientWorkspacePage() {
             <PnlPanel
               pnl={pnl}
               apiUrl={apiUrl}
-              onSelectExpenseCategory={(category) => void loadDrilldown(category)}
-              onSelectIncomeCategory={(category) => void loadDrilldown(category, "income")}
+              onSelectExpenseCategory={(category: string) => void loadDrilldown(category)}
+              onSelectIncomeCategory={(category: string) => void loadDrilldown(category, "income")}
             />
             <DrilldownPanel drilldown={drilldown} apiUrl={apiUrl} />
           </div>
         </div>
       ) : null}
 
-      {tab === "export" ? <ExportCenter clientId={clientId} taxYear={profile?.tax_year ?? null} /> : null}
+      {tab === "export" ? <ExportCenter clientId={clientId} taxYear={profile?.tax_year ?? null} onNavigate={changeTab} /> : null}
 
       <MagicMobileLinkModal
         clientId={clientId}

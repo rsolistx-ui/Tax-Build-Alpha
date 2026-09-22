@@ -91,6 +91,10 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        // The initial experience is the dashboard and intake shell. The
+        // receipt workspace and HEIC converter are lazy routes, so avoid
+        // forcing a phone to download them before they are needed.
+        globIgnores: ['assets/client-workspace-*.js', 'assets/heic2any-*.js'],
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/.*\.googleapis\.com\/.*/i,
@@ -106,22 +110,6 @@ export default defineConfig({
             options: {
               cacheName: 'cloudflare-assets',
               expiration: { maxEntries: 50, maxAgeSeconds: 60 * 60 * 24 * 30 },
-            },
-          },
-          {
-            urlPattern: /\/api\/.*/i,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'api-cache',
-              networkTimeoutSeconds: 10,
-              expiration: { maxEntries: 100, maxAgeSeconds: 60 * 60 * 24 },
-              plugins: [
-                {
-                  cacheKeyWillBeUsed: async ({ request }) => {
-                    return request.url;
-                  },
-                },
-              ],
             },
           },
           {
@@ -155,7 +143,10 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    sourcemap: true,
+    // Do not ship readable source maps with the public financial workspace.
+    // Production diagnostics are handled server-side; removing these maps
+    // reduces the install payload and avoids exposing application source.
+    sourcemap: false,
     rollupOptions: {
       output: {
         manualChunks: {

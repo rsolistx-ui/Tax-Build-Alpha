@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Receipt, Banknote, Clock, TrendingUp, Download } from "lucide-react";
+import { Receipt, Banknote, Clock, TrendingUp, Download, CheckCircle2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,6 +11,9 @@ type TimeSavingsData = {
   hoursFromReceipts: number;
   hoursFromBank: number;
   hoursFromChasing: number;
+  hoursFromEsign: number;
+  measuredEvents: number;
+  estimateMethod: string;
   weeksToTarget: number | null;
   progressPercent: number;
 };
@@ -64,6 +67,7 @@ export function TimeSavingsTracker() {
   const hoursFromReceipts = Number(data.hoursFromReceipts || 0);
   const hoursFromBank = Number(data.hoursFromBank || 0);
   const hoursFromChasing = Number(data.hoursFromChasing || 0);
+  const hoursFromEsign = Number(data.hoursFromEsign || 0);
   const progressRefills = Math.min(100, (totalHoursSaved / 10) * 100);
   const weeklyData = Array.isArray(data.weeklyData) ? data.weeklyData : [];
 
@@ -89,7 +93,7 @@ export function TimeSavingsTracker() {
         <div className="space-y-6">
           <div>
             <div className="flex items-center justify-between text-sm">
-              <span className="text-[var(--color-muted-foreground)]">Weekly Progress</span>
+              <span className="text-[var(--color-muted-foreground)]">Measured weekly estimate</span>
               <span className="font-medium">{totalHoursSaved.toFixed(1)} / 10 hours</span>
             </div>
             <div className="mt-2 h-2 w-full rounded-full bg-[var(--color-muted)]">
@@ -98,7 +102,9 @@ export function TimeSavingsTracker() {
                 style={{ width: `${progressRefills}%` }}
               />
             </div>
-            {data.weeksToTarget !== null && data.weeksToTarget !== undefined && (
+            {data.measuredEvents === 0 ? (
+              <p className="mt-2 text-xs text-[var(--color-muted-foreground)]">No completed workflow events have been recorded this week. This figure will populate from real work—not a preset claim.</p>
+            ) : data.weeksToTarget !== null && data.weeksToTarget !== undefined && (
               <p className="mt-2 text-xs text-[var(--color-muted-foreground)]">
                 {data.weeksToTarget > 0
                   ? `${data.weeksToTarget} more weeks to reach 10+ hour target`
@@ -107,7 +113,7 @@ export function TimeSavingsTracker() {
             )}
           </div>
 
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
             <div className="rounded-lg bg-[var(--color-muted)]/50 p-4">
               <div className="flex items-center gap-2 text-xs text-[var(--color-muted-foreground)]">
                 <Receipt className="h-3 w-3" />
@@ -117,6 +123,11 @@ export function TimeSavingsTracker() {
               <div className="text-xs text-[var(--color-muted-foreground)]">
                 {totalHoursSaved > 0 ? ((hoursFromReceipts / totalHoursSaved) * 100).toFixed(0) : "0"}% of savings
               </div>
+            </div>
+            <div className="rounded-lg bg-[var(--color-muted)]/50 p-4">
+              <div className="flex items-center gap-2 text-xs text-[var(--color-muted-foreground)]"><CheckCircle2 className="h-3 w-3" /> Secure signing</div>
+              <div className="mt-1 text-2xl font-semibold">{hoursFromEsign.toFixed(1)}h</div>
+              <div className="text-xs text-[var(--color-muted-foreground)]">Completed documents only</div>
             </div>
 
             <div className="rounded-lg bg-[var(--color-muted)]/50 p-4">
@@ -160,7 +171,7 @@ export function TimeSavingsTracker() {
                       <tr key={i} className="border-b border-[var(--color-border)] last:border-0">
                         <td className="px-4 py-2">{week.week}</td>
                         <td className="px-4 py-2 text-right font-medium">{Number(week.hoursSaved || 0).toFixed(1)}h</td>
-                        <td className="px-4 py-2 text-right text-[var(--color-muted-foreground)]">1.5h</td>
+                        <td className="px-4 py-2 text-right text-[var(--color-muted-foreground)]">{Number(week.target || 0).toFixed(1)}h</td>
                         <td className="px-4 py-2 text-right">
                           <Badge
                             className={
@@ -179,6 +190,7 @@ export function TimeSavingsTracker() {
               </div>
             </div>
           )}
+          <p className="text-xs text-[var(--color-muted-foreground)]">{data.estimateMethod}</p>
         </div>
       </CardContent>
     </Card>

@@ -4,7 +4,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { PenTool } from "lucide-react";
-import { NativeEsignModal } from "./native-esign-modal";
 
 type Engagement = {
   id: string;
@@ -42,7 +41,7 @@ export function EngagementsPanel({ clientId, focusEngagementId }: { clientId: st
   const [taxYear, setTaxYear] = useState("");
   const [letterBusy, setLetterBusy] = useState<string | null>(null);
   const [letterStatus, setLetterStatus] = useState<Record<string, string>>({});
-  const [signingRequest, setSigningRequest] = useState<{ requestId: string; title: string } | null>(null);
+  const [signingUrl, setSigningUrl] = useState<string | null>(null);
   const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   useEffect(() => {
@@ -137,7 +136,7 @@ export function EngagementsPanel({ clientId, focusEngagementId }: { clientId: st
     }
   }
 
-  async function startNativeSigning(engagementId: string, engTitle: string) {
+  async function startNativeSigning(engagementId: string) {
     setLetterBusy(engagementId);
     setLetterStatus((prev) => ({ ...prev, [engagementId]: "" }));
     try {
@@ -145,7 +144,9 @@ export function EngagementsPanel({ clientId, focusEngagementId }: { clientId: st
         `/api/clients/${clientId}/engagements/${engagementId}/letter`,
         { method: "POST", body: JSON.stringify({}) },
       );
-      setSigningRequest({ requestId: request.id, title: `Engagement Letter — ${engTitle}` });
+      const link = await api<{ signingUrl: string; expiresAt: string }>(`/api/clients/${clientId}/signature-requests/${request.id}/native-link`, { method: "POST" });
+      setSigningUrl(link.signingUrl);
+      setLetterStatus((prev) => ({ ...prev, [engagementId]: `Secure link prepared for the client. It expires ${new Date(link.expiresAt).toLocaleDateString("en-US")}.` }));
     } catch (e) {
       setLetterStatus((prev) => ({
         ...prev,
@@ -262,11 +263,11 @@ export function EngagementsPanel({ clientId, focusEngagementId }: { clientId: st
                     size="sm"
                     variant="default"
                     disabled={letterBusy === eng.id}
-                    onClick={() => startNativeSigning(eng.id, eng.title)}
+                    onClick={() => startNativeSigning(eng.id)}
                     className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs"
                   >
                     <PenTool className="h-3.5 w-3.5" />
-                    {letterBusy === eng.id ? "Preparing…" : "Sign internally with Folio"}
+                    {letterBusy === eng.id ? "Preparing…" : "Create secure client signing link"}
                   </Button>
                   <Button
                     size="sm"
@@ -280,6 +281,7 @@ export function EngagementsPanel({ clientId, focusEngagementId }: { clientId: st
                   {letterStatus[eng.id] ? (
                     <span className="text-xs text-[var(--color-muted-foreground)]">{letterStatus[eng.id]}</span>
                   ) : null}
+                  {signingUrl ? <Button size="sm" variant="outline" onClick={() => void navigator.clipboard.writeText(signingUrl)}>Copy secure link</Button> : null}
                 </div>
               </div>
             );
@@ -287,21 +289,6 @@ export function EngagementsPanel({ clientId, focusEngagementId }: { clientId: st
         </div>
       )}
 
-      {signingRequest && (
-        <NativeEsignModal
-          clientId={clientId}
-          requestId={signingRequest.requestId}
-          documentTitle={signingRequest.title}
-          onClose={() => setSigningRequest(null)}
-          onSuccess={(res) => {
-            setLetterStatus((prev) => ({
-              ...prev,
-              [signingRequest.requestId]: `Cryptographically sealed (${res.certificateId})`,
-            }));
-            load();
-          }}
-        />
-      )}
     </div>
   );
 }

@@ -173,29 +173,19 @@ function timeAgo(iso: string): string {
 
 function PracticeOsStrip({ counts }: { counts: OperationsCommandCenter }) {
   const items: Array<{ label: string; value: number | string; href: string; tone?: "warn" }> = [
-    { label: "Open engagements", value: counts.openEngagements, href: "/work-queue" },
-    { label: "Overdue work", value: counts.overdueWorkCount, href: "/work-queue?view=overdue", tone: counts.overdueWorkCount > 0 ? "warn" : undefined },
-    { label: "Due today", value: counts.dueTodayWorkCount, href: "/work-queue?view=due_today" },
+    { label: "Due today", value: counts.dueTodayWorkCount, href: "/work-queue?view=due_today", tone: counts.dueTodayWorkCount > 0 ? "warn" : undefined },
     { label: "Due soon", value: counts.dueSoonWorkCount, href: "/work-queue?view=due_soon" },
     { label: "Waiting on client", value: counts.waitingOnClientCount, href: "/work-queue?view=waiting_on_client" },
-    { label: "Professional review", value: counts.professionalReviewCount, href: "/work-queue?view=professional_review" },
-    { label: "Blocked", value: counts.blockedCount, href: "/work-queue?view=blocked", tone: counts.blockedCount > 0 ? "warn" : undefined },
-    {
-      label: "Oldest pending request",
-      value: counts.oldestPendingRequestDays === null ? "none" : `${counts.oldestPendingRequestDays}d`,
-      href: "/work-queue",
-      tone: counts.oldestPendingRequestDays !== null && counts.oldestPendingRequestDays > 7 ? "warn" : undefined,
-    },
     {
       label: "Agent approvals",
-      value: counts.awaitingAgentApprovalCount ?? 0,
+      value: (counts.awaitingAgentApprovalCount ?? 0) + counts.professionalReviewCount,
       href: "/agent-desk",
-      tone: (counts.awaitingAgentApprovalCount ?? 0) > 0 ? "warn" : undefined,
+      tone: (counts.awaitingAgentApprovalCount ?? 0) + counts.professionalReviewCount > 0 ? "warn" : undefined,
     },
   ];
   return (
     <div>
-      <p className="mb-1.5 text-xs font-medium text-[var(--color-muted-foreground)]">Practice OS</p>
+      <p className="mb-1.5 text-xs font-medium text-[var(--color-muted-foreground)]">Today</p>
       <div className="grid grid-cols-2 gap-px overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-border)] sm:grid-cols-4">
         {items.map((item) => (
           <Link key={item.label} to={item.href} className="bg-[var(--color-card)] px-4 py-3 hover:bg-[var(--color-muted)]">
@@ -215,19 +205,13 @@ function PracticeOsStrip({ counts }: { counts: OperationsCommandCenter }) {
 
 function SummaryStrip({ summary }: { summary: Summary }) {
   const items: Array<{ label: string; value: number; tone?: "warn" }> = [
-    { label: "Clients", value: summary.clients },
-    { label: "Ready", value: summary.clientsReady },
-    { label: "Needs attention", value: summary.clientsNeedingAttention, tone: summary.clientsNeedingAttention > 0 ? "warn" : undefined },
-    { label: "Open actions", value: summary.totalOpenActions, tone: summary.totalOpenActions > 0 ? "warn" : undefined },
-    { label: "Receipts to review", value: summary.receiptsAwaitingReview },
-    { label: "Missing evidence", value: summary.missingEvidence, tone: summary.missingEvidence > 0 ? "warn" : undefined },
-    { label: "Bank exceptions", value: summary.unresolvedBankExceptions, tone: summary.unresolvedBankExceptions > 0 ? "warn" : undefined },
-    { label: "Unclassified", value: summary.unclassifiedTransactions, tone: summary.unclassifiedTransactions > 0 ? "warn" : undefined },
-    { label: "Uncategorized", value: summary.uncategorizedActivity },
-    { label: "Currency conflicts", value: summary.currencyConflicts, tone: summary.currencyConflicts > 0 ? "warn" : undefined },
+    { label: "Active clients", value: summary.clients },
+    { label: "Ready to close", value: summary.clientsReady },
+    { label: "Needs your review", value: summary.receiptsAwaitingReview + summary.unresolvedBankExceptions, tone: summary.receiptsAwaitingReview + summary.unresolvedBankExceptions > 0 ? "warn" : undefined },
+    { label: "Waiting on evidence", value: summary.missingEvidence, tone: summary.missingEvidence > 0 ? "warn" : undefined },
   ];
   return (
-    <div className="grid grid-cols-2 gap-px overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-border)] sm:grid-cols-5">
+    <div className="grid grid-cols-2 gap-px overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-border)] sm:grid-cols-4">
       {items.map((item) => (
         <div key={item.label} className="bg-[var(--color-card)] px-4 py-3">
           <div
@@ -259,20 +243,8 @@ function QuickActions({
       <Button size="sm" variant="outline" onClick={onOpenWave}>
         <UploadCloud className="h-3.5 w-3.5" /> Import Books CSV
       </Button>
-      <Button size="sm" variant="secondary" onClick={() => onPickClient("upload")}>
-        <Upload className="h-3.5 w-3.5" /> Upload receipts
-      </Button>
-      <Button size="sm" variant="secondary" onClick={() => onPickClient("bank")}>
-        Import bank CSV
-      </Button>
       <Button size="sm" variant="secondary" onClick={() => onPickClient("review")}>
-        Review receipts
-      </Button>
-      <Button size="sm" variant="secondary" onClick={() => onPickClient("bank")}>
-        Resolve bank exceptions
-      </Button>
-      <Button size="sm" variant="secondary" onClick={() => navigate("/documents/review")}>
-        Review documents
+        <Upload className="h-3.5 w-3.5" /> Review client evidence
       </Button>
     </div>
   );

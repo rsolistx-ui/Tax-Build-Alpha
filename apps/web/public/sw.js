@@ -28,10 +28,10 @@ self.addEventListener("fetch", (event) => {
 });
 
 self.addEventListener("push", (event) => {
-  const data = event.data ? event.data.json().catch(() => ({ title: event.data.text() })) : Promise.resolve({ title: "Folio", body: "" });
+  const data = event.data ? event.data.json().catch(() => ({ title: event.data.text() })) : Promise.resolve({ title: "Truepost", body: "" });
   event.waitUntil(
     Promise.resolve(data).then((d) =>
-      self.registration.showNotification(d.title || "Folio", {
+      self.registration.showNotification(d.title || "Truepost", {
         body: d.body || "",
         icon: "/icons/icon-192.png",
         badge: "/icons/icon-192.png",

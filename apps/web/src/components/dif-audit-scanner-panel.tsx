@@ -107,7 +107,7 @@ export function DifAuditScannerPanel({ clientId }: { clientId: string }) {
       <Card className="border-[var(--color-border)]">
         <CardContent className="py-16 text-center text-xs text-[var(--color-muted-foreground)] space-y-2">
           <RefreshCw className="h-6 w-6 animate-spin mx-auto text-emerald-500" />
-          <p>Running IRS DIF Statistical Scoring &amp; Audit Technique Guide analysis…</p>
+          <p>Running the pre-filing risk review…</p>
         </CardContent>
       </Card>
     );
@@ -139,15 +139,14 @@ export function DifAuditScannerPanel({ clientId }: { clientId: string }) {
           <div className="flex items-center gap-2">
             <h2 className="text-lg font-bold text-[var(--color-foreground)] flex items-center gap-2">
               <Scale className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
-              IRS DIF Pre-Filing Audit Risk Scanner
+              Pre-Filing Risk Review
             </h2>
             <Badge className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30 text-[10px]">
               Treasury Circular 230 Shield
             </Badge>
           </div>
           <p className="text-xs text-[var(--color-muted-foreground)] mt-0.5">
-            Statistical benchmark scan for {clientName} ({taxYear} Tax Year · {industry || "General Business"}){lastScannedAt ? ` · Evaluated ${formatDateTime(lastScannedAt)}` : ""}.
-            Simulates IRS Discriminant Index Function algorithms prior to filing.
+            An internal, explainable variance review for {clientName} ({taxYear} Tax Year · {industry || "General Business"}){lastScannedAt ? ` · Evaluated ${formatDateTime(lastScannedAt)}` : ""}. It is not an IRS score, audit prediction, or filing determination.
           </p>
         </div>
 
@@ -177,7 +176,7 @@ export function DifAuditScannerPanel({ clientId }: { clientId: string }) {
         }`}>
           <CardHeader className="pb-2">
             <CardDescription className="text-xs font-semibold uppercase tracking-wider text-[var(--color-muted-foreground)]">
-              Pre-Filing Audit Risk Score
+              Internal review score
             </CardDescription>
             <div className="flex items-baseline gap-2 pt-1">
               <span className={`text-4xl font-extrabold tracking-tight ${
@@ -193,7 +192,7 @@ export function DifAuditScannerPanel({ clientId }: { clientId: string }) {
               {isLowRisk ? (
                 <>
                   <ShieldCheck className="h-4 w-4 text-emerald-600" />
-                  <span className="text-emerald-700 dark:text-emerald-400">Low Audit Risk Profile</span>
+                  <span className="text-emerald-700 dark:text-emerald-400">Lower variance observed</span>
                 </>
               ) : isModerateRisk ? (
                 <>
@@ -203,7 +202,7 @@ export function DifAuditScannerPanel({ clientId }: { clientId: string }) {
               ) : (
                 <>
                   <ShieldAlert className="h-4 w-4 text-rose-600" />
-                  <span className="text-rose-700 dark:text-rose-400">Elevated Audit Trigger Probability</span>
+                  <span className="text-rose-700 dark:text-rose-400">Elevated variance requires review</span>
                 </>
               )}
             </div>

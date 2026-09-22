@@ -501,6 +501,30 @@ export function AdminPanel() {
     window.scrollTo({ top: 400, behavior: "smooth" });
   }
 
+  async function handleRulebookFile(file: File | null) {
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith(".md")) {
+      alert("Rulebook Upload accepts Markdown (.md) files only.");
+      return;
+    }
+    if (file.size === 0 || file.size > 512 * 1024) {
+      alert("Choose a Markdown rulebook between 1 byte and 512 KB.");
+      return;
+    }
+    try {
+      const markdown = await file.text();
+      if (!markdown.trim()) {
+        alert("This Markdown file is empty.");
+        return;
+      }
+      setRuleTitle(file.name.replace(/\.md$/i, "").replace(/[-_]+/g, " ").trim() || "Imported rulebook");
+      setRuleContent(markdown);
+      setRuleSuccessMsg("Rulebook loaded. Choose its client scope, test it below, then approve deployment.");
+    } catch {
+      alert("Truepost could not read that Markdown file.");
+    }
+  }
+
   async function handleSaveRule() {
     if (!ruleTitle.trim() || !ruleContent.trim()) return;
     setSavingRule(true);
@@ -1406,6 +1430,22 @@ export function AdminPanel() {
 
               <div className="space-y-1">
                 <label className="text-xs font-medium text-[var(--color-foreground)]">Markdown Directive Content</label>
+                <div className="mb-2 flex flex-wrap items-center gap-2 rounded-md border border-dashed border-[var(--color-border)] bg-[var(--color-muted)]/40 px-3 py-2">
+                  <label htmlFor="rulebook-upload" className="cursor-pointer text-xs font-medium text-[var(--color-primary)] hover:underline">
+                    Load a Markdown rulebook
+                  </label>
+                  <span className="text-xs text-[var(--color-muted-foreground)]">.md only · reviewed before deployment · 512 KB max</span>
+                  <input
+                    id="rulebook-upload"
+                    type="file"
+                    accept=".md,text/markdown,text/plain"
+                    className="sr-only"
+                    onChange={(event) => {
+                      void handleRulebookFile(event.target.files?.[0] ?? null);
+                      event.currentTarget.value = "";
+                    }}
+                  />
+                </div>
                 <textarea
                   rows={8}
                   placeholder="Type or paste markdown compliance rules..."

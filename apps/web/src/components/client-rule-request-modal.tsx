@@ -13,6 +13,7 @@ import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
+import { useDialogFocus } from "@/hooks/use-dialog-focus";
 
 interface ClientRuleRequestModalProps {
   isOpen: boolean;
@@ -34,6 +35,7 @@ export function ClientRuleRequestModal({
   const [loading, setLoading] = useState(false);
   const [ticketNumber, setTicketNumber] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const dialogRef = useDialogFocus(isOpen, handleReset);
 
   if (!isOpen) return null;
 
@@ -76,10 +78,19 @@ export function ClientRuleRequestModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="client-rule-request-title"
+        aria-describedby="client-rule-request-description"
+        className="contents"
+      >
       <Card className="relative w-full max-w-lg border border-[var(--color-border)] bg-[var(--color-card)] shadow-2xl">
         <button
           type="button"
           onClick={handleReset}
+          data-dialog-autofocus
           className="absolute right-4 top-4 rounded-md p-1 text-[var(--color-muted-foreground)] hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)]"
           aria-label="Close"
         >
@@ -92,8 +103,8 @@ export function ClientRuleRequestModal({
               <Sparkles className="h-5 w-5" />
             </span>
             <div>
-              <CardTitle className="text-base">Request Custom Accounting Directive</CardTitle>
-              <CardDescription className="text-xs">
+              <CardTitle id="client-rule-request-title" className="text-base">Request Custom Accounting Directive</CardTitle>
+              <CardDescription id="client-rule-request-description" className="text-xs">
                 {clientName ? `Queue a deterministic rule for ${clientName}.` : "Queue a custom firm-wide compliance rule."}
               </CardDescription>
             </div>
@@ -120,7 +131,7 @@ export function ClientRuleRequestModal({
               </div>
               <h3 className="text-sm font-semibold text-[var(--color-foreground)]">Directive Queued with Operations Desk</h3>
               <p className="text-xs text-[var(--color-muted-foreground)] max-w-sm mx-auto">
-                An automated confirmation has been sent to your email. Our operations team will compile and verify your rule against your chart of accounts and push it live to this client.
+                An automated confirmation has been sent to your email. Safe, client-scoped intake rules activate for future suggestions after validation; anything affecting tax treatment or historical records stays in review.
               </p>
               <div className="pt-2 flex justify-center gap-2">
                 <Button size="sm" onClick={handleReset}>
@@ -193,6 +204,7 @@ export function ClientRuleRequestModal({
           )}
         </CardContent>
       </Card>
+      </div>
     </div>
   );
 }

@@ -99,7 +99,7 @@ describe("DashboardPage", () => {
     const link = await screen.findByRole("link", { name: /Missing receipt or evidence/i });
     expect(link).toHaveAttribute("href", "/clients/cli_needs?tab=bank&focus=t1");
   });
-  it("renders Practice OS metrics with deep links into the matching work-queue view", async () => {
+  it("renders the concise Today queue with deep links into the matching work-queue view", async () => {
     const { api } = await import("@/lib/api");
     (api as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
       summary: { clients: 1, clientsReady: 1, clientsNeedingAttention: 0, totalOpenActions: 0, receiptsAwaitingReview: 0, missingEvidence: 0, unresolvedBankExceptions: 0, unclassifiedTransactions: 0, uncategorizedActivity: 0, currencyConflicts: 0 },
@@ -123,12 +123,12 @@ describe("DashboardPage", () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByText("Open engagements")).toBeInTheDocument();
-    const overdueLink = screen.getByText("Overdue work").closest("a");
-    expect(overdueLink).toHaveAttribute("href", "/work-queue?view=overdue");
+    expect(await screen.findByText("Today")).toBeInTheDocument();
+    const dueSoonLink = screen.getByText("Due soon").closest("a");
+    expect(dueSoonLink).toHaveAttribute("href", "/work-queue?view=due_soon");
     const waitingLink = screen.getByText("Waiting on client").closest("a");
     expect(waitingLink).toHaveAttribute("href", "/work-queue?view=waiting_on_client");
-    expect(screen.getByText("9d")).toBeInTheDocument();
+    expect(screen.getByText("Agent approvals")).toBeInTheDocument();
   });
 
   it("does not render the Practice OS strip when the backend omits operationsCommandCenter", async () => {
@@ -144,7 +144,7 @@ describe("DashboardPage", () => {
         <DashboardPage />
       </MemoryRouter>,
     );
-    await screen.findByText("Clients");
-    expect(screen.queryByText("Open engagements")).not.toBeInTheDocument();
+    await screen.findByText("Active clients");
+    expect(screen.queryByText("Today")).not.toBeInTheDocument();
   });
 });

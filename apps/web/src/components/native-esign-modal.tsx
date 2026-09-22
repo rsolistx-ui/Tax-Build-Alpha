@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from "react";
-import { api } from "@/lib/api";
+import { api, API_BASE } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -11,6 +11,8 @@ interface NativeEsignModalProps {
   documentTitle?: string;
   defaultSignerName?: string;
   defaultSignerEmail?: string;
+  /** Used only by the recipient-bound public signing page. */
+  publicSigningToken?: string;
   onClose: () => void;
   onSuccess: (result: { certificateId: string; documentHash: string }) => void;
 }
@@ -21,6 +23,7 @@ export function NativeEsignModal({
   documentTitle = "Tax Engagement & Disclosure Document",
   defaultSignerName = "",
   defaultSignerEmail = "",
+  publicSigningToken,
   onClose,
   onSuccess,
 }: NativeEsignModalProps) {
@@ -127,7 +130,20 @@ export function NativeEsignModal({
 
     setIsSubmitting(true);
     try {
-      const res = await api<{
+      const payload = {
+        signatureType: signMode === "draw" ? "drawn" : "typed",
+        signatureData,
+        signerName: signerName.trim(),
+        ...(publicSigningToken ? {} : { signerEmail: signerEmail.trim() }),
+        consentAgreed: true,
+      };
+      const res = publicSigningToken
+        ? await fetch(`${API_BASE}/api/signing/complete`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${publicSigningToken}` }, body: JSON.stringify(payload) }).then(async (response) => {
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || "Failed to execute electronic signature");
+            return data;
+          })
+        : await api<{
         ok: boolean;
         certificateId: string;
         documentHash: string;
@@ -135,13 +151,7 @@ export function NativeEsignModal({
         status: string;
       }>(`/api/clients/${clientId}/signature-requests/${requestId}/sign-native`, {
         method: "POST",
-        body: JSON.stringify({
-          signatureType: signMode === "draw" ? "drawn" : "typed",
-          signatureData,
-          signerName: signerName.trim(),
-          signerEmail: signerEmail.trim(),
-          consentAgreed: true,
-        }),
+        body: JSON.stringify(payload),
       });
 
       setCertResult({
@@ -178,7 +188,7 @@ export function NativeEsignModal({
             </div>
             <div>
               <CardTitle id="native-esign-title" className="text-base font-semibold">
-                Folio In-House Document Signing
+                Truepost Secure Document Signing
               </CardTitle>
               <CardDescription className="text-xs">
                 For ordinary business documents. IRS Forms 8878 and 8879 require additional identity-verification controls and are unavailable here.
@@ -211,7 +221,7 @@ export function NativeEsignModal({
                 <div className="flex justify-between pt-1">
                   <span className="text-[var(--color-muted-foreground)]">Status:</span>
                   <Badge className="border-emerald-500 text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30">
-                    Folio signing record
+                    Truepost signing record
                   </Badge>
                 </div>
               </div>
@@ -257,6 +267,7 @@ export function NativeEsignModal({
                     required
                     value={signerEmail}
                     onChange={(e) => setSignerEmail(e.target.value)}
+                    readOnly={Boolean(publicSigningToken)}
                     placeholder="signer@example.com"
                     id="native-esign-email"
                     className="h-9 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-3 text-sm focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
