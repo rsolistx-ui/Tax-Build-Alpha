@@ -18,6 +18,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { TimeTrackingPanel } from "@/components/time-tracking-panel";
 
 export interface InvoiceLine {
   description: string;
@@ -189,6 +190,8 @@ export function BillingPanel({ clientId, clientName }: { clientId: string; clien
 
   return (
     <div className="space-y-6">
+      <TimeTrackingPanel clientId={clientId} onInvoiced={loadInvoices} />
+
       {/* Top Metrics Banner */}
       <div className="grid gap-4 sm:grid-cols-3">
         <Card className="border-[var(--color-border)]">

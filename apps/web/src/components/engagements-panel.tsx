@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { PenTool } from "lucide-react";
+import { RecurringWorkPanel } from "@/components/recurring-work-panel";
 
 type Engagement = {
   id: string;
@@ -289,6 +290,7 @@ export function EngagementsPanel({ clientId, focusEngagementId }: { clientId: st
         </div>
       )}
 
+      <RecurringWorkPanel clientId={clientId} />
     </div>
   );
 }
