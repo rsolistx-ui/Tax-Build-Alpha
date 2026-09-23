@@ -1,100 +1,111 @@
-# Session Handoff — Tax Build Alpha
+# Session Handoff — Truepost (Tax Build Alpha)
 
-## Status: M5.5 COMPLETE · M6-M8 IN PROGRESS
+**Written:** 2026-09-23. This replaces the previous handoff, which was stale (it predated the last ~180 files of changes). Everything below is verified against the actual codebase and a live production smoke test, not assumed.
 
-### What Was Built (This Session)
-1. **Fixed feedback.ts** — replaced React content with Hono API route (was 4992 bytes of wrong content)
-2. **Removed misplaced feedback-panel.tsx** from `apps/api/src/routes/`
-3. **Fixed analytics-dashboard.tsx typecheck** — unused imports, `StatCard` missing component, `monthlyData` typed as `never`, `Tab` type missing `"analytics"`
-4. **Fixed feedback-panel.tsx typecheck** — missing `textarea`/`select` UI components → replaced with native HTML `<select>` and `<textarea>` + existing `Input`
-5. **Fixed client-workspace.tsx typecheck** — added `Activity` import, added `"analytics"` to `Tab` type, added `taxPrepRequired` to `ClientProfile`, fixed `never` type issues from AnalyticsDashboard prop typing
-6. **Upgraded tax-extended-panels.tsx** — all 7 panels upgraded from read-only stubs to functional write UI:
-   - CarryforwardPanel: Create + Utilize forms with validation
-   - StateModsPanel: Create form with all fields (state, type, amount, apportionment)
-   - M3Panel: Create reconciliation + add lines with part I/II/III selection
-   - PriorYearPanel: Shows added/removed form line codes between years
-   - ExtensionsPanel: Create 4868/7004 extensions with due dates
-   - OrganizerPanel: Prefill-from-prior-year checkbox toggle
-   - DiagnosticsPanel: Shows blocking errors with red highlighting
-7. **Fixed tax-organizer.ts route** — removed `requireActiveBeta` middleware, added `prefill=1` query param support for prior-year prefill
-8. **All typecheck/build/test green** — typecheck 0 errors, build passes, 363 API tests + 80 web tests + 40 script tests pass
-9. **Deploy blocked** — Cloudflare API token expired (auth error), needs renewal
-10. **Committed 6754f0d** to origin/main
+## Status: core loop is real and verified live. Native e-sign is the next real milestone.
 
-### NOT BUILT (correctly deferred)
-- Capacitor wrapper
-- Biometric auth
-- M6: DocuSign wiring + KBA/8879 signing ceremony (services exist but disconnected)
-- M7: Tax Workbench taxonomy/extraction reuse/review queue
-- M8: Return engine federal/state calcs/MeF/ATS
+A full production pipeline test passed end-to-end this session (exit 0): receipt upload → R2 → Workers AI extraction → per-client rule categorization → validation → review → filing → P&L → bank CSV import → matching → exceptions → client portal → professional review → close, plus cross-tenant isolation, tax-year readiness, and engagement automation. This was not a code-read — it was a real synthetic tenant created, exercised, and cleaned up against `https://folio-api.rsolistx.workers.dev`.
 
-### File Structure
-```
-apps/api/src/routes/
-  feedback.ts          Hono API route (POST/GET/PATCH /api/feedback)
-  tax-extended.ts      Carryforward/state-mod/M3/extensions routes (write-enabled)
-  tax-organizer.ts     Tax organizer + diagnostics (prefill support)
-  tax-workbench.ts     Workbench + readiness blocking
-  tax-workpapers.ts    Tax workpaper JSONB CRUD
-  return-engine.ts     Return submit stub
-  doc-versioning.ts    Document versions + signature requests
-  doc-versioning.ts    Document versions + signature requests
-  doc-versioning.ts    Document versions + signature requests
-  (all other routes unchanged)
+---
 
-apps/web/src/components/
-  tax-extended-panels.tsx  7 panels with full write UI (157→356 lines)
-  analytics-dashboard.tsx  Fixed typecheck, proper prop types
-  feedback-panel.tsx       Fixed typecheck, native HTML selects
-  tax-workpaper.tsx        HyperFormula grid (full, 555 lines)
-  tax-readiness-panel.tsx  Readiness state machine + checklist
+## 1. What shipped this session (all committed, pushed, deployed to production)
 
-apps/web/src/pages/
-  client-workspace.tsx     Tab type includes "analytics", Activity import, taxPrepRequired
-```
+- **Time tracking tied to invoicing** — start/stop timer or manual entry, billing rates (hourly/fixed/retainer), convert unbilled time into a real Stripe-ready invoice. Migration `0056`, full UI in the Billing tab.
+- **Client pipeline view** — prospect → engaged → active → inactive kanban, replacing a hardcoded "Active" badge that was previously fake. Migration `0057`.
+- **Recurring workflow templates** — build a checklist once ("every March, prepare the 1040"), subscribe a client, and it auto-generates work items on schedule via the existing Cloudflare Cron trigger (already running, zero added cost). Migration `0058`. Full UI in the Engagements tab.
+- **Spending-by-category pie chart** — `recharts` was a declared dependency that was never actually imported anywhere; built a real donut chart on the P&L tab fed by live category totals, colors validated for light/dark and colorblind accessibility.
+- **New TP logo** embedded everywhere — favicon, all PWA icon sizes, Tauri desktop icons, app shell.
+- **PWA push notifications fixed** — `vite-plugin-pwa`'s `generateSW` mode silently overwrites the hand-written `sw.js` at every build, so push/notificationclick had zero listener in production. Fixed via `workbox.importScripts`. Also fixed two dead home-screen shortcut URLs and a missing icon reference.
+- **Design pass** — fixed 3 real dark-mode CSS bugs (toast banners and a count badge used hardcoded hex with no dark override) and one off-brand purple "AI slop" accent, found via the Impeccable detector, not eyeballed.
+- **Four real production database bugs found and fixed** by the live pipeline test (see §2 — this is the most important finding of the session).
+- **Twilio SMS webhook security** (from prior session, verified still correct): real Twilio signature verification, not a stub.
+- **Stripe Connect OAuth flow** (from prior session, verified working): Phyllis authorizes her own existing Stripe account via Stripe's hosted consent screen — Truepost never touches her banking details or holds platform keys on her behalf.
 
-### Key Files to Know
-- `apps/web/src/components/tax-extended-panels.tsx` — All 7 M5.5 panels (write-enabled)
-- `apps/web/src/components/tax-workpaper.tsx` — HyperFormula grid
-- `apps/web/src/components/tax-readiness-panel.tsx` — Readiness + checklist
-- `apps/web/src/pages/client-workspace.tsx` — Tab wiring, analytics tab
-- `apps/api/src/routes/tax-extended.ts` — All carryforward/state-mod/M3/extension API endpoints
-- `apps/api/src/routes/tax-organizer.ts` — Prefill support
-- `apps/api/src/services/docusign.ts` — Full DocuSign client (unwired, ID bug at line 506)
-- `apps/api/src/services/return-engine.ts` — Stub
+## 2. Production bugs found via live testing (all fixed, verified, migrated)
 
-### DB Migrations
-- Migration 0018: `tax_engine.sql` — core M5 tables (journals, mappings, M-1, M-3, state-mod, carryforward)
-- Migration 0019: `docusign.sql` — DocuSign token/envelope tables
-- Migration 0020: `tax_workpapers.sql` — tax_workpapers JSONB
-- Migration 0022: `tax_extensions.sql` — tax_extensions table
-- Migration 0023: `doc_versioning.sql` — document_versions + signature_requests
-- Migration 0024: `tax_returns.sql` — tax_returns + tax_diagnostics_cache
-- Migration 0026: `feedback_agent.sql` — feedback_submissions
+These were **invisible to code review** — they only surfaced by actually running a receipt through the live pipeline and reading the true database-level error (the API only ever returned a generic message to the client).
 
-### Deploy
-- Latest deploy attempt: **FAILED** — Cloudflare API token authentication error (code 10000)
-- Token needs renewal at https://dash.cloudflare.com/profile/api-tokens
-- Last successful deploy: `00c7a04e`
+| Bug | Root cause | Impact before fix |
+|---|---|---|
+| Migration 0034 never applied | Typo: `$$ LANGUAGE plpgsql.` instead of `;` | `stripe_connect_accounts`/`stripe_customers` didn't exist |
+| Migration 0040 never applied | Referenced table `documents`, real table is `client_documents` | 1099/duplicate-detection columns didn't exist |
+| **`document_classifications` table never created by any migration** | Pure omission | **Every single receipt upload in production was failing**, regardless of whether AI extraction succeeded |
+| `receipts.notes` column missing | Pure omission | Export/close-packet flow threw 500 on every call |
 
-### Current Git State
-- Latest commit: `6754f0d` — "feat: M5.5 panels upgraded..."
-- Previous: `f06a6ee` + `be45cda` + `1b408d4`
-- All 11 files committed, 0 uncommitted changes
+**Lesson for next session:** `scripts/verify-neon-schema.mjs` had blind spots — it only checks objects someone remembered to add a check for. All four gaps above now have checks added. Still worth periodically diffing every migration file's `CREATE TABLE`/`ADD COLUMN` against what the verifier actually asserts, since the verifier is manually maintained and can still drift.
 
-### Typecheck/Build/Test Status
-- ✅ `npm run typecheck` — 0 errors
-- ✅ `npm run build` — web build + wrangler dry-run pass
-- ✅ `npm run test` — 363 API + 80 web + 40 script = 483 tests pass
-- ❌ `npm run deploy:api` — Cloudflare auth error (token expired)
+## 3. Owner-action items — nothing else can proceed on these without you
 
-### M6-M8 Remaining Work
-- **M6**: Wire `docusign.ts` to `doc-versioning.ts` routes, fix `saveEnvelope` ID bug (line 506 generates wrong ID), add field placement for 8879, add KBA flow
-- **M7**: Build real Tax Workbench page (separate from workpaper tab), add extraction reuse from receipts/bank, add review queue, add preparation status dashboard
-- **M8**: Build return engine with federal/state calcs, add MeF/IRIS submission, add ack/reject handling, add state apportionment math
+| Item | Status | What's needed |
+|---|---|---|
+| Stripe secret/publishable keys + Connect Client ID | **Not set** | dashboard.stripe.com → Developers → API keys; Settings → Connect settings for Client ID (`ca_...`) |
+| Plaid Client ID + Sandbox secret | **Not set** | dashboard.plaid.com → Team Settings → Keys |
+| Twilio Account SID + Auth Token | **Not set** | twilio.com/try-twilio (free trial). Webhook URL once set: `https://folio-api.rsolistx.workers.dev/api/sms/inbound` (already has real signature verification wired) |
+| Naming | **Resolved** — "Truepost" confirmed as the shipping name | — |
+| Pricing model | **Recommendation given, not yet decided by owner** — flat monthly subscription, no per-seat/per-client scaling, annual option at a discount. Rationale in prior conversation turn. | Owner picks the actual price point |
 
-### Next Steps
-1. Renew Cloudflare API token → deploy `6754f0d` to production
-2. Start M6: Wire DocuSign service to routes + fix ID bug
-3. Start M7: Tax Workbench page with extraction reuse
-4. Start M8: Return engine with calcs + MeF
+## 4. Native e-signature — the real next milestone (not third-party DocuSign)
+
+**Correction from earlier in this session:** the "M6: wire DocuSign" item in the old roadmap referred to `apps/api/src/services/docusign.ts`, a wrapper around the actual third-party DocuSign API. That is **not** what the product wants — the goal is an in-house system that supersedes DocuSign, not a dependency on it. Do not wire the third-party `docusign.ts` service; the correct next milestone is closing the gap on the **native** e-sign system (`native-esign.ts`).
+
+### What's real today (`docs/NATIVE_ESIGN_STATUS.md`, verified accurate)
+Signs ordinary business documents (engagement letters) with real evidence: SHA-256 digest, signer name/email, timestamp, IP address, user agent, stored in R2 with an audit event. This is genuinely solid and already better UX than DocuSign for its scope.
+
+### What's explicitly blocked, by design
+IRS Form 8878/8879 remote signing. The API rejects those forms today. This is the correct, honest current state — do not market current native e-sign as IRS/UETA/ESIGN compliant.
+
+### DocuSign competitive research (done this session)
+
+**Pricing (2026):** Personal $10-15/mo (5 envelopes/mo cap); Standard $25-45/user/mo (~100 envelopes/yr); Business Pro $40-65/user/mo; newer "Intelligent Agreement Management" tiers run $40-95/user/mo. No free tier. Add-ons stack on top: SMS delivery $0.40+/send, ID verification $2.50+/attempt. DocuSign has **no dedicated IRS 8878/8879 product** — tax pros manually layer DocuSign's generic Identity Verification/KBA add-on onto standard envelopes, and that add-on typically requires Enterprise tier plus a separate contract.
+
+**What real IRS compliance requires** (IRS Publication 1345 — [pdf](https://www.irs.gov/pub/irs-pdf/p1345.pdf)):
+- Third-party KBA (knowledge-based authentication: multiple-choice questions from credit-history data, not just an ID photo) at **every** remote signing event, with two exceptions: signing in the ERO's physical presence, or an existing multi-year relationship with that ERO.
+- Must record: digital image of the signed form, signature date/time, taxpayer IP address, login ID, signing method, name/address/DOB.
+- Compliance standard: NIST SP 800-63 Identity Assurance Level 2 (IAL2).
+- Retention: 3 years minimum (matches what the native system already targets).
+- **Not confirmed from secondary sources:** exact KBA question count and pass/retry thresholds. Read the Pub 1345 PDF directly before writing the actual signing-flow logic rather than building from this summary.
+
+**KBA vendor reality:** LexisNexis and Experian are the two vendors DocuSign itself sources KBA from — genuine credit-history-quiz KBA, not document/selfie checks. IDology also offers it. (Persona and Jumio are document+biometric verification, not the same thing — don't substitute them.) No public self-serve pricing exists for any of these; typical small-practice spend through DocuSign's own markup lands around $5,000-$10,000/year for a few hundred verifications, direct-vendor pricing likely lower but requires a sales call.
+
+### Gap-to-parity list
+
+**Buildable in-house, zero marginal cost:**
+- PIN + form-specific authorization data capture
+- Sealed/immutable retention with 3-year policy enforcement
+- Audit export/verifier tooling
+- ERO/e-file operating-control workflow (block 8878/8879 signing until KBA passes)
+
+**Cannot be zero-cost, no way around it:**
+- The KBA identity-verification step itself. This is the one piece of real IRS compliance that requires paying a credit-bureau-grade vendor (LexisNexis or Experian) per signing event — budget for this specifically before enabling remote 8878/8879 signing. Everything else above is free; this one line item is not, and that's true for DocuSign too — they're paying the same vendors under the hood and marking it up.
+
+### Recommended sequence for next session
+1. Read the actual Pub 1345 PDF section on KBA question count/thresholds before writing signing logic.
+2. Build the zero-cost pieces first (PIN capture, immutable retention, audit export, ERO gating) — real progress, no vendor dependency, no cost.
+3. Get a direct quote from LexisNexis or Experian for KBA-as-a-service before committing to a vendor or a price point to charge for 8879 signing as a feature.
+4. Only then wire the KBA step in and lift the 8878/8879 block.
+
+## 5. Also still open (lower priority than native e-sign)
+
+- **M7 — Tax Workbench**: real workbench page separate from the raw workpaper tab, extraction reuse from receipts/bank, review queue, prep-status dashboard. Not started.
+- **M8 — Return engine**: federal/state calculations, MeF/IRIS submission, ack/reject handling, state apportionment. Not started. Correctly deferred — this is the biggest, most regulatorily complex piece and should come last.
+- **PWA audit was bounded, not exhaustive** — covered push notifications, dead shortcuts, and the `/api/*` no-cache security guarantee. Not yet covered: full Lighthouse PWA score, iOS install-prompt quirks, deep offline-capability testing, maskable-icon safe-zone verification.
+- **QuickBooks OAuth** — service exists, unconfigured, not prioritized (no key request from owner yet).
+- **HyperFormula** — intentionally kept in evaluation mode until there's revenue to justify the commercial license (owner's explicit call, zero-cost bootstrap phase).
+
+## 6. Verification status as of this handoff
+
+- `npm run typecheck` — 0 errors (web + api)
+- `npm run test` — 475+ API tests, 81 web tests, 42 script tests, all passing, 0 failures
+- `npm run build` — clean, both workspaces
+- Live production smoke test (`scripts/smoke-production.ps1`) — **full pass, exit 0**, self-cleaning, zero residue confirmed independently
+- `scripts/verify-neon-schema.mjs` — all checks pass, including the 4 new ones added this session for the bugs found
+- Production health: `https://folio-api.rsolistx.workers.dev/api/health` reachable, Workers AI enabled
+- Git: `origin/main` matches local `HEAD`, working tree clean
+
+## 7. Files worth knowing for next session
+
+- `apps/api/src/services/native-esign.ts` — the in-house signer to extend (not `docusign.ts`, which wraps the third-party service and should stay unwired)
+- `docs/NATIVE_ESIGN_STATUS.md` — the honest current-state doc, keep it honest as this evolves
+- `scripts/smoke-production.ps1` — the real end-to-end test; run it after any schema or pipeline change, not just typecheck/build
+- `scripts/verify-neon-schema.mjs` — add a check here for every new migration's tables/columns, immediately, not later
+- `SMOKE_CLEANUP_TOKEN` — saved at `C:\Users\rdsol\OneDrive\Desktop\Truepost-SMOKE_CLEANUP_TOKEN.txt` and set as the live Cloudflare secret
