@@ -32,6 +32,10 @@ async function runQuery(query) {
 
 const checks = [
   {
+    label: "firm_agreements table (service agreement acceptance, migration 0065)",
+    query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'firm_agreements'`,
+  },
+  {
     label: "mileage_trips table (IRC § 274(d) mileage log, migration 0064)",
     query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'mileage_trips'`,
   },

@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { formatDate, formatDateTime } from "@/lib/formatters";
+import { FormPlacementPicker, type Placement } from "./form-placement-picker";
 
 type Status = "awaiting_signature" | "handwritten_received" | "signed" | "voided";
 type Method = "handwritten_upload" | "in_person_esign" | "remote_kba_esign";
@@ -305,6 +306,7 @@ function InPersonModal({ base, item, onClose, onDone }: { base: string; item: Au
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pad = useRef<SignaturePadHandle>(null);
+  const [placement, setPlacement] = useState<Placement | null>(null);
 
   useEffect(() => { void api<{ relationship: { priorTaxYear: number } | null }>(`${base}/${item.id}/multi-year`).then((r) => setReturning(r.relationship)).catch(() => setReturning(null)); }, [base, item.id]);
 
@@ -316,6 +318,7 @@ function InPersonModal({ base, item, onClose, onDone }: { base: string; item: Au
     try {
       await api(`${base}/${item.id}/sign-in-person`, { method: "POST", body: JSON.stringify({
         signature: { signatureType: signMode, signatureData, signerName, taxpayerPin: pin },
+        placement,
         identity: mode === "multi_year" ? { mode } : { mode, inspection: id },
       }) });
       onDone();
@@ -351,6 +354,7 @@ function InPersonModal({ base, item, onClose, onDone }: { base: string; item: Au
 
         <fieldset className="space-y-2">
           <legend className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--color-muted-foreground)]">2. Taxpayer signs</legend>
+          <FormPlacementPicker pdfPath={`${base}/${item.id}/prepared`} value={placement} onChange={setPlacement} />
           <label className="block text-xs">Legal name<input className={inputClass} value={signerName} onChange={(e) => setSignerName(e.target.value)} required /></label>
           <label className="block text-xs">Five-digit PIN the taxpayer chooses as their signature<input className={`${inputClass} font-mono tracking-[0.4em]`} inputMode="numeric" maxLength={5} value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} required /></label>
           <div className="flex gap-2">
