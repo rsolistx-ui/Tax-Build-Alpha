@@ -1,9 +1,9 @@
 import type { FormEvent } from "react";
 import { BrandMark } from "@/components/brand-mark";
-import { useState, useEffect, useRef } from "react";
+import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { authClient } from "@/lib/auth-client";
-import { setAdminToken, getAdminToken, apiUrl } from "@/lib/api";
+import { setAdminToken, getAdminToken } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -18,25 +18,6 @@ import {
   Lock,
   Loader2,
 } from "lucide-react";
-
-declare global {
-  interface Window {
-    turnstile?: {
-      render: (
-        container: string | HTMLElement,
-        options: {
-          sitekey: string;
-          callback?: (token: string) => void;
-          "error-callback"?: () => void;
-          "expired-callback"?: () => void;
-          theme?: "light" | "dark" | "auto";
-        },
-      ) => string;
-      reset: (widgetId?: string) => void;
-      remove: (widgetId?: string) => void;
-    };
-  }
-}
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -53,98 +34,15 @@ export function LoginPage() {
   const [code, setCode] = useState("");
   const [useBackupCode, setUseBackupCode] = useState(false);
 
-  // Turnstile State
-  const [turnstileEnabled, setTurnstileEnabled] = useState(false);
-  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
-  const turnstileWidgetId = useRef<string | null>(null);
-
   // Fast-Pass State
   const [fastPassCode, setFastPassCode] = useState("");
   const [fastPassLoading, setFastPassLoading] = useState(false);
   const [fastPassError, setFastPassError] = useState<string | null>(null);
 
-  // Check Turnstile configuration on mount
-  useEffect(() => {
-    let isMounted = true;
-    async function checkTurnstile() {
-      try {
-        const res = await fetch(apiUrl("/api/auth/turnstile/config"));
-        if (!res.ok) return;
-        const data = (await res.json()) as { enabled: boolean; siteKey: string | null };
-        if (isMounted && data.enabled && data.siteKey) {
-          setTurnstileEnabled(true);
-          loadTurnstileScript(data.siteKey);
-        }
-      } catch {
-        // Turnstile unconfigured or offline; graceful fallback
-      }
-    }
-    void checkTurnstile();
-    return () => {
-      isMounted = false;
-      if (turnstileWidgetId.current && window.turnstile) {
-        try {
-          window.turnstile.remove(turnstileWidgetId.current);
-        } catch {
-          // ignore cleanup error
-        }
-      }
-    };
-  }, []);
-
-  function loadTurnstileScript(siteKey: string) {
-    if (document.getElementById("cf-turnstile-script")) {
-      renderTurnstileWidget(siteKey);
-      return;
-    }
-    const script = document.createElement("script");
-    script.id = "cf-turnstile-script";
-    script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
-    script.async = true;
-    script.defer = true;
-    script.onload = () => {
-      renderTurnstileWidget(siteKey);
-    };
-    document.head.appendChild(script);
-  }
-
-  function renderTurnstileWidget(siteKey: string) {
-    const container = document.getElementById("turnstile-box");
-    if (!container || !window.turnstile) return;
-    try {
-      if (turnstileWidgetId.current) {
-        window.turnstile.remove(turnstileWidgetId.current);
-      }
-      turnstileWidgetId.current = window.turnstile.render("#turnstile-box", {
-        sitekey: siteKey,
-        theme: "auto",
-        callback: (token: string) => {
-          setTurnstileToken(token);
-          setError(null);
-        },
-        "expired-callback": () => {
-          setTurnstileToken(null);
-        },
-        "error-callback": () => {
-          setTurnstileToken(null);
-        },
-      });
-    } catch {
-      // ignore re-render errors
-    }
-  }
-
   async function onPasswordSubmit(e: FormEvent) {
     e.preventDefault();
     setLoading(true);
     setError(null);
-
-    // 1. Cloudflare Turnstile: the server checks this single-use token on the sign-in request.
-    if (turnstileEnabled && !turnstileToken) {
-      setLoading(false);
-      setError("Please complete the Cloudflare security check before signing in.");
-      return;
-    }
 
     // 2. Validate Superuser 64-hex Token if provided
     const trimmedToken = masterToken.trim();
@@ -157,16 +55,10 @@ export function LoginPage() {
     }
 
     // 3. Authenticate User Credentials
-    const { data, error: err } = await authClient.signIn.email(
-      { email, password },
-      turnstileToken ? { headers: { "x-captcha-response": turnstileToken } } : undefined,
-    );
+    const { data, error: err } = await authClient.signIn.email({ email, password });
     setLoading(false);
 
     if (err) {
-      // The token was spent on this attempt; a retry needs a fresh check.
-      if (turnstileWidgetId.current && window.turnstile) window.turnstile.reset(turnstileWidgetId.current);
-      setTurnstileToken(null);
       setError(err.message || "Sign in failed. Check your email and password.");
       return;
     }
@@ -366,15 +258,7 @@ export function LoginPage() {
                   ) : null}
                 </div>
 
-                {/* Cloudflare Turnstile Box */}
-                {turnstileEnabled ? (
-                  <div className="flex flex-col items-center justify-center pt-1 pb-1">
-                    <div id="turnstile-box" className="min-h-[65px] flex items-center justify-center" />
-                    <p className="text-[10px] text-[var(--color-muted-foreground)] flex items-center gap-1 mt-1">
-                      <ShieldCheck className="h-3 w-3 text-[var(--color-primary)]" /> Protected by Cloudflare Turnstile bot deterrence
-                    </p>
-                  </div>
-                ) : null}
+
 
                 {error ? <p className="text-xs text-rose-600 font-medium">{error}</p> : null}
 

@@ -4,6 +4,8 @@ import type { AuthedVars } from "./session";
 import { createDb } from "../db";
 import { computeAccessDecision, type EntitlementRow } from "../services/beta";
 import { insertBetaAccessEvent } from "../services/beta-db";
+import { getCookie } from "hono/cookie";
+import { ADMIN_UNLOCK_COOKIE, isValidAdminUnlock, turnstileConfigured } from "../services/admin-unlock";
 
 export function isOwnerEmail(env: Env, email: string): boolean {
   if (!email) return false;
@@ -87,6 +89,11 @@ export const requireOwner = createMiddleware<{ Bindings: Env; Variables: AuthedV
       error: "Admin master security token required",
       code: "MASTER_TOKEN_REQUIRED",
     }, 403);
+  }
+
+  // With Turnstile configured, the admin panel also needs the pass issued by POST /api/admin-unlock.
+  if (turnstileConfigured(c.env) && !(await isValidAdminUnlock(c.env, c.get("userId"), getCookie(c, ADMIN_UNLOCK_COOKIE)))) {
+    return c.json({ error: "Complete the admin security check to continue.", code: "ADMIN_UNLOCK_REQUIRED" }, 403);
   }
 
   await next();

@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { KeyRound, ShieldAlert, ShieldCheck, Lock, Unlock, Eye, EyeOff } from "lucide-react";
-import { getAdminToken, setAdminToken, api } from "@/lib/api";
+import { getAdminToken, setAdminToken, api, apiUrl } from "@/lib/api";
+import { TurnstileWidget } from "@/components/turnstile-widget";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -16,9 +17,23 @@ export function AdminTokenGate({ onTokenChanged, className }: AdminTokenGateProp
   const [verifying, setVerifying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  // Cloudflare Turnstile guards the admin panel only; the server checks it in POST /api/admin-unlock.
+  const [turnstileSiteKey, setTurnstileSiteKey] = useState<string | null>(null);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [turnstileReset, setTurnstileReset] = useState(0);
 
   useEffect(() => {
-    setCurrentToken(getAdminToken());
+    fetch(apiUrl("/api/auth/turnstile/config"))
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { enabled?: boolean; siteKey?: string | null } | null) => setTurnstileSiteKey(data?.enabled && data.siteKey ? data.siteKey : null))
+      .catch(() => setTurnstileSiteKey(null));
+    const stored = getAdminToken();
+    if (!stored) return;
+    // A stored token alone is not enough once the 8-hour admin pass has lapsed; show the check again.
+    api("/api/beta/entitlements").catch(() => {
+      setCurrentToken(null);
+      setInputToken(stored);
+    });
   }, []);
 
   async function handleSaveToken(e: React.FormEvent) {
@@ -34,6 +49,11 @@ export function AdminTokenGate({ onTokenChanged, className }: AdminTokenGateProp
       return;
     }
 
+    if (turnstileSiteKey && !turnstileToken) {
+      setError("Complete the Cloudflare security check first.");
+      return;
+    }
+
     setVerifying(true);
     setError(null);
     setSuccess(null);
@@ -42,6 +62,7 @@ export function AdminTokenGate({ onTokenChanged, className }: AdminTokenGateProp
     setAdminToken(token);
 
     try {
+      await api("/api/admin-unlock", { method: "POST", body: JSON.stringify({ turnstileToken }) });
       // Test the token against the admin endpoints
       await api("/api/beta/entitlements");
       setCurrentToken(token);
@@ -52,12 +73,15 @@ export function AdminTokenGate({ onTokenChanged, className }: AdminTokenGateProp
     } catch (err: any) {
       setAdminToken(null);
       setError(err?.message || "Invalid master token or unauthorized access.");
+      // The Turnstile token was spent on this attempt.
+      setTurnstileReset((n) => n + 1);
     } finally {
       setVerifying(false);
     }
   }
 
   function handleClearToken() {
+    void api("/api/admin-unlock", { method: "DELETE" }).catch(() => undefined);
     setAdminToken(null);
     setCurrentToken(null);
     setError(null);
@@ -130,13 +154,15 @@ export function AdminTokenGate({ onTokenChanged, className }: AdminTokenGateProp
             <Button
               type="submit"
               size="sm"
-              disabled={verifying || !inputToken.trim()}
+              disabled={verifying || !inputToken.trim() || (Boolean(turnstileSiteKey) && !turnstileToken)}
               className="bg-[var(--color-primary)] hover:opacity-90 text-[var(--color-primary-foreground)] text-xs h-9 px-4 gap-1.5 shadow-sm"
             >
               <KeyRound className="h-3.5 w-3.5" />
               {verifying ? "Validating Key..." : "Unlock Master Access"}
             </Button>
           </div>
+
+          {turnstileSiteKey ? <TurnstileWidget siteKey={turnstileSiteKey} onToken={setTurnstileToken} resetKey={turnstileReset} /> : null}
 
           <div className="flex items-center justify-between text-[11px] text-[var(--color-muted-foreground)] px-0.5">
             <span>Timing-attack protected via constant-time XOR comparison</span>

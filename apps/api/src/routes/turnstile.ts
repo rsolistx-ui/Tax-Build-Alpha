@@ -1,12 +1,12 @@
 import { Hono } from "hono";
 import type { Env } from "../env";
-import { turnstileConfigured } from "../auth";
+import { turnstileConfigured } from "../services/admin-unlock";
 
 export const turnstileRoutes = new Hono<{ Bindings: Env }>();
 
 /**
- * Returns public Turnstile site key configuration to the frontend. The token itself is
- * verified by Better Auth's captcha plugin on the sign-in request (see auth.ts).
+ * Returns public Turnstile site key configuration to the admin panel. The token itself is
+ * verified by POST /api/admin-unlock (see routes/admin-unlock.ts).
  */
 turnstileRoutes.get("/config", (c) => {
   const enabled = turnstileConfigured(c.env);

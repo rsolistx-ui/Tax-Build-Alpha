@@ -66,6 +66,7 @@ import { taxAdvisoryRoutes } from "./routes/tax-advisory";
 import { intercompanyRoutes } from "./routes/intercompany";
 import { directUploadSmsRoutes } from "./routes/direct-upload-sms";
 import { turnstileRoutes } from "./routes/turnstile";
+import { adminUnlockRoutes } from "./routes/admin-unlock";
 import { runScheduledOperations } from "./services/scheduled-operations";
 import { runSupervisorHeartbeat } from "./services/supervisor-heartbeat";
 import { runBankFeedHeartbeat } from "./services/bank-feed-heartbeat";
@@ -149,6 +150,7 @@ app.route("/api/auth/turnstile", turnstileRoutes);
 app.on(["POST", "GET"], "/api/auth/*", (c) => createAuth(c.env).handler(c.req.raw));
 
 app.route("/api/beta", betaRoutes);
+app.route("/api/admin-unlock", adminUnlockRoutes);
 app.route("/api/admin", adminRoutes);
 app.route("/api/internal", internalRoutes);
 
