@@ -4,12 +4,12 @@ import { newId } from "../lib/id";
 import { issueSigningAccessLink } from "./signature-access";
 
 /** Sends one email through Resend. Returns false (and sends nothing) when email is not configured. */
-export async function sendEmail(env: Pick<Env, "RESEND_API_KEY" | "SENDER_EMAIL">, message: { to: string; fromName: string; subject: string; text: string; html: string }, deps: { fetch?: typeof fetch } = {}): Promise<boolean> {
+export async function sendEmail(env: Pick<Env, "RESEND_API_KEY" | "SENDER_EMAIL" | "REPLY_TO_EMAIL">, message: { to: string; fromName: string; subject: string; text: string; html: string }, deps: { fetch?: typeof fetch } = {}): Promise<boolean> {
   if (!env.RESEND_API_KEY) return false;
   const response = await (deps.fetch ?? fetch)("https://api.resend.com/emails", {
     method: "POST",
     headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ from: env.SENDER_EMAIL || `${message.fromName} <onboarding@resend.dev>`, to: [message.to], subject: message.subject, text: message.text, html: message.html }),
+    body: JSON.stringify({ from: env.SENDER_EMAIL || `${message.fromName} <onboarding@resend.dev>`, to: [message.to], reply_to: env.REPLY_TO_EMAIL || undefined, subject: message.subject, text: message.text, html: message.html }),
   }).catch(() => null);
   return Boolean(response?.ok);
 }

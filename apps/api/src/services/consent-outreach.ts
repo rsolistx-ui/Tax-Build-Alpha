@@ -60,7 +60,7 @@ export async function runConsentOutreach(db: Db, env: Env, deps: { fetch?: typeo
     const response = await doFetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from: env.SENDER_EMAIL || `${row.firm_name} <onboarding@resend.dev>`, to: [row.email], ...message }),
+      body: JSON.stringify({ from: env.SENDER_EMAIL || `${row.firm_name} <onboarding@resend.dev>`, to: [row.email], reply_to: env.REPLY_TO_EMAIL || undefined, ...message }),
     }).catch(() => null);
     const delivered = Boolean(response?.ok);
     if (delivered) sent++;

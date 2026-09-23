@@ -433,6 +433,7 @@ ${draftReply}
         body: JSON.stringify({
           from: sender,
           to,
+          reply_to: this.env.REPLY_TO_EMAIL || undefined,
           subject,
           text,
           html,

@@ -2,7 +2,7 @@ import type { Db } from "../db";
 import { addRequestMessage } from "./request-messages";
 import { sendEmail } from "./signature-reminders";
 
-type EmailEnv = { RESEND_API_KEY?: string; SENDER_EMAIL?: string };
+type EmailEnv = { RESEND_API_KEY?: string; SENDER_EMAIL?: string; REPLY_TO_EMAIL?: string };
 
 const DEFAULT_REMINDER_DELAY_DAYS = 5;
 

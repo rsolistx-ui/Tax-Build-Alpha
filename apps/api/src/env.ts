@@ -39,6 +39,8 @@ export type Env = {
   ADMIN_NOTIFICATION_EMAIL?: string;
   /** Custom sender address for Resend (e.g. notifications@resend.dev or firm domain). */
   SENDER_EMAIL?: string;
+  /** Where client replies to outbound email go (the sender address has no inbox). */
+  REPLY_TO_EMAIL?: string;
   /** Shared secret required by the internal smoke-cleanup endpoint. Never exposed to any client. */
   SMOKE_CLEANUP_TOKEN?: string;
   /** Push notifications (Web Push + VAPID). Never hardcoded; set as Worker secrets. */
