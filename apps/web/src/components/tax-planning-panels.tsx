@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { CalendarClock, Car, Trash2 } from "lucide-react";
-import { api } from "@/lib/api";
+import { CalendarClock, Car, Download, Home, Trash2 } from "lucide-react";
+import { api, apiUrl } from "@/lib/api";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { formatDate } from "@/lib/formatters";
@@ -155,6 +155,87 @@ export function MileagePanel({ clientId, taxYear }: { clientId: string; taxYear:
         ) : <p className="text-sm text-[var(--color-muted-foreground)]">No trips logged for {year}.</p>}
       </CardContent>
     </Card>
+  );
+}
+
+type HomeOfficeResult = { qualifies: boolean; problems: string[]; simplifiedDeduction: number; tentativeSimplified: number; incomeLimit: number | null; businessUsePercent: number | null; notes: string[] };
+
+/** Home office: simplified method (Rev. Proc. 2013-13) and business-use percentage for Form 8829. */
+export function HomeOfficePanel({ clientId }: { clientId: string }) {
+  const [form, setForm] = useState({ officeSqFt: "", homeSqFt: "", grossIncomeFromBusinessUse: "", otherBusinessExpenses: "", regularAndExclusiveUse: false, principalPlaceOrClientMeetings: false, isEmployee: false });
+  const [result, setResult] = useState<HomeOfficeResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const set = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [key]: e.target.type === "checkbox" ? e.target.checked : e.target.value }));
+  async function compute(e: React.FormEvent) {
+    e.preventDefault(); setError(null);
+    try {
+      setResult(await api<HomeOfficeResult>(`/api/clients/${clientId}/home-office`, { method: "POST", body: JSON.stringify({
+        officeSqFt: num(form.officeSqFt) ?? 0, homeSqFt: num(form.homeSqFt), grossIncomeFromBusinessUse: num(form.grossIncomeFromBusinessUse), otherBusinessExpenses: num(form.otherBusinessExpenses),
+        regularAndExclusiveUse: form.regularAndExclusiveUse, principalPlaceOrClientMeetings: form.principalPlaceOrClientMeetings, isEmployee: form.isEmployee,
+      }) }));
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not compute."); }
+  }
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base"><Home className="h-4 w-4 text-[var(--color-primary)]" />Home office</CardTitle>
+        <CardDescription>Simplified method: $5 per square foot, up to 300 square feet (Rev. Proc. 2013-13). The space must be used regularly and exclusively for the business.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <form onSubmit={(e) => void compute(e)} className="grid gap-3 sm:grid-cols-4">
+          <label className="text-xs">Office sq ft<input className={inputClass} inputMode="decimal" value={form.officeSqFt} onChange={set("officeSqFt")} required /></label>
+          <label className="text-xs">Whole home sq ft<input className={inputClass} inputMode="decimal" value={form.homeSqFt} onChange={set("homeSqFt")} /></label>
+          <label className="text-xs">Gross income from business use<input className={inputClass} inputMode="decimal" value={form.grossIncomeFromBusinessUse} onChange={set("grossIncomeFromBusinessUse")} /></label>
+          <label className="text-xs">Other business expenses<input className={inputClass} inputMode="decimal" value={form.otherBusinessExpenses} onChange={set("otherBusinessExpenses")} /></label>
+          <div className="space-y-1 text-xs sm:col-span-3">
+            <label className="flex items-center gap-2"><input type="checkbox" checked={form.regularAndExclusiveUse} onChange={set("regularAndExclusiveUse")} />Used regularly and only for the business</label>
+            <label className="flex items-center gap-2"><input type="checkbox" checked={form.principalPlaceOrClientMeetings} onChange={set("principalPlaceOrClientMeetings")} />Principal place of business, or where clients are met</label>
+            <label className="flex items-center gap-2"><input type="checkbox" checked={form.isEmployee} onChange={set("isEmployee")} />The client is an employee (W-2), not self-employed</label>
+          </div>
+          <div className="flex items-end"><Button type="submit" className="w-full">Calculate</Button></div>
+        </form>
+        {error ? <p role="alert" className="text-sm text-rose-600">{error}</p> : null}
+        {result ? (
+          <div className="space-y-2 text-sm">
+            {result.qualifies ? (
+              <div className="flex flex-wrap items-baseline gap-3">
+                <span className="text-2xl font-semibold tabular-nums">{usd(result.simplifiedDeduction)}</span>
+                <span className="text-xs text-[var(--color-muted-foreground)]">simplified deduction{result.businessUsePercent != null ? ` · business use ${result.businessUsePercent}% for Form 8829` : ""}</span>
+              </div>
+            ) : <ul className="list-disc space-y-1 pl-5 text-amber-700 dark:text-amber-300">{result.problems.map((p) => <li key={p}>{p}</li>)}</ul>}
+            <ul className="list-disc space-y-1 pl-5 text-xs text-[var(--color-muted-foreground)]">{result.notes.map((n) => <li key={n}>{n}</li>)}</ul>
+          </div>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** Downloads every file and record for this client (service agreement section 9). */
+export function ExportArchiveButton({ clientId }: { clientId: string }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function download() {
+    setBusy(true); setError(null);
+    try {
+      const res = await fetch(apiUrl(`/api/clients/${clientId}/export-archive`), { credentials: "include" });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Export failed.");
+      const name = /filename="([^"]+)"/.exec(res.headers.get("content-disposition") ?? "")?.[1] ?? "Truepost-export.zip";
+      const url = URL.createObjectURL(await res.blob());
+      const a = document.createElement("a"); a.href = url; a.download = name; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Export failed."); }
+    finally { setBusy(false); }
+  }
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] p-4">
+      <div>
+        <p className="text-sm font-semibold">Export everything for this client</p>
+        <p className="text-xs text-[var(--color-muted-foreground)]">One ZIP with every original file, signed form, consent, spreadsheet of records and a fingerprint manifest.</p>
+        {error ? <p role="alert" className="mt-1 text-xs text-rose-600">{error}</p> : null}
+      </div>
+      <Button onClick={() => void download()} disabled={busy}><Download className="h-4 w-4" />{busy ? "Preparing…" : "Download ZIP"}</Button>
+    </div>
   );
 }
 

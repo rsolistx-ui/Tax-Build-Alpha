@@ -4,6 +4,7 @@ import { authClient } from "@/lib/auth-client";
 import { AppShell } from "@/components/layout/app-shell";
 import { LockedScreen } from "@/components/locked";
 import { MfaEnrollment } from "@/components/mfa-enrollment";
+import { AgreementGate } from "@/components/agreement-gate";
 import { api } from "@/lib/api";
 
 type BetaStatus = {
@@ -17,6 +18,7 @@ export function ProtectedLayout() {
   const { data: session, isPending } = authClient.useSession();
   const [firmName, setFirmName] = useState<string | undefined>();
   const [betaStatus, setBetaStatus] = useState<BetaStatus | null>(null);
+  const [agreementAccepted, setAgreementAccepted] = useState<boolean | null>(null);
 
   useEffect(() => {
     if (!session?.user) return;
@@ -24,6 +26,11 @@ export function ProtectedLayout() {
       .then(setBetaStatus)
       .catch(() => setBetaStatus({ isOwner: false, allowed: false, reason: "BETA_REQUIRED" }));
   }, [session?.user]);
+
+  useEffect(() => {
+    if (!betaStatus?.allowed || betaStatus.isOwner) return;
+    void api<{ accepted: boolean }>("/api/agreement").then((r) => setAgreementAccepted(r.accepted)).catch(() => setAgreementAccepted(false));
+  }, [betaStatus?.allowed, betaStatus?.isOwner]);
 
   useEffect(() => {
     if (!session?.user) return;
@@ -60,6 +67,14 @@ export function ProtectedLayout() {
   // 16 CFR 314.4(c)(5): no client data until two-step sign-in is on.
   if (!(session.user as { twoFactorEnabled?: boolean | null }).twoFactorEnabled) {
     return <MfaEnrollment />;
+  }
+
+  // 16 CFR 314.4(f)(2): firms accept the service-provider agreement once per version. The operator is exempt.
+  if (!betaStatus.isOwner) {
+    if (agreementAccepted === null) {
+      return <div className="flex min-h-full items-center justify-center text-sm text-[var(--color-muted-foreground)]">Loading…</div>;
+    }
+    if (!agreementAccepted) return <AgreementGate onAccepted={() => setAgreementAccepted(true)} />;
   }
 
   const daysLeft =

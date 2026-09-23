@@ -250,6 +250,8 @@ function PrepareForm({ clientId, base, defaultTaxYear, onDone }: { clientId: str
       <label className="text-xs">Taxpayer name<input name="taxpayerName" className={inputClass} required /></label>
       <label className="text-xs">Taxpayer email<input name="taxpayerEmail" type="email" className={inputClass} placeholder="Needed for pen-sign links" /></label>
       <label className="text-xs">Signer<select name="taxpayerRole" className={inputClass} defaultValue="primary"><option value="primary">Taxpayer</option><option value="spouse">Spouse</option></select></label>
+      <label className="text-xs">Spouse name (joint return)<input name="spouseName" className={inputClass} placeholder="Leave blank if not joint" /></label>
+      <label className="text-xs">Spouse email<input name="spouseEmail" type="email" className={inputClass} /></label>
       <label className="text-xs sm:col-span-2">Prepared form PDF from your tax software<input name="file" type="file" accept="application/pdf" required className="block w-full text-sm file:mr-3 file:rounded-md file:border-0 file:bg-[var(--color-muted)] file:px-3 file:py-1.5" /></label>
       <div className="flex items-end"><Button type="submit" disabled={saving} className="w-full">{saving ? "Saving…" : "Prepare"}</Button></div>
       {error ? <p role="alert" className="text-sm text-rose-600 sm:col-span-3">{error}</p> : null}

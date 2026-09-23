@@ -76,6 +76,8 @@ const TaxBridgePanel = lazy(() => import("@/components/tax-bridge-panel").then((
 const BillingPanel = lazy(() => import("@/components/billing-panel").then((module) => ({ default: module.BillingPanel })));
 const DeadlineCalendarPanel = lazy(() => import("@/components/deadline-calendar-panel").then((module) => ({ default: module.DeadlineCalendarPanel })));
 const EstimatedTaxPanel = lazy(() => import("@/components/tax-planning-panels").then((module) => ({ default: module.EstimatedTaxPanel })));
+const HomeOfficePanel = lazy(() => import("@/components/tax-planning-panels").then((module) => ({ default: module.HomeOfficePanel })));
+const ExportArchiveButton = lazy(() => import("@/components/tax-planning-panels").then((module) => ({ default: module.ExportArchiveButton })));
 const MileagePanel = lazy(() => import("@/components/tax-planning-panels").then((module) => ({ default: module.MileagePanel })));
 const ClientConsentCard = lazy(() => import("@/components/client-consent-card").then((module) => ({ default: module.ClientConsentCard })));
 const EfileAuthorizationPanel = lazy(() => import("@/components/efile-authorization-panel").then((module) => ({ default: module.EfileAuthorizationPanel })));
@@ -141,17 +143,17 @@ type BatchFile = {
   error?: string;
 };
 
-type Tab = "overview" | "folders" | "upload" | "review" | "bank" | "pnl" | "tax-bridge" | "tax-readiness" | "dif-audit" | "advisory" | "intercompany" | "workpaper" | "documents" | "esign" | "engagements" | "requests" | "export" | "agent" | "analytics" | "billing" | "deadlines" | "estimated-tax" | "mileage";
+type Tab = "overview" | "folders" | "upload" | "review" | "bank" | "pnl" | "tax-bridge" | "tax-readiness" | "dif-audit" | "advisory" | "intercompany" | "workpaper" | "documents" | "esign" | "engagements" | "requests" | "export" | "agent" | "analytics" | "billing" | "deadlines" | "estimated-tax" | "mileage" | "home-office";
 
 // Sections for the "More tools" menu so specialist tools are found by purpose, not by scanning a flat list.
 const TOOL_GROUPS: Array<{ label: string; ids: Tab[] }> = [
-  { label: "Tax", ids: ["tax-readiness", "workpaper", "estimated-tax", "tax-bridge", "dif-audit", "advisory", "deadlines"] },
+  { label: "Tax", ids: ["tax-readiness", "workpaper", "estimated-tax", "home-office", "tax-bridge", "dif-audit", "advisory", "deadlines"] },
   { label: "Client", ids: ["requests", "documents", "esign", "engagements"] },
   { label: "Billing", ids: ["billing"] },
   { label: "Books", ids: ["folders", "mileage", "intercompany", "analytics", "agent"] },
 ];
 
-const VALID_TABS: Tab[] = ["overview", "folders", "upload", "review", "bank", "pnl", "tax-bridge", "tax-readiness", "dif-audit", "advisory", "intercompany", "workpaper", "documents", "esign", "engagements", "requests", "export", "agent", "analytics", "billing", "deadlines", "estimated-tax", "mileage"];
+const VALID_TABS: Tab[] = ["overview", "folders", "upload", "review", "bank", "pnl", "tax-bridge", "tax-readiness", "dif-audit", "advisory", "intercompany", "workpaper", "documents", "esign", "engagements", "requests", "export", "agent", "analytics", "billing", "deadlines", "estimated-tax", "mileage", "home-office"];
 
 function formatCurrency(amount: number | undefined, currency = "USD"): string {
   if (typeof amount !== "number" || !Number.isFinite(amount)) return "—";
@@ -401,6 +403,7 @@ export function ClientWorkspacePage() {
       { id: "deadlines" as const, label: "Deadlines", icon: CalendarIcon },
       { id: "estimated-tax" as const, label: "Quarterly estimates", icon: CalendarIcon },
       { id: "mileage" as const, label: "Mileage log", icon: Landmark },
+      { id: "home-office" as const, label: "Home office", icon: Landmark },
       { id: "export" as const, label: "Close Packet", icon: FileDown },
     ],
     [review.length],
@@ -1068,7 +1071,8 @@ export function ClientWorkspacePage() {
         </div>
       ) : null}
 
-      {tab === "export" ? <ExportCenter clientId={clientId} taxYear={profile?.tax_year ?? null} onNavigate={changeTab} /> : null}
+      {tab === "export" ? <div className="space-y-4"><ExportArchiveButton clientId={clientId} /><ExportCenter clientId={clientId} taxYear={profile?.tax_year ?? null} onNavigate={changeTab} /></div> : null}
+      {tab === "home-office" ? <HomeOfficePanel clientId={clientId} /> : null}
 
       <MagicMobileLinkModal
         clientId={clientId}

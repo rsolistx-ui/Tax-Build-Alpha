@@ -8,6 +8,8 @@ import { ensureFirm } from "../services/firm";
 import { getClient } from "../services/clients";
 import { computeEstimatedTax } from "../services/estimated-tax";
 import { MileageError, addTrip, listTrips, removeTrip, summarizeTrips } from "../services/mileage";
+import { ArchiveError, buildClientArchive } from "../services/client-archive";
+import { computeHomeOffice } from "../services/home-office";
 
 /** Quarterly estimated-tax worksheet and mileage log, mounted at /api/clients. */
 export const taxPlanningRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
@@ -40,6 +42,30 @@ taxPlanningRoutes.post("/:clientId/estimated-tax", async (c) => {
     }).parse(await c.req.json());
     return c.json(computeEstimatedTax(input));
   } catch (error) { return fail(c, error); }
+});
+
+taxPlanningRoutes.post("/:clientId/home-office", async (c) => {
+  try {
+    await scope(c);
+    const input = z.object({
+      officeSqFt: z.number().min(0).max(100000), homeSqFt: z.number().min(0).max(1000000).nullable().optional(),
+      regularAndExclusiveUse: z.boolean(), principalPlaceOrClientMeetings: z.boolean(), isEmployee: z.boolean().optional(),
+      grossIncomeFromBusinessUse: money, otherBusinessExpenses: money,
+    }).parse(await c.req.json());
+    return c.json(computeHomeOffice(input));
+  } catch (error) { return fail(c, error); }
+});
+
+/** Clean exit archive: every file and record for one client in a ZIP. */
+taxPlanningRoutes.get("/:clientId/export-archive", async (c) => {
+  try {
+    const { db, firmId, clientId } = await scope(c);
+    const archive = await buildClientArchive(db, c.env, firmId, clientId, c.get("userId"));
+    return new Response(archive.bytes, { headers: { "Content-Type": "application/zip", "Content-Disposition": `attachment; filename="${archive.filename}"`, "Cache-Control": "no-store" } });
+  } catch (error) {
+    if (error instanceof ArchiveError) return c.json({ error: error.message }, error.status);
+    return fail(c, error);
+  }
 });
 
 taxPlanningRoutes.get("/:clientId/mileage", async (c) => {

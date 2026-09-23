@@ -1,5 +1,6 @@
 import { createDb } from "../db";
 import { runConsentOutreach } from "./consent-outreach";
+import { runSignatureReminders } from "./signature-reminders";
 import type { Env } from "../env";
 import { ReliabilityEngineerService } from "./reliability-engineer";
 import { handleReminderCron } from "./reminders";
@@ -40,6 +41,8 @@ export async function runScheduledOperations(env: Env): Promise<ScheduledOperati
   const workflowSummary = await new WorkflowTemplateService(db).runDueSubscriptions();
   // IRC § 7216 consent links go out on their own; a failure here never blocks the rest of the morning run.
   const consentOutreach = await runConsentOutreach(db, env).catch((error) => { console.error("consent outreach failed", error); return null; });
+  const signatureReminders = await runSignatureReminders(db, env).catch((error) => { console.error("signature reminders failed", error); return null; });
+  if (signatureReminders) console.log(`8879 reminders: sent ${signatureReminders.sent}${signatureReminders.skipped ? ` (${signatureReminders.skipped})` : ""}`);
   if (consentOutreach) console.log(`consent outreach: ${consentOutreach.status}, sent ${consentOutreach.sent}, waiting ${consentOutreach.waiting}`);
 
   const pendingProfessionalReviews = Number(pending[0]?.count ?? 0);

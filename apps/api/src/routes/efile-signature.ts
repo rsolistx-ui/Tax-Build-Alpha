@@ -70,6 +70,8 @@ const createSchema = z.object({
   taxpayerRole: z.enum(["primary", "spouse"]).default("primary"),
   taxpayerName: z.string().trim().min(1, "Enter the taxpayer's name."),
   taxpayerEmail: z.string().trim().email("Enter a valid email.").optional().or(z.literal("")).transform((v) => v || null),
+  spouseName: z.string().trim().optional().transform((v) => v || null),
+  spouseEmail: z.string().trim().email("Enter a valid spouse email.").optional().or(z.literal("")).transform((v) => v || null),
 });
 
 efileSignatureRoutes.post("/:clientId/efile-authorizations", async (c) => {
@@ -77,8 +79,14 @@ efileSignatureRoutes.post("/:clientId/efile-authorizations", async (c) => {
     const { db, firmId, clientId } = await scope(c);
     const form = await c.req.formData();
     const fields = createSchema.parse(Object.fromEntries([...form.entries()].filter(([, v]) => typeof v === "string")));
-    const authorization = await createEfileAuthorization(db, c.env, { firmId, clientId, userId: c.get("userId"), ...fields, formPdf: await fileBytes(form) });
-    return c.json({ authorization }, 201);
+    const { spouseName, spouseEmail, ...primary } = fields;
+    const formPdf = await fileBytes(form);
+    const authorization = await createEfileAuthorization(db, c.env, { firmId, clientId, userId: c.get("userId"), ...primary, formPdf });
+    // Joint return: each spouse signs their own authorization for the same return (Pub 1345).
+    const spouse = spouseName && primary.taxpayerRole === "primary"
+      ? await createEfileAuthorization(db, c.env, { firmId, clientId, userId: c.get("userId"), ...primary, taxpayerRole: "spouse", taxpayerName: spouseName, taxpayerEmail: spouseEmail, formPdf })
+      : null;
+    return c.json({ authorization, spouse }, 201);
   } catch (error) { return fail(c, error); }
 });
 
@@ -136,6 +144,7 @@ const signatureSchema = z.object({
 
 const inPersonSchema = z.object({
   signature: signatureSchema,
+  placement: z.object({ page: z.number().int().min(0).max(200), xPct: z.number().min(0).max(1), yPct: z.number().min(0).max(1) }).nullable().optional(),
   identity: z.discriminatedUnion("mode", [
     z.object({ mode: z.literal("multi_year") }),
     z.object({ mode: z.literal("photo_id"), inspection: z.object({
@@ -155,7 +164,7 @@ efileSignatureRoutes.post("/:clientId/efile-authorizations/:id/sign-in-person", 
   try {
     const { db, auth } = await scopedAuthorization(c);
     const body = inPersonSchema.parse(await c.req.json());
-    return c.json({ sealed: await signInPerson(db, c.env, auth, { hostUserId: c.get("userId"), signature: body.signature, identity: body.identity, userAgent: c.req.header("user-agent") ?? null }) });
+    return c.json({ sealed: await signInPerson(db, c.env, auth, { hostUserId: c.get("userId"), signature: body.signature, identity: body.identity, userAgent: c.req.header("user-agent") ?? null, placement: body.placement ?? null }) });
   } catch (error) { return fail(c, error); }
 });
 

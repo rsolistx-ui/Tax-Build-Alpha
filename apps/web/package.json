@@ -24,6 +24,7 @@
     "heic2any": "^0.0.4",
     "hyperformula": "^3.4.0",
     "lucide-react": "^0.483.0",
+    "pdfjs-dist": "^6.3.289",
     "qrcode": "^1.5.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

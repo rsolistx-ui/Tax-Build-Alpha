@@ -41,6 +41,8 @@ export type IdentityCheck =
   | { type: "not_required_handwritten"; reviewedByUserId: string };
 
 export type ElectronicSignature = { signatureType: "drawn" | "typed"; signatureData: string; signerName: string; taxpayerPin: string };
+/** Where to stamp the signature on the form itself: page index and position as fractions from the top-left. */
+export type SignaturePlacement = { page: number; xPct: number; yPct: number };
 
 export class EfileSignatureError extends Error {
   constructor(message: string, readonly status: 400 | 403 | 404 | 409 | 422 = 400, readonly code?: string) {
@@ -238,7 +240,7 @@ export async function findMultiYearRelationship(db: Db, auth: EfileAuthorization
 /** Taxpayer signs on the firm's device with the ERO physically present. */
 export async function signInPerson(db: Db, env: Pick<Env, "RECEIPTS">, auth: EfileAuthorizationRow, input: {
   hostUserId: string; signature: ElectronicSignature; identity: { mode: "photo_id"; inspection: PhotoIdInspection } | { mode: "multi_year" };
-  userAgent: string | null;
+  userAgent: string | null; placement?: SignaturePlacement | null;
 }) {
   assertOpen(auth);
   const pin = validateTaxpayerPin(input.signature.taxpayerPin);
@@ -260,7 +262,7 @@ export async function signInPerson(db: Db, env: Pick<Env, "RECEIPTS">, auth: Efi
   return seal(db, env, auth, doc, {
     method: "in_person_esign", signatureType: input.signature.signatureType, signatureData: input.signature.signatureData,
     signerName: input.signature.signerName, taxpayerPin: pin, signerIp: null, signerLogin: null, signerUserAgent: input.userAgent,
-    identityCheck, recordedBy: input.hostUserId,
+    identityCheck, recordedBy: input.hostUserId, placement: input.placement ?? null,
   });
 }
 
@@ -303,7 +305,7 @@ export async function signRemotelyAfterKba(db: Db, env: Pick<Env, "RECEIPTS" | "
 type SealInput = {
   method: EfileSigningMethod; signatureType: "handwritten_image" | "drawn" | "typed"; signatureData?: string;
   signerName: string; taxpayerPin: string | null; signerIp: string | null; signerLogin: string | null; signerUserAgent: string | null;
-  identityCheck: IdentityCheck; recordedBy: string | null; receivedHash?: string;
+  identityCheck: IdentityCheck; recordedBy: string | null; receivedHash?: string; placement?: SignaturePlacement | null;
 };
 
 const METHOD_LABEL: Record<EfileSigningMethod, string> = {
@@ -333,6 +335,29 @@ async function seal(db: Db, env: Pick<Env, "RECEIPTS">, auth: EfileAuthorization
   const signedAt = new Date();
   const retainUntil = retentionUntil(auth.tax_year, signedAt);
   const evidenceId = newId("efev");
+  const drawnPng = input.signatureType === "drawn"
+    ? await (async () => {
+        if (!input.signatureData?.startsWith("data:image/png;base64,")) throw new EfileSignatureError("Drawn signatures must be submitted as a PNG.", 422);
+        return doc.embedPng(Uint8Array.from(atob(input.signatureData.slice(22)), (c) => c.charCodeAt(0)))
+          .catch(() => { throw new EfileSignatureError("The drawn signature could not be read. Clear it and sign again.", 422); });
+      })()
+    : null;
+  // Signature on the form itself, where the preparer placed it; the certificate page below still records it.
+  if (input.placement && input.signatureType !== "handwritten_image") {
+    const pages = doc.getPages();
+    const target = pages[input.placement.page];
+    if (!target) throw new EfileSignatureError("The signature placement is not on a page of this form.", 422);
+    const { width, height } = target.getSize();
+    const x = Math.min(Math.max(input.placement.xPct, 0), 1) * width;
+    const y = height - Math.min(Math.max(input.placement.yPct, 0), 1) * height;
+    if (drawnPng) {
+      const scale = Math.min((width * 0.25) / drawnPng.width, 36 / drawnPng.height);
+      target.drawImage(drawnPng, { x, y: y - drawnPng.height * scale, width: drawnPng.width * scale, height: drawnPng.height * scale });
+    } else {
+      target.drawText(`/${input.signerName}/`, { x, y: y - 12, size: 12, font: bold, color: rgb(0.08, 0.2, 0.45) });
+    }
+    target.drawText(`e-signed ${signedAt.toISOString().slice(0, 10)}`, { x, y: y - 44, size: 6.5, font, color: rgb(0.35, 0.35, 0.35) });
+  }
   const page = doc.addPage([612, 792]);
   let y = 738;
   const line = (text: string, size = 9, useBold = false, gap = 14, color = rgb(0.15, 0.15, 0.15)) => {
@@ -345,10 +370,8 @@ async function seal(db: Db, env: Pick<Env, "RECEIPTS">, auth: EfileAuthorization
   line(`Record ${evidenceId}  |  Authorization ${auth.id}`, 8, false, 18, rgb(0.4, 0.4, 0.4));
   rule();
   line("TAXPAYER SIGNATURE", 10, true, 16);
-  if (input.signatureType === "drawn") {
-    if (!input.signatureData?.startsWith("data:image/png;base64,")) throw new EfileSignatureError("Drawn signatures must be submitted as a PNG.", 422);
-    const png = await doc.embedPng(Uint8Array.from(atob(input.signatureData.slice(22)), (c) => c.charCodeAt(0)))
-      .catch(() => { throw new EfileSignatureError("The drawn signature could not be read. Clear it and sign again.", 422); });
+  if (drawnPng) {
+    const png = drawnPng;
     const scale = Math.min(220 / png.width, 60 / png.height, 1);
     page.drawImage(png, { x: 54, y: y - 50, width: png.width * scale, height: png.height * scale });
     y -= 64;

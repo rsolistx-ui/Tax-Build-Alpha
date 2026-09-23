@@ -108,6 +108,17 @@ describe("in-person electronic signature", () => {
     expect((await verifyEfileEvidence(verify.db, store, authorization())).intact).toBe(true);
   });
 
+  it("stamps the signature where the preparer placed it on the form, and refuses a page that does not exist", async () => {
+    const store = r2(); store.objects.set("prepared.pdf", await onePagePdf());
+    const result = await signInPerson(mockDb().db, store, authorization(), {
+      hostUserId: "staff_1", identity: photoId, userAgent: null, placement: { page: 0, xPct: 0.1, yPct: 0.8 },
+      signature: { signatureType: "drawn", signatureData: PNG_DATA_URL, signerName: "Pat Taxpayer", taxpayerPin: "24680" },
+    });
+    expect((await PDFDocument.load(store.objects.get(result.signedR2Key)!)).getPageCount()).toBe(2);
+    await expect(signInPerson(mockDb().db, store, authorization(), { hostUserId: "staff_1", identity: photoId, userAgent: null, placement: { page: 5, xPct: 0.1, yPct: 0.8 }, signature: typed }))
+      .rejects.toThrow(/not on a page/);
+  });
+
   it("detects a sealed file that was altered after signing", async () => {
     const store = r2(); store.objects.set("signed.pdf", new Uint8Array([1, 2, 3]));
     const { db } = mockDb((sql) => sql.includes("FROM efile_signature_evidence") ? [{ id: "ev", signed_hash: "0".repeat(64), signed_r2_key: "signed.pdf" }] : undefined);
