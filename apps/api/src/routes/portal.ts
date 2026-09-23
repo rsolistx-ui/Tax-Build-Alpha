@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { createConsentRequest, documentReadingStatus } from "../services/taxpayer-consent";
 import { z } from "zod";
 import { createDb } from "../db";
 import type { Env } from "../env";
@@ -57,6 +58,21 @@ portalRoutes.get("/home", async (c) => {
     dueRequests: outstanding.filter((r) => !overdue.includes(r)),
     recentlyCompletedRequests: recentlyCompleted,
   });
+});
+
+/**
+ * IRC § 7216: if the client still needs to sign the disclosure consent, hand the
+ * portal a fresh signing link so it can ask right away.
+ */
+portalRoutes.get("/consent", async (c) => {
+  const db = createDb(c.env);
+  const firmId = c.get("portalFirmId");
+  const clientId = c.get("portalClientId");
+  const status = await documentReadingStatus(db, c.env, clientId);
+  if (!status.required || status.covered) return c.json({ needed: false });
+  const link = await createConsentRequest(db, firmId, clientId, "portal");
+  const origin = c.env.APP_ORIGIN || new URL(c.req.url).origin;
+  return c.json({ needed: true, consentUrl: `${origin}/consent#token=${encodeURIComponent(link.token)}` });
 });
 
 portalRoutes.get("/engagements", async (c) => {

@@ -18,6 +18,7 @@ export function ThemeToggle() {
       document.documentElement.classList.remove("dark");
       localStorage.setItem("folio-theme", "light");
     }
+    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", isDark ? "#0d1420" : "#f5f6f8");
   }, [isDark]);
 
   return (

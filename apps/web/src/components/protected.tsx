@@ -3,6 +3,7 @@ import { Navigate } from "react-router-dom";
 import { authClient } from "@/lib/auth-client";
 import { AppShell } from "@/components/layout/app-shell";
 import { LockedScreen } from "@/components/locked";
+import { MfaEnrollment } from "@/components/mfa-enrollment";
 import { api } from "@/lib/api";
 
 type BetaStatus = {
@@ -54,6 +55,11 @@ export function ProtectedLayout() {
 
   if (!betaStatus.allowed) {
     return <LockedScreen reason={betaStatus.reason} />;
+  }
+
+  // 16 CFR 314.4(c)(5): no client data until two-step sign-in is on.
+  if (!(session.user as { twoFactorEnabled?: boolean | null }).twoFactorEnabled) {
+    return <MfaEnrollment />;
   }
 
   const daysLeft =

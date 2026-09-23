@@ -341,7 +341,7 @@ export function DirectScaleUploadModal({
                   size="sm"
                   onClick={handleSimulateSmsDrop}
                   disabled={simulatingSms}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs"
+                  className="bg-[var(--color-primary)] hover:opacity-90 text-[var(--color-primary-foreground)] text-xs"
                 >
                   {simulatingSms ? (
                     <>

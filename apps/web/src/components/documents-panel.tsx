@@ -111,11 +111,6 @@ export function DocumentsPanel({ clientId }: { clientId: string }) {
               </a>
               <div className="flex items-center gap-2">
                 {doc.duplicate_of_document_id ? <Badge>Possible duplicate</Badge> : null}
-                {doc.document_type === "engagement_letter" ? (
-                  <Badge className="border-emerald-500/40 bg-emerald-500/10 text-emerald-600 text-[10px]">
-                    ESIGN Certified
-                  </Badge>
-                ) : null}
                 <Badge>{label(doc.document_type)}</Badge>
                 <Badge>{label(doc.status)}</Badge>
               </div>

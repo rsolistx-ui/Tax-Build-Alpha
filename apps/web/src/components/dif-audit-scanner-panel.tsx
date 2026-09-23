@@ -142,7 +142,7 @@ export function DifAuditScannerPanel({ clientId }: { clientId: string }) {
               Pre-Filing Risk Review
             </h2>
             <Badge className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30 text-[10px]">
-              Treasury Circular 230 Shield
+              Internal review
             </Badge>
           </div>
           <p className="text-xs text-[var(--color-muted-foreground)] mt-0.5">
@@ -157,7 +157,7 @@ export function DifAuditScannerPanel({ clientId }: { clientId: string }) {
           <Button
             size="sm"
             onClick={() => setShowMemoModal(true)}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs h-8 gap-1.5 shadow-sm"
+            className="bg-[var(--color-primary)] hover:opacity-90 text-[var(--color-primary-foreground)] text-xs h-8 gap-1.5 shadow-sm"
           >
             <FileCheck2 className="h-3.5 w-3.5" /> View Defense Memo
           </Button>
@@ -369,10 +369,10 @@ export function DifAuditScannerPanel({ clientId }: { clientId: string }) {
               <div>
                 <h3 className="text-base font-bold text-[var(--color-foreground)] flex items-center gap-2">
                   <Scale className="h-5 w-5 text-emerald-600" />
-                  Treasury Circular 230 Due Diligence Defense Memorandum
+                  Pre-filing review notes (draft)
                 </h3>
                 <p className="text-xs text-[var(--color-muted-foreground)]">
-                  Statutory workpaper defense under 31 CFR § 10.22 and IRC § 6694(a).
+                  Draft generated from this file. The preparer must review and edit it. Not legal advice and not audit protection.
                 </p>
               </div>
               <Button size="sm" variant="ghost" onClick={() => setShowMemoModal(false)} className="h-8 w-8 p-0">
@@ -405,7 +405,7 @@ export function DifAuditScannerPanel({ clientId }: { clientId: string }) {
                   size="sm"
                   disabled={loggingMemo || memoLogged}
                   onClick={handleLogDefenseMemo}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs h-8 gap-1.5 shadow-sm"
+                  className="bg-[var(--color-primary)] hover:opacity-90 text-[var(--color-primary-foreground)] text-xs h-8 gap-1.5 shadow-sm"
                 >
                   <FileCheck2 className="h-3.5 w-3.5" />
                   {loggingMemo ? "Recording..." : "Log in Compliance Audit Vault"}

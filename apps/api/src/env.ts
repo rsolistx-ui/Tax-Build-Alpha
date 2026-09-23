@@ -53,6 +53,20 @@ export type Env = {
   /** Twilio inbound MMS webhook credentials. Both are required before the public SMS endpoint is enabled. */
   TWILIO_ACCOUNT_SID?: string;
   TWILIO_AUTH_TOKEN?: string;
+  /** "true": receipts are read only by services located in the United States (Azure Document Intelligence in a US region). */
+  US_ONLY_READING?: string;
+  /** Azure AI Document Intelligence resource created in a US region (e.g. https://name.cognitiveservices.azure.com). */
+  AZURE_DI_ENDPOINT?: string;
+  /** Worker secret. */
+  AZURE_DI_KEY?: string;
+  /** Region the resource was created in, e.g. "eastus". Must be a US region. */
+  AZURE_DI_REGION?: string;
+  /** "true" blocks every authenticated API call from accounts without two-step sign-in (16 CFR 314.4(c)(5)). */
+  REQUIRE_MFA?: string;
+  /** Identity-verification (KBA) vendor for remote IRS 8878/8879 e-signatures: "lexisnexis" | "experian". Unset keeps remote e-signing off. */
+  EFILE_KBA_PROVIDER?: string;
+  /** Credential for the selected KBA vendor. Worker secret only. */
+  EFILE_KBA_API_KEY?: string;
   /** Optional Teller bank connectivity. Worker secret only. */
   TELLER_CLIENT_ID?: string;
   TELLER_CLIENT_SECRET?: string;

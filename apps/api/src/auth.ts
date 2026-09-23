@@ -1,4 +1,5 @@
 import { betterAuth } from "better-auth";
+import { twoFactor } from "better-auth/plugins";
 import type { Env } from "./env";
 
 /**
@@ -25,6 +26,8 @@ export function createAuth(env: Env) {
       minPasswordLength: 8,
     },
     trustedOrigins,
+    // Multi-factor sign-in (FTC Safeguards Rule, 16 CFR 314.4(c)(5)).
+    plugins: [twoFactor({ issuer: "Truepost" })],
     advanced: {
       defaultCookieAttributes: {
         sameSite: "lax",

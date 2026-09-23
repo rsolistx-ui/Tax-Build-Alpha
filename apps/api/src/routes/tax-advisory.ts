@@ -117,7 +117,6 @@ taxAdvisoryRoutes.post("/:clientId/advisory-roadmap/log", async (c) => {
         taxYear: body.taxYear,
         totalEstimatedSavings: body.totalEstimatedSavings,
         memoSummary: body.memoSummary,
-        circular230Compliant: true,
       }),
     ]
   );

@@ -379,7 +379,7 @@ export function TaxBridgePanel({ clientId }: { clientId: string }) {
                             <Button
                               size="sm"
                               variant="outline"
-                              className="text-xs h-7 text-emerald-600"
+                              className="text-xs h-7 text-[var(--color-primary)]"
                               onClick={() => markW9Received(c.contractorName)}
                             >
                               <CheckCircle2 className="h-3.5 w-3.5" />

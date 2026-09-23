@@ -1,7 +1,8 @@
 import type { Db, DbStatement } from "../db";
 import type { Env } from "../env";
 import { newId } from "../lib/id";
-import { getLlmProvider, type ReceiptBusinessContext, type ReceiptExtraction } from "../providers/llm";
+import { activeDocumentReaders, getLlmProvider, type ReceiptBusinessContext, type ReceiptExtraction } from "../providers/llm";
+import { consentRequired, hasDocumentReadingConsent } from "./taxpayer-consent";
 import { validateReceipt } from "../services/receipt-validation";
 import type { ClientRow } from "../services/clients";
 import { MAX_UPLOAD_BYTES } from "../services/documents";
@@ -9,7 +10,7 @@ import { delegateReceiptAgents } from "./agent-supervisor";
 import { AdminRulesService } from "./admin-rules";
 
 export type ReceiptIngestResult =
-  | { ok: true; receiptId: string; jobId: string; bankTransactionId: string | null }
+  | { ok: true; receiptId: string; jobId: string; bankTransactionId: string | null; readingSkipped?: "consent_required" }
   | { ok: false; receiptId: string; jobId: string; error: string; requestId: string };
 
 /**
@@ -115,6 +116,30 @@ export async function ingestReceiptForClient(
       params: [receiptId],
     },
   ]);
+
+  // IRC § 7216: nothing is sent to an outside reading service without the
+  // client's signed disclosure consent. The file is kept for manual entry.
+  const readers = activeDocumentReaders(env);
+  if (consentRequired(readers) && !(await hasDocumentReadingConsent(db, client.id, readers.map((r) => r.id)))) {
+    const statements: DbStatement[] = [
+      { query: `UPDATE jobs SET status = 'done', result = $1::jsonb, updated_at = NOW() WHERE id = $2`, params: [{ skipped: "consent_required" }, jobId] },
+      {
+        query: `UPDATE receipts SET status = 'review', extracted_merchant = 'Manual entry needed', extracted_total = 0, confidence = 0,
+          validation_status = 'fail', validation_json = $1::jsonb, updated_at = NOW() WHERE id = $2`,
+        params: [JSON.stringify({ status: "fail", checks: [{ code: "CONSENT_REQUIRED", label: "Client consent", status: "fail",
+          message: "Automatic reading is off for this client until they sign the disclosure consent. The original is saved; enter the details by hand." }] }), receiptId],
+      },
+    ];
+    if (bankTransactionId) {
+      statements.push({
+        query: `UPDATE bank_transactions SET triage = 'receipt_pending', pending_receipt_id = $1, reviewed_at = NOW(), reviewed_by_user_id = $2
+          WHERE id = $3 AND client_id = $4`,
+        params: [receiptId, actorUserId, bankTransactionId, client.id],
+      });
+    }
+    await db.transaction(statements);
+    return { ok: true, receiptId, jobId, bankTransactionId, readingSkipped: "consent_required" };
+  }
 
   try {
     const llm = getLlmProvider(env);

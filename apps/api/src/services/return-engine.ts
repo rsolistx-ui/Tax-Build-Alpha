@@ -1,6 +1,7 @@
 import type { Db } from "../db";
 import { newId } from "../lib/id";
 import { runTaxDiagnostics } from "./tax-diagnostics";
+import { assertReturnSigned } from "./efile-signature";
 
 export type ReturnStatus = "draft" | "transmitted" | "accepted" | "rejected" | "voided";
 
@@ -23,6 +24,7 @@ export async function submitReturn(db: Db, firmId: string, clientId: string, ret
   const [r] = await db.query<any>(`SELECT * FROM tax_returns WHERE id=$1 AND firm_id=$2 AND client_id=$3`, [returnId, firmId, clientId]);
   if (!r) throw new Error("Return not found");
   if (r.status !== "draft") throw new Error("Only draft returns can be submitted");
+  await assertReturnSigned(db, returnId);
   const submissionId = `FOLIO-${r.tax_year}-${r.form_type}-${returnId.slice(0, 8).toUpperCase()}`;
   await db.query(`UPDATE tax_returns SET status='transmitted', mef_submission_id=$1, updated_at=NOW() WHERE id=$2`, [submissionId, returnId]);
   await db.query(`INSERT INTO tax_diagnostics_cache (id, client_id, tax_year, diagnostics, created_at) VALUES ($1,$2,$3,$4::jsonb,NOW()) ON CONFLICT DO NOTHING`,

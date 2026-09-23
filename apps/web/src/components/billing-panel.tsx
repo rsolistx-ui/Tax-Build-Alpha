@@ -352,7 +352,7 @@ export function BillingPanel({ clientId, clientName }: { clientId: string; clien
                     {!isPaid ? (
                       <Button
                         size="sm"
-                        className="h-8 text-xs gap-1 bg-emerald-600 hover:bg-emerald-700 text-white"
+                        className="h-8 text-xs gap-1 bg-[var(--color-primary)] hover:opacity-90 text-[var(--color-primary-foreground)]"
                         onClick={() => {
                           setSelectedInvoice(inv);
                           setPaymentAmount(inv.balanceDue ?? inv.total);
@@ -556,7 +556,7 @@ export function BillingPanel({ clientId, clientName }: { clientId: string; clien
                   <Button
                     type="submit"
                     size="sm"
-                    className="h-8 text-xs bg-emerald-600 hover:bg-emerald-700 text-white"
+                    className="h-8 text-xs bg-[var(--color-primary)] hover:opacity-90 text-[var(--color-primary-foreground)]"
                     disabled={recordingPayment}
                   >
                     {recordingPayment ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : null}

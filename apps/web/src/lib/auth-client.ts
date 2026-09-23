@@ -1,4 +1,5 @@
 import { createAuthClient } from "better-auth/react";
+import { twoFactorClient } from "better-auth/client/plugins";
 
 /**
  * Dev: leave VITE_API_URL unset so requests go through the Vite proxy (/api → :8787)
@@ -9,4 +10,5 @@ const baseURL = import.meta.env.VITE_API_URL || window.location.origin;
 
 export const authClient = createAuthClient({
   baseURL,
+  plugins: [twoFactorClient()],
 });

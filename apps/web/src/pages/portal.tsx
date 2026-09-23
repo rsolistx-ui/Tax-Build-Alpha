@@ -86,6 +86,7 @@ export function PortalPage() {
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<View>("home");
   const [home, setHome] = useState<HomeSummary | null>(null);
+  const [consentUrl, setConsentUrl] = useState<string | null>(null);
   const [requests, setRequests] = useState<PortalRequest[]>([]);
   const [documents, setDocuments] = useState<PortalDocument[]>([]);
   const [selected, setSelected] = useState<PortalRequest | null>(null);
@@ -130,6 +131,8 @@ export function PortalPage() {
     try {
       const data = await portalApi<HomeSummary>(token, "/api/portal/home");
       setHome(data);
+      // Ask for the IRC § 7216 consent right away if it is still needed.
+      void portalApi<{ needed: boolean; consentUrl?: string }>(token, "/api/portal/consent").then((c) => setConsentUrl(c.needed ? c.consentUrl ?? null : null)).catch(() => undefined);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not load your portal");
     } finally {
@@ -259,6 +262,14 @@ export function PortalPage() {
       ) : null}
 
       {error ? <p className="text-sm text-[var(--color-destructive)]">{error}</p> : null}
+
+      {consentUrl ? (
+        <div className="rounded-lg border border-[var(--color-primary)]/40 bg-[var(--color-primary)]/10 p-3 text-sm">
+          <p className="font-medium">One quick form before we read your receipts</p>
+          <p className="mt-1 text-[var(--color-muted-foreground)]">Federal law requires your written consent. It takes about a minute, and you can say no.</p>
+          <a href={consentUrl} className="mt-2 inline-flex items-center justify-center rounded-md bg-[var(--color-primary)] px-4 py-2 font-medium text-[var(--color-primary-foreground)]">Review the form</a>
+        </div>
+      ) : null}
 
       {isRequestView && selected ? (
         <div className="space-y-3">

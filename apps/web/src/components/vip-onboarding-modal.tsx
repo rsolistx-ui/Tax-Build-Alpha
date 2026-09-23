@@ -152,11 +152,11 @@ export function VipOnboardingModal({
 
           <div className="flex items-center justify-between pt-2">
             <span className="text-[11px] text-[var(--color-muted-foreground)]">
-              Encrypted · 15 U.S.C. § 7001 Compliant · 256-Bit TLS
+              Sent over HTTPS
             </span>
             <Button
               onClick={onClose}
-              className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs px-5 shadow-sm"
+              className="gap-2 bg-[var(--color-primary)] hover:opacity-90 text-[var(--color-primary-foreground)] font-medium text-xs px-5 shadow-sm"
             >
               <span>Enter Workspace</span>
               <ArrowRight className="h-3.5 w-3.5" />

@@ -487,7 +487,7 @@ export function VoiceRuleDictationModal({
                     size="sm"
                     disabled={saving}
                     onClick={handleSaveAndApply}
-                    className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-medium"
+                    className="gap-1.5 bg-[var(--color-primary)] hover:opacity-90 text-[var(--color-primary-foreground)] font-medium"
                   >
                     {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
                     Submit Directive to Engineering Desk

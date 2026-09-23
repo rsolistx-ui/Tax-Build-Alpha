@@ -60,11 +60,13 @@ taxExtendedRoutes.post("/:clientId/state-mods/calculate-conformity", async (c) =
     federalBonusDepreciation: z.number().optional(),
     californiaAllowableDepreciation: z.number().optional(),
     federalSection179Deduction: z.number().optional(),
+    section179PropertyCost: z.number().optional(),
     hsaContributionsDeducted: z.number().optional(),
     hsaEarningsTaxable: z.number().optional(),
     isCaliforniaLlc: z.boolean().optional(),
     californiaGrossReceipts: z.number().optional(),
     californiaPteTaxPaid: z.number().optional(),
+    californiaPteJunePaymentMade: z.boolean().optional(),
     // NY inputs
     newYorkAllowableDepreciation: z.number().optional(),
     stateLocalTaxDeductedFed: z.number().optional(),
@@ -79,11 +81,13 @@ taxExtendedRoutes.post("/:clientId/state-mods/calculate-conformity", async (c) =
       federalBonusDepreciation: body.federalBonusDepreciation,
       californiaAllowableDepreciation: body.californiaAllowableDepreciation,
       federalSection179Deduction: body.federalSection179Deduction,
+      section179PropertyCost: body.section179PropertyCost,
       hsaContributionsDeducted: body.hsaContributionsDeducted,
       hsaEarningsTaxable: body.hsaEarningsTaxable,
       isCaliforniaLlc: body.isCaliforniaLlc,
       californiaGrossReceipts: body.californiaGrossReceipts,
       californiaPteTaxPaid: body.californiaPteTaxPaid,
+      californiaPteJunePaymentMade: body.californiaPteJunePaymentMade,
     });
   } else {
     result = computeNewYorkConformity(body.taxYear, {

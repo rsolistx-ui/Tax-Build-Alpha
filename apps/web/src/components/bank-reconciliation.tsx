@@ -538,7 +538,7 @@ export function BankReconciliation({
                   size="sm"
                   onClick={() => void handleBatchAutoTriage()}
                   disabled={batchTriageBusy}
-                  className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm"
+                  className="gap-1.5 bg-[var(--color-primary)] hover:opacity-90 text-[var(--color-primary-foreground)] shadow-sm"
                 >
                   <Sparkles className="h-3.5 w-3.5" />
                   {batchTriageBusy ? "Applying Auto-Triage…" : `⚡ 1-Click Auto-Triage (${highConfidenceCount} ready)`}

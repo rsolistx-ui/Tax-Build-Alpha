@@ -265,7 +265,7 @@ export function EngagementsPanel({ clientId, focusEngagementId }: { clientId: st
                     variant="default"
                     disabled={letterBusy === eng.id}
                     onClick={() => startNativeSigning(eng.id)}
-                    className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs"
+                    className="flex items-center gap-1.5 bg-[var(--color-primary)] hover:opacity-90 text-[var(--color-primary-foreground)] text-xs"
                   >
                     <PenTool className="h-3.5 w-3.5" />
                     {letterBusy === eng.id ? "Preparing…" : "Create secure client signing link"}

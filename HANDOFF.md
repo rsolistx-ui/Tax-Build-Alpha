@@ -1,6 +1,6 @@
 # Session Handoff — Truepost (Tax Build Alpha)
 
-**Written:** 2026-09-23. This replaces the previous handoff, which was stale (it predated the last ~180 files of changes). Everything below is verified against the actual codebase and a live production smoke test, not assumed.
+**Written:** 2026-09-22 (updated same day after the e-file signing build, see §4). This replaces the previous handoff, which was stale (it predated the last ~180 files of changes). Everything below is verified against the actual codebase and a live production smoke test, not assumed.
 
 ## Status: core loop is real and verified live. Native e-sign is the next real milestone.
 
@@ -59,11 +59,11 @@ IRS Form 8878/8879 remote signing. The API rejects those forms today. This is th
 **Pricing (2026):** Personal $10-15/mo (5 envelopes/mo cap); Standard $25-45/user/mo (~100 envelopes/yr); Business Pro $40-65/user/mo; newer "Intelligent Agreement Management" tiers run $40-95/user/mo. No free tier. Add-ons stack on top: SMS delivery $0.40+/send, ID verification $2.50+/attempt. DocuSign has **no dedicated IRS 8878/8879 product** — tax pros manually layer DocuSign's generic Identity Verification/KBA add-on onto standard envelopes, and that add-on typically requires Enterprise tier plus a separate contract.
 
 **What real IRS compliance requires** (IRS Publication 1345 — [pdf](https://www.irs.gov/pub/irs-pdf/p1345.pdf)):
-- Third-party KBA (knowledge-based authentication: multiple-choice questions from credit-history data, not just an ID photo) at **every** remote signing event, with two exceptions: signing in the ERO's physical presence, or an existing multi-year relationship with that ERO.
+- Third-party KBA (knowledge-based authentication: multiple-choice questions from credit-history data, not just an ID photo) at **every remote electronic** signing event. **Correction:** the multi-year-relationship exception applies to *in-person* signing only (p.16), not remote. A pen-signed form returned by fax/email/website is not a remote e-signature and needs no identity check at all (p.17).
 - Must record: digital image of the signed form, signature date/time, taxpayer IP address, login ID, signing method, name/address/DOB.
 - Compliance standard: NIST SP 800-63 Identity Assurance Level 2 (IAL2).
 - Retention: 3 years minimum (matches what the native system already targets).
-- **Not confirmed from secondary sources:** exact KBA question count and pass/retry thresholds. Read the Pub 1345 PDF directly before writing the actual signing-flow logic rather than building from this summary.
+- **Confirmed from the Pub 1345 PDF (Rev. 12-2025):** 3 failed KBA attempts, then a handwritten signature is required. The PDF does not set a question count; that is vendor-defined.
 
 **KBA vendor reality:** LexisNexis and Experian are the two vendors DocuSign itself sources KBA from — genuine credit-history-quiz KBA, not document/selfie checks. IDology also offers it. (Persona and Jumio are document+biometric verification, not the same thing — don't substitute them.) No public self-serve pricing exists for any of these; typical small-practice spend through DocuSign's own markup lands around $5,000-$10,000/year for a few hundred verifications, direct-vendor pricing likely lower but requires a sales call.
 
@@ -78,7 +78,14 @@ IRS Form 8878/8879 remote signing. The API rejects those forms today. This is th
 **Cannot be zero-cost, no way around it:**
 - The KBA identity-verification step itself. This is the one piece of real IRS compliance that requires paying a credit-bureau-grade vendor (LexisNexis or Experian) per signing event — budget for this specifically before enabling remote 8878/8879 signing. Everything else above is free; this one line item is not, and that's true for DocuSign too — they're paying the same vendors under the hood and marking it up.
 
-### Recommended sequence for next session
+### UPDATE 2026-09-22: built (uncommitted until owner approves)
+
+Zero-cost 8879/8878 signing is built, tested, and documented. Read `docs/NATIVE_ESIGN_STATUS.md` (current state) and `docs/ESIGN_DOCUSIGN_GAP_ANALYSIS.md` (scorecard and next zero-cost gaps).
+- Live: pen-sign link with photo upload plus staff review, in-office e-sign with ID capture, returning-client shortcut, evidence packet, integrity verify, transmission gate on `submitReturn`.
+- Built but off: remote KBA e-sign. Vendor adapters in `apps/api/src/services/kba-providers.ts` (`implemented: false`).
+- **Migration `0061_efile_signature_authorizations.sql` must be applied to production Neon (`npm run db:migrate:neon`) and verified (`npm run db:verify:neon`) before deploying the API**, or the new E-sign panel will 500.
+
+### Original recommended sequence (steps 1-2 done)
 1. Read the actual Pub 1345 PDF section on KBA question count/thresholds before writing signing logic.
 2. Build the zero-cost pieces first (PIN capture, immutable retention, audit export, ERO gating) — real progress, no vendor dependency, no cost.
 3. Get a direct quote from LexisNexis or Experian for KBA-as-a-service before committing to a vendor or a price point to charge for 8879 signing as a feature.
@@ -109,3 +116,23 @@ IRS Form 8878/8879 remote signing. The API rejects those forms today. This is th
 - `scripts/smoke-production.ps1` — the real end-to-end test; run it after any schema or pipeline change, not just typecheck/build
 - `scripts/verify-neon-schema.mjs` — add a check here for every new migration's tables/columns, immediately, not later
 - `SMOKE_CLEANUP_TOKEN` — saved at `C:\Users\rdsol\OneDrive\Desktop\Truepost-SMOKE_CLEANUP_TOKEN.txt` and set as the live Cloudflare secret
+
+## 8. Session of 2026-09-22/23: compliance pass (uncommitted until owner approves)
+
+Read `docs/LEGAL_COMPLIANCE_REVIEW.md` and `docs/competitive-intelligence/2026-09-22_PHYLLIS_DEEP_DIVE_AND_GAP_ANALYSIS.md`.
+
+**Deploy in this exact order** (the app shows a two-step sign-in enrollment screen that fails if the auth table is missing):
+1. `npm run db:migrate:remote -w @folio/api` (D1: `migrations/0003_two_factor.sql`)
+2. `npm run db:migrate:neon` then `npm run db:verify:neon` (Neon: 0061 e-file signing, 0062 tax_returns 'voided', 0063 taxpayer consents)
+3. Deploy API and web.
+4. Owner enrolls two-step sign-in; update `scripts/smoke-production.ps1` to handle it; then set Worker var `REQUIRE_MFA=true`.
+
+**Behavior change on deploy:** automatic receipt reading stops for every client until that client signs the IRC § 7216 disclosure consent (Client consent card, Upload or E-sign tab). Receipts still upload and wait for manual entry. Send consent links first.
+
+Open items: attorney review of consent wording; operating entity legal name for the consent; US-only reading provider (removes the foreign-disclosure/SSN risk); app-wide accent is green on older screens while the logo is blue.
+
+### Added 2026-09-23
+- Migration `0064_mileage_trips.sql` (Neon). Run with the others in step 2.
+- **US-only reading:** create a free Azure AI Document Intelligence resource (pricing tier F0) in a US region, then set Worker secrets `AZURE_DI_ENDPOINT`, `AZURE_DI_KEY`, and vars `AZURE_DI_REGION` (e.g. `eastus`) and `US_ONLY_READING=true`. Consent is then not required and the consent emails stop on their own. F0 limits: 500 pages/month, first 2 pages of each PDF, 4 MB files.
+- **Consent emails:** set `RESEND_API_KEY` (free tier) and `SENDER_EMAIL` to have links emailed each morning; without it, clients are asked in the portal.
+- **R2 US jurisdiction** (Cloudflare, Aug 2026) guarantees stored files stay in the US. Needs a new bucket created with `jurisdiction = "us"` and a one-time copy of existing objects; not done yet.

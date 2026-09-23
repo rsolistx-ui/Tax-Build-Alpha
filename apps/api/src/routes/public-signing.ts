@@ -26,6 +26,7 @@ async function access(c: any) {
   const entitlement: EntitlementRow | null = row?.status && row.expires_at ? { status: row.status as EntitlementRow["status"], expiresAt: row.expires_at } : null;
   return computeAccessDecision(entitlement, new Date()).allowed ? link : null;
 }
+export const resolvePublicSigningLink = access;
 function invalid(c: any) { return c.json({ error: "This signing link is unavailable. Ask your firm for a new link." }, 401); }
 
 publicSigningRoutes.get("/me", async (c) => {

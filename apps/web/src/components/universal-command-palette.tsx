@@ -92,7 +92,7 @@ export function UniversalCommandPalette({
       list.push(
         {
           id: "goto_dif_audit",
-          title: "Run IRS DIF Pre-Filing Audit Risk Scanner",
+          title: "Run pre-filing risk review",
           category: "Tax & Audit Engines",
           icon: Scale,
           shortcutHint: "Shield",
@@ -295,7 +295,7 @@ export function UniversalCommandPalette({
                   onMouseEnter={() => setSelectedIndex(idx)}
                   className={`w-full text-left flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg text-xs transition-colors ${
                     isSelected
-                      ? "bg-emerald-600 text-white font-medium shadow-sm"
+                      ? "bg-[var(--color-primary)] text-[var(--color-primary-foreground)] font-medium shadow-sm"
                       : "text-[var(--color-foreground)] hover:bg-[var(--color-muted)]"
                   }`}
                 >
@@ -324,7 +324,7 @@ export function UniversalCommandPalette({
                     )}
                     <span
                       className={`text-[10px] uppercase tracking-wider font-semibold ${
-                        isSelected ? "text-emerald-100" : "text-[var(--color-muted-foreground)]"
+                        isSelected ? "text-[var(--color-primary-foreground)]/80" : "text-[var(--color-muted-foreground)]"
                       }`}
                     >
                       {action.category}
@@ -354,7 +354,7 @@ export function UniversalCommandPalette({
               Close
             </span>
           </div>
-          <span className="font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+          <span className="font-semibold text-[var(--color-primary)] flex items-center gap-1">
             <Command className="h-3 w-3" /> Truepost Warp Speed
           </span>
         </div>

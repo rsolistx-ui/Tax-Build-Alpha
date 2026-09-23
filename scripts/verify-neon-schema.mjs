@@ -32,6 +32,54 @@ async function runQuery(query) {
 
 const checks = [
   {
+    label: "mileage_trips table (IRC § 274(d) mileage log, migration 0064)",
+    query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'mileage_trips'`,
+  },
+  {
+    label: "taxpayer_consents table (IRC § 7216 consents, migration 0063)",
+    query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'taxpayer_consents'`,
+  },
+  {
+    label: "taxpayer_consents_guard_update trigger (signed consents can only be revoked, migration 0063)",
+    query: `SELECT 1 FROM pg_trigger WHERE tgname = 'taxpayer_consents_guard_update'`,
+  },
+  {
+    label: "consent_requests table (single-use consent links, migration 0063)",
+    query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'consent_requests'`,
+  },
+  {
+    label: "tax_returns_status_check allows 'voided' (migration 0062 — voidReturn failed on every call before this)",
+    query: `SELECT 1 FROM pg_constraint WHERE conname = 'tax_returns_status_check' AND pg_get_constraintdef(oid) LIKE '%voided%'`,
+  },
+  {
+    label: "efile_authorizations table (IRS 8878/8879 signing, migration 0061)",
+    query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'efile_authorizations'`,
+  },
+  {
+    label: "efile_authorizations.received_hash column (pen-signed copy review, migration 0061)",
+    query: `SELECT 1 FROM information_schema.columns WHERE table_name = 'efile_authorizations' AND column_name = 'received_hash'`,
+  },
+  {
+    label: "efile_signature_evidence.taxpayer_pin column (migration 0061)",
+    query: `SELECT 1 FROM information_schema.columns WHERE table_name = 'efile_signature_evidence' AND column_name = 'taxpayer_pin'`,
+  },
+  {
+    label: "efile_kba_attempts table (3-attempt identity-check rule, migration 0061)",
+    query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'efile_kba_attempts'`,
+  },
+  {
+    label: "idx_efile_authorizations_live_return_role one-live-authorization index (migration 0061)",
+    query: `SELECT 1 FROM pg_indexes WHERE indexname = 'idx_efile_authorizations_live_return_role'`,
+  },
+  {
+    label: "efile_signature_evidence append-only triggers (migration 0061)",
+    query: `SELECT 1 FROM pg_trigger WHERE tgname = 'efile_signature_evidence_no_update' AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'efile_signature_evidence_no_delete')`,
+  },
+  {
+    label: "efile_authorization_transition_guard trigger (signed records cannot reopen, migration 0061)",
+    query: `SELECT 1 FROM pg_trigger WHERE tgname = 'efile_authorization_transition_guard'`,
+  },
+  {
     label: "receipts.notes column (migration 0060 — export/preview threw 'column notes does not exist' on every call before this pass)",
     query: `SELECT 1 FROM information_schema.columns WHERE table_name = 'receipts' AND column_name = 'notes'`,
   },

@@ -97,7 +97,7 @@ export function ExceptionHeatmap() {
                       <Badge className="bg-yellow-500 text-black hover:bg-yellow-600">{client.mediumCount}</Badge>
                     </td>
                     <td className="px-4 py-3 text-center">
-                      <Badge className="bg-green-500 text-white hover:bg-green-600">{client.lowCount}</Badge>
+                      <Badge className="bg-[var(--color-primary)] text-[var(--color-primary-foreground)] hover:bg-[var(--color-primary)]">{client.lowCount}</Badge>
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">

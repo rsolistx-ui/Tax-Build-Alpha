@@ -680,7 +680,7 @@ export function AdminPanel() {
           <Headphones className="h-3.5 w-3.5" />
           Support Sentinel
           {metrics.openTickets > 0 ? (
-            <span className="ml-1 rounded-full bg-emerald-500 px-1.5 py-0.2 text-[10px] text-white">
+            <span className="ml-1 rounded-full bg-[var(--color-primary)] px-1.5 py-0.2 text-[10px] text-[var(--color-primary-foreground)]">
               {metrics.openTickets}
             </span>
           ) : null}
@@ -825,7 +825,7 @@ export function AdminPanel() {
                   <Flame className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
                   <CardTitle className="text-base">Token Burn Telemetry &amp; Cost Guard</CardTitle>
                 </div>
-                <Badge className="bg-emerald-600 text-white hover:bg-emerald-700 text-xs">
+                <Badge className="bg-[var(--color-primary)] text-[var(--color-primary-foreground)] hover:opacity-90 text-xs">
                   Deterministic Token Guard Active
                 </Badge>
               </div>
@@ -1023,11 +1023,11 @@ export function AdminPanel() {
                   <CardTitle className="text-base text-white">Regulatory Compliance &amp; Legal Shield Desk</CardTitle>
                 </div>
                 <Badge className="bg-emerald-500/20 text-emerald-300 border-emerald-500/40 text-[10px]">
-                  Treasury Circular 230 Certified Posture
+                  Practitioner responsibilities
                 </Badge>
               </div>
               <CardDescription className="text-xs text-slate-400">
-                Statutory safeguards, preparer penalty defense, and cryptographic chain of custody.
+                What Truepost does, and what remains the firm's professional responsibility.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3 text-xs text-slate-300">
@@ -1035,30 +1035,30 @@ export function AdminPanel() {
                 <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-3 space-y-1">
                   <div className="font-semibold text-white flex items-center gap-1.5">
                     <Scale className="h-3.5 w-3.5 text-emerald-400" />
-                    Treasury Circular 230 &amp; IRC § 6694 Disclaimer
+                    Practitioner review required
                   </div>
                   <p className="text-[11px] text-slate-400 leading-relaxed">
-                    Truepost operates strictly as a deterministic computational ledger and evidence extraction engine. All categorization proposals, Schedule C line items, and tax workpapers are computational aids provided for licensed practitioner verification. Final tax determinations and filings remain under practitioner oversight.
+                    Truepost is a bookkeeping and evidence tool. Its AI-assisted extraction can be wrong. All categorization proposals, Schedule C line items, and tax workpapers are computational aids provided for licensed practitioner verification. Final tax determinations and filings remain under practitioner oversight.
                   </p>
                 </div>
 
                 <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-3 space-y-1">
                   <div className="font-semibold text-white flex items-center gap-1.5">
                     <ShieldCheck className="h-3.5 w-3.5 text-blue-400" />
-                    IRC § 7216 Client Data Non-Disclosure
+                    Client data and outside processors (IRC § 7216)
                   </div>
                   <p className="text-[11px] text-slate-400 leading-relaxed">
-                    All financial and tax return records are encrypted at rest with AES-256-GCM and in transit via TLS 1.3. Cryptographic tenant gating ensures absolute isolation between firms. Client tax data is never shared, monetized, or exposed to third-party generative LLM training loops.
+                    Records are stored in Neon Postgres and Cloudflare R2, both encrypted at rest by those providers, and served over HTTPS. Firms are separated by access checks on every request. Receipt images are sent to an AI service for extraction: Cloudflare Workers AI, and Google Gemini or Groq if their keys are set. Review each provider's data terms, and obtain any client consent § 7216 requires, before processing client tax information.
                   </p>
                 </div>
 
                 <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-3 space-y-1">
                   <div className="font-semibold text-white flex items-center gap-1.5">
                     <FileCheck2 className="h-3.5 w-3.5 text-purple-400" />
-                    IRS Rev. Proc. 2005-39 E-Sign Tamper Evidence
+                    E-signature evidence
                   </div>
                   <p className="text-[11px] text-slate-400 leading-relaxed">
-                    Electronic signatures (engagement letters, Form 8879 authorizations) are bound with SHA-256 cryptographic document hashes, client IP capture, browser telemetry, and immutable audit timestamps complying with Uniform Electronic Transactions Act (UETA) and IRS standards.
+                    Signed documents record SHA-256 hashes before and after signing, the signer's IP address and browser, and append-only audit timestamps. Form 8879/8878 signing is built to IRS Publication 1345 for pen signatures and in-office e-signatures; it has not been reviewed by the IRS or an attorney.
                   </p>
                 </div>
 
@@ -1146,7 +1146,7 @@ export function AdminPanel() {
                           {t.status !== "resolved" ? (
                             <Button
                               size="sm"
-                              className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs h-7"
+                              className="bg-[var(--color-primary)] hover:opacity-90 text-[var(--color-primary-foreground)] text-xs h-7"
                               onClick={() => handleUpdateTicketStatus(t.id, "resolved")}
                             >
                               Mark Resolved
@@ -1463,7 +1463,7 @@ export function AdminPanel() {
                   size="sm"
                   onClick={handleSaveRule}
                   disabled={savingRule || !ruleTitle.trim() || !ruleContent.trim()}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs h-9 gap-1.5"
+                  className="bg-[var(--color-primary)] hover:opacity-90 text-[var(--color-primary-foreground)] text-xs h-9 gap-1.5"
                 >
                   <Upload className="h-3.5 w-3.5" />
                   {savingRule ? "Deploying..." : "Approve & Deploy Rule"}
@@ -1634,7 +1634,7 @@ export function AdminPanel() {
                 <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-muted)] p-4 space-y-2 text-xs">
                   <div className="flex items-center gap-2 font-semibold">
                     <span>Matched Category:</span>
-                    <Badge className="bg-emerald-600 text-white">{simResult.matchedCategory}</Badge>
+                    <Badge className="bg-[var(--color-primary)] text-[var(--color-primary-foreground)]">{simResult.matchedCategory}</Badge>
                     <span className="text-[var(--color-muted-foreground)]">({simResult.taxBucket})</span>
                   </div>
                   <div>
@@ -1729,7 +1729,7 @@ export function AdminPanel() {
                   onClick={handleCreateInvitation}
                   disabled={generatingInvite || !inviteEmail.trim()}
                   size="sm"
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs h-8 gap-1.5"
+                  className="bg-[var(--color-primary)] hover:opacity-90 text-[var(--color-primary-foreground)] text-xs h-8 gap-1.5"
                 >
                   <Key className="h-3.5 w-3.5" />
                   {generatingInvite ? "Generating Token..." : "Issue Cryptographic Invitation Link"}
@@ -1740,7 +1740,7 @@ export function AdminPanel() {
                 <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4 space-y-2">
                   <div className="flex items-center justify-between text-xs font-semibold text-emerald-800 dark:text-emerald-300">
                     <span>Generated Invitation Link (Valid for {inviteDays === 9999 ? "Lifetime" : `${inviteDays} days`}):</span>
-                    <Badge className="bg-emerald-600 text-white text-[10px]">Single-Use Only</Badge>
+                    <Badge className="bg-[var(--color-primary)] text-[var(--color-primary-foreground)] text-[10px]">Single-Use Only</Badge>
                   </div>
                   <div className="flex items-center justify-between rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] p-2.5 text-xs font-mono">
                     <span className="truncate max-w-xl text-[11px]">{generatedInviteLink}</span>

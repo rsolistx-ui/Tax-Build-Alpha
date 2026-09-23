@@ -113,11 +113,13 @@ export function StateModsPanel({ clientId, taxYear }: { clientId: string; taxYea
     federalBonusDepreciation: "",
     californiaAllowableDepreciation: "",
     federalSection179Deduction: "",
+    section179PropertyCost: "",
     hsaContributionsDeducted: "",
     hsaEarningsTaxable: "",
     isCaliforniaLlc: false,
     californiaGrossReceipts: "",
     californiaPteTaxPaid: "",
+    californiaPteJunePayment: "unknown" as "unknown" | "made" | "missed",
     newYorkAllowableDepreciation: "",
     stateLocalTaxDeductedFed: "",
     mctdNetSelfEmploymentEarnings: "",
@@ -150,11 +152,13 @@ export function StateModsPanel({ clientId, taxYear }: { clientId: string; taxYea
       if (wizardState === "CA") {
         payload.californiaAllowableDepreciation = wizardInputs.californiaAllowableDepreciation ? Number(wizardInputs.californiaAllowableDepreciation) : undefined;
         payload.federalSection179Deduction = wizardInputs.federalSection179Deduction ? Number(wizardInputs.federalSection179Deduction) : undefined;
+        payload.section179PropertyCost = wizardInputs.section179PropertyCost ? Number(wizardInputs.section179PropertyCost) : undefined;
         payload.hsaContributionsDeducted = wizardInputs.hsaContributionsDeducted ? Number(wizardInputs.hsaContributionsDeducted) : undefined;
         payload.hsaEarningsTaxable = wizardInputs.hsaEarningsTaxable ? Number(wizardInputs.hsaEarningsTaxable) : undefined;
         payload.isCaliforniaLlc = wizardInputs.isCaliforniaLlc;
         payload.californiaGrossReceipts = wizardInputs.californiaGrossReceipts ? Number(wizardInputs.californiaGrossReceipts) : undefined;
         payload.californiaPteTaxPaid = wizardInputs.californiaPteTaxPaid ? Number(wizardInputs.californiaPteTaxPaid) : undefined;
+        payload.californiaPteJunePaymentMade = wizardInputs.californiaPteJunePayment === "unknown" ? undefined : wizardInputs.californiaPteJunePayment === "made";
       } else {
         payload.newYorkAllowableDepreciation = wizardInputs.newYorkAllowableDepreciation ? Number(wizardInputs.newYorkAllowableDepreciation) : undefined;
         payload.stateLocalTaxDeductedFed = wizardInputs.stateLocalTaxDeductedFed ? Number(wizardInputs.stateLocalTaxDeductedFed) : undefined;
@@ -306,7 +310,16 @@ export function StateModsPanel({ clientId, taxYear }: { clientId: string; taxYea
                     value={wizardInputs.federalSection179Deduction}
                     onChange={(e) => setWizardInputs((w) => ({ ...w, federalSection179Deduction: e.target.value }))}
                   />
-                  <span className="text-[10px] text-[var(--color-muted-foreground)]">Auto-adds back excess over CA $25,000 cap</span>
+                  <span className="text-[10px] text-[var(--color-muted-foreground)]">Adds back excess over the CA $25,000 limit (R&TC § 17255)</span>
+                </div>
+                <div>
+                  <label className="text-[var(--color-muted-foreground)]">Total cost of Section 179 property placed in service</label>
+                  <Input
+                    placeholder="e.g. 210000"
+                    value={wizardInputs.section179PropertyCost}
+                    onChange={(e) => setWizardInputs((w) => ({ ...w, section179PropertyCost: e.target.value }))}
+                  />
+                  <span className="text-[10px] text-[var(--color-muted-foreground)]">CA limit drops dollar-for-dollar above $200,000</span>
                 </div>
                 <div>
                   <label className="text-[var(--color-muted-foreground)]">HSA Contribution Deducted (Fed Sch 1 Ln 13)</label>
@@ -318,13 +331,22 @@ export function StateModsPanel({ clientId, taxYear }: { clientId: string; taxYea
                   <span className="text-[10px] text-[var(--color-muted-foreground)]">CA non-conformity to IRC § 223</span>
                 </div>
                 <div>
-                  <label className="text-[var(--color-muted-foreground)]">CA Pass-Through Entity Tax (AB 150 - 9.3%)</label>
+                  <label className="text-[var(--color-muted-foreground)]">CA Pass-Through Entity Elective Tax paid</label>
                   <Input
                     placeholder="e.g. 9300"
                     value={wizardInputs.californiaPteTaxPaid}
                     onChange={(e) => setWizardInputs((w) => ({ ...w, californiaPteTaxPaid: e.target.value }))}
                   />
-                  <span className="text-[10px] text-[var(--color-muted-foreground)]">Form 3804-CR credit + federal add-back</span>
+                  <span className="text-[10px] text-[var(--color-muted-foreground)]">FTB 3804-CR credit (entity handles the add-back)</span>
+                  <select
+                    className="mt-1 h-8 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-2 text-xs"
+                    value={wizardInputs.californiaPteJunePayment}
+                    onChange={(e) => setWizardInputs((w) => ({ ...w, californiaPteJunePayment: e.target.value as "unknown" | "made" | "missed" }))}
+                  >
+                    <option value="unknown">2026+: June 15 prepayment not confirmed</option>
+                    <option value="made">2026+: June 15 prepayment made</option>
+                    <option value="missed">2026+: June 15 prepayment missed (credit reduced 12.5%)</option>
+                  </select>
                 </div>
                 <div className="space-y-1 rounded border border-[var(--color-border)] p-2">
                   <label className="flex items-center gap-2 font-medium">
@@ -337,7 +359,7 @@ export function StateModsPanel({ clientId, taxYear }: { clientId: string; taxYea
                   </label>
                   {wizardInputs.isCaliforniaLlc && (
                     <Input
-                      placeholder="CA Gross Receipts (e.g. 600000)"
+                      placeholder="CA total income: gross income + COGS (e.g. 600000)"
                       value={wizardInputs.californiaGrossReceipts}
                       onChange={(e) => setWizardInputs((w) => ({ ...w, californiaGrossReceipts: e.target.value }))}
                     />
@@ -353,7 +375,7 @@ export function StateModsPanel({ clientId, taxYear }: { clientId: string; taxYea
                     value={wizardInputs.federalBonusDepreciation}
                     onChange={(e) => setWizardInputs((w) => ({ ...w, federalBonusDepreciation: e.target.value }))}
                   />
-                  <span className="text-[10px] text-[var(--color-muted-foreground)]">Form IT-225 Code A-201 add-back</span>
+                  <span className="text-[10px] text-[var(--color-muted-foreground)]">Form IT-225 A-209 add-back (Form IT-398)</span>
                 </div>
                 <div>
                   <label className="text-[var(--color-muted-foreground)]">New York Allowable Regular MACRS Depreciation</label>
@@ -362,16 +384,16 @@ export function StateModsPanel({ clientId, taxYear }: { clientId: string; taxYea
                     value={wizardInputs.newYorkAllowableDepreciation}
                     onChange={(e) => setWizardInputs((w) => ({ ...w, newYorkAllowableDepreciation: e.target.value }))}
                   />
-                  <span className="text-[10px] text-[var(--color-muted-foreground)]">Form IT-225 Code S-201 subtraction</span>
+                  <span className="text-[10px] text-[var(--color-muted-foreground)]">Form IT-225 S-213 subtraction (Form IT-398)</span>
                 </div>
                 <div>
-                  <label className="text-[var(--color-muted-foreground)]">Federal Schedule A State & Local Taxes (SALT)</label>
+                  <label className="text-[var(--color-muted-foreground)]">Income taxes deducted as a business expense (e.g. NYC UBT)</label>
                   <Input
                     placeholder="e.g. 10000"
                     value={wizardInputs.stateLocalTaxDeductedFed}
                     onChange={(e) => setWizardInputs((w) => ({ ...w, stateLocalTaxDeductedFed: e.target.value }))}
                   />
-                  <span className="text-[10px] text-[var(--color-muted-foreground)]">Form IT-225 Code A-101 add-back</span>
+                  <span className="text-[10px] text-[var(--color-muted-foreground)]">Form IT-225 A-201 add-back. Schedule A taxes go on IT-196, not here</span>
                 </div>
                 <div>
                   <label className="text-[var(--color-muted-foreground)]">NY Pass-Through Entity Tax (PTET)</label>
@@ -425,7 +447,7 @@ export function StateModsPanel({ clientId, taxYear }: { clientId: string; taxYea
                   size="sm"
                   onClick={() => handleComputeConformity(true)}
                   disabled={applying}
-                  className="bg-emerald-600 text-white hover:bg-emerald-700 text-xs"
+                  className="bg-[var(--color-primary)] text-[var(--color-primary-foreground)] hover:opacity-90 text-xs"
                 >
                   <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />
                   {applying ? "Applying to Workpapers..." : "Apply All to Client Workpaper (1-Click)"}
@@ -458,6 +480,12 @@ export function StateModsPanel({ clientId, taxYear }: { clientId: string; taxYea
                       </div>
                     ))}
                   </div>
+                )}
+
+                {computedResult.notes?.length > 0 && (
+                  <ul className="list-disc space-y-0.5 rounded bg-sky-500/10 p-2 pl-5 text-[11px] text-sky-800 dark:text-sky-200">
+                    {computedResult.notes.map((note: string, idx: number) => <li key={idx}>{note}</li>)}
+                  </ul>
                 )}
 
                 <div className="space-y-1 divide-y divide-[var(--color-border)]/40 pt-1">

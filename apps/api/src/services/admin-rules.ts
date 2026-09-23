@@ -290,7 +290,7 @@ Dictated Practitioner Instruction:
 "${input.dictatedText}"
 
 Context:
-- Client: ${input.clientName || "General Firm-wide"}
+- Scope: ${input.clientName ? "One client" : "General firm-wide"}
 - Entity Type: ${input.entityType || "Unspecified"}
 - Industry: ${input.industry || "Unspecified"}
 
@@ -307,7 +307,8 @@ Respond strictly in JSON format with:
   "explanation": "Human-friendly summary of how the engine will apply this rule"
 }`;
 
-    if (env?.AI) {
+    // US-only mode keeps practitioner text away from services that may process it abroad.
+    if (env?.AI && env.US_ONLY_READING !== "true") {
       try {
         const aiRes = (await env.AI.run("@cf/qwen/qwen3.8-27b", {
           messages: [
@@ -531,7 +532,8 @@ Categorize this expense accurately. Respond in JSON format with:
   "ruleCited": "Specific rule matched"
 }`;
 
-    if (env?.AI) {
+    // US-only mode keeps practitioner text away from services that may process it abroad.
+    if (env?.AI && env.US_ONLY_READING !== "true") {
       try {
         const aiRes = (await env.AI.run("@cf/qwen/qwen3.8-27b", {
           messages: [

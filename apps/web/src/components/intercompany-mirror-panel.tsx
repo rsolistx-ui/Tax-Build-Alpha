@@ -309,7 +309,7 @@ export function IntercompanyMirrorPanel({ clientId }: { clientId: string }) {
                         size="sm"
                         onClick={() => handleReconcile(match)}
                         disabled={isReconciling}
-                        className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs h-7 gap-1.5 shadow-sm ml-2"
+                        className="bg-[var(--color-primary)] hover:opacity-90 text-[var(--color-primary-foreground)] text-xs h-7 gap-1.5 shadow-sm ml-2"
                       >
                         {isReconciling ? (
                           <>
@@ -510,7 +510,7 @@ export function IntercompanyMirrorPanel({ clientId }: { clientId: string }) {
                 size="sm"
                 onClick={handleCreateAffiliate}
                 disabled={!selectedAffiliateId || savingLink}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs"
+                className="bg-[var(--color-primary)] hover:opacity-90 text-[var(--color-primary-foreground)] text-xs"
               >
                 {savingLink ? "Linking..." : "Save Link"}
               </Button>

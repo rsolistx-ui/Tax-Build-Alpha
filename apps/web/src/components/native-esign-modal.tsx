@@ -183,7 +183,7 @@ export function NativeEsignModal({
 
         <CardHeader className="pb-4">
           <div className="flex items-center gap-2">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--color-primary)]/10 text-[var(--color-primary)]">
               <ShieldCheck className="h-5 w-5" />
             </div>
             <div>
@@ -377,7 +377,7 @@ export function NativeEsignModal({
                   type="submit"
                   size="sm"
                   disabled={isSubmitting || !consentAgreed}
-                  className="bg-emerald-600 text-white hover:bg-emerald-700"
+                  className="bg-[var(--color-primary)] text-[var(--color-primary-foreground)] hover:opacity-90"
                 >
                   {isSubmitting ? (
                     "Sealing Document..."

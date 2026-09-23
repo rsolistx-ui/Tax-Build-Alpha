@@ -126,8 +126,7 @@ export class NativeEsignService {
     // Header Banner
     printLine("TRUEPOST — CERTIFICATE OF COMPLETION", { size: 13, useBold: true, gap: 18 });
     printLine(`Certificate ID: ${certificateId}`, { size: 9, color: rgb(0.4, 0.4, 0.4), gap: 14 });
-    printLine("This document has been electronically signed pursuant to the United States Electronic Signatures in", { size: 8.5, color: rgb(0.3, 0.3, 0.3), gap: 10 });
-    printLine("Global and National Commerce Act (ESIGN, 15 U.S.C. § 7001 et seq.) and Uniform Electronic Transactions Act (UETA).", { size: 8.5, color: rgb(0.3, 0.3, 0.3), gap: 20 });
+    printLine("This certificate records an electronic signature captured by Truepost and the evidence listed below.", { size: 8.5, color: rgb(0.3, 0.3, 0.3), gap: 20 });
 
     certPage.drawLine({
       start: { x: margin, y: cy + 6 },

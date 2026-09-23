@@ -1,4 +1,5 @@
 import { lazy, useEffect, useMemo, useRef, useState } from "react";
+import { BrandMark } from "@/components/brand-mark";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import {
    ArrowLeft,
@@ -74,6 +75,10 @@ const DiagnosticsPanel = lazy(() => import("@/components/tax-extended-panels").t
 const TaxBridgePanel = lazy(() => import("@/components/tax-bridge-panel").then((module) => ({ default: module.TaxBridgePanel })));
 const BillingPanel = lazy(() => import("@/components/billing-panel").then((module) => ({ default: module.BillingPanel })));
 const DeadlineCalendarPanel = lazy(() => import("@/components/deadline-calendar-panel").then((module) => ({ default: module.DeadlineCalendarPanel })));
+const EstimatedTaxPanel = lazy(() => import("@/components/tax-planning-panels").then((module) => ({ default: module.EstimatedTaxPanel })));
+const MileagePanel = lazy(() => import("@/components/tax-planning-panels").then((module) => ({ default: module.MileagePanel })));
+const ClientConsentCard = lazy(() => import("@/components/client-consent-card").then((module) => ({ default: module.ClientConsentCard })));
+const EfileAuthorizationPanel = lazy(() => import("@/components/efile-authorization-panel").then((module) => ({ default: module.EfileAuthorizationPanel })));
 const EsignVaultPanel = lazy(() => import("@/components/esign-vault-panel").then((module) => ({ default: module.EsignVaultPanel })));
 const DifAuditScannerPanel = lazy(() => import("@/components/dif-audit-scanner-panel").then((module) => ({ default: module.DifAuditScannerPanel })));
 const TaxAdvisoryRoadmapPanel = lazy(() => import("@/components/tax-advisory-roadmap-panel").then((module) => ({ default: module.TaxAdvisoryRoadmapPanel })));
@@ -136,9 +141,17 @@ type BatchFile = {
   error?: string;
 };
 
-type Tab = "overview" | "folders" | "upload" | "review" | "bank" | "pnl" | "tax-bridge" | "tax-readiness" | "dif-audit" | "advisory" | "intercompany" | "workpaper" | "documents" | "esign" | "engagements" | "requests" | "export" | "agent" | "analytics" | "billing" | "deadlines";
+type Tab = "overview" | "folders" | "upload" | "review" | "bank" | "pnl" | "tax-bridge" | "tax-readiness" | "dif-audit" | "advisory" | "intercompany" | "workpaper" | "documents" | "esign" | "engagements" | "requests" | "export" | "agent" | "analytics" | "billing" | "deadlines" | "estimated-tax" | "mileage";
 
-const VALID_TABS: Tab[] = ["overview", "folders", "upload", "review", "bank", "pnl", "tax-bridge", "tax-readiness", "dif-audit", "advisory", "intercompany", "workpaper", "documents", "esign", "engagements", "requests", "export", "agent", "analytics", "billing", "deadlines"];
+// Sections for the "More tools" menu so specialist tools are found by purpose, not by scanning a flat list.
+const TOOL_GROUPS: Array<{ label: string; ids: Tab[] }> = [
+  { label: "Tax", ids: ["tax-readiness", "workpaper", "estimated-tax", "tax-bridge", "dif-audit", "advisory", "deadlines"] },
+  { label: "Client", ids: ["requests", "documents", "esign", "engagements"] },
+  { label: "Billing", ids: ["billing"] },
+  { label: "Books", ids: ["folders", "mileage", "intercompany", "analytics", "agent"] },
+];
+
+const VALID_TABS: Tab[] = ["overview", "folders", "upload", "review", "bank", "pnl", "tax-bridge", "tax-readiness", "dif-audit", "advisory", "intercompany", "workpaper", "documents", "esign", "engagements", "requests", "export", "agent", "analytics", "billing", "deadlines", "estimated-tax", "mileage"];
 
 function formatCurrency(amount: number | undefined, currency = "USD"): string {
   if (typeof amount !== "number" || !Number.isFinite(amount)) return "—";
@@ -373,7 +386,7 @@ export function ClientWorkspacePage() {
       { id: "bank" as const, label: "Bank", icon: Landmark },
       { id: "pnl" as const, label: "P&L", icon: LineChart },
       { id: "tax-readiness" as const, label: "Tax readiness", icon: ClipboardList },
-      { id: "dif-audit" as const, label: "IRS DIF Risk", icon: ShieldAlert },
+      { id: "dif-audit" as const, label: "Pre-filing risk", icon: ShieldAlert },
       { id: "advisory" as const, label: "Tax Advisory", icon: TrendingUp },
       { id: "intercompany" as const, label: "Intercompany Mirror", icon: Network },
       { id: "workpaper" as const, label: "Workpaper", icon: FileSpreadsheet },
@@ -386,6 +399,8 @@ export function ClientWorkspacePage() {
       { id: "tax-bridge" as const, label: "Tax Bridge & 1099", icon: Sparkles },
       { id: "billing" as const, label: "Billing & Invoices", icon: CreditCard },
       { id: "deadlines" as const, label: "Deadlines", icon: CalendarIcon },
+      { id: "estimated-tax" as const, label: "Quarterly estimates", icon: CalendarIcon },
+      { id: "mileage" as const, label: "Mileage log", icon: Landmark },
       { id: "export" as const, label: "Close Packet", icon: FileDown },
     ],
     [review.length],
@@ -427,7 +442,7 @@ export function ClientWorkspacePage() {
         </Link>
         <div className="mt-4 flex flex-col justify-between gap-5 lg:flex-row lg:items-end">
           <div className="flex min-w-0 items-start gap-3">
-            <img src="/icons/icon-192.png" alt="" className="mt-0.5 h-10 w-10 shrink-0 rounded-xl bg-[#082f79] object-cover p-1 shadow-[0_10px_24px_rgba(8,47,121,0.2)]" />
+            <BrandMark decorative className="mt-0.5 h-10 w-10 shrink-0" />
             <div className="min-w-0">
               <h1 className="text-2xl font-semibold tracking-[-0.025em] text-[var(--color-foreground)] sm:text-3xl">{client?.name ?? "Workspace"}</h1>
               <p className="mt-1 max-w-2xl text-sm leading-6 text-[var(--color-muted-foreground)]">
@@ -541,7 +556,11 @@ export function ClientWorkspacePage() {
           <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
           <select value={dailyTabs.some((item) => item.id === tab) ? "" : tab} onChange={(event) => event.target.value && changeTab(event.target.value as Tab)}>
             <option value="">{dailyTabs.some((item) => item.id === tab) ? "More tools" : activeTool?.label}</option>
-            {specialistTools.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+            {TOOL_GROUPS.map((group) => {
+              const items = specialistTools.filter((item) => group.ids.includes(item.id));
+              return items.length ? <optgroup key={group.label} label={group.label}>{items.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</optgroup> : null;
+            })}
+            {specialistTools.filter((item) => !TOOL_GROUPS.some((group) => group.ids.includes(item.id))).map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
           </select>
           <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
         </label>
@@ -616,7 +635,15 @@ export function ClientWorkspacePage() {
       ) : null}
 
       {tab === "documents" ? <DocumentsPanel clientId={clientId} /> : null}
-      {tab === "esign" ? <EsignVaultPanel clientId={clientId} /> : null}
+      {tab === "estimated-tax" ? <EstimatedTaxPanel clientId={clientId} taxYear={pinnedTaxYear ?? profile?.tax_year ?? new Date().getFullYear()} /> : null}
+      {tab === "mileage" ? <MileagePanel clientId={clientId} taxYear={pinnedTaxYear ?? profile?.tax_year ?? new Date().getFullYear()} /> : null}
+      {tab === "esign" ? (
+        <div className="space-y-4">
+          <ClientConsentCard clientId={clientId} />
+          <EfileAuthorizationPanel clientId={clientId} defaultTaxYear={pinnedTaxYear ?? profile?.tax_year ?? new Date().getFullYear() - 1} />
+          <EsignVaultPanel clientId={clientId} />
+        </div>
+      ) : null}
 
       {tab === "engagements" ? <EngagementsPanel clientId={clientId} focusEngagementId={focusId} /> : null}
 
@@ -736,10 +763,11 @@ export function ClientWorkspacePage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">Upload tray <span className="rounded bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800">PWA ready — works on iOS and Android</span></CardTitle>
             <CardDescription>
-              Take a photo or pick from library on your phone. Works installed to home screen on both iOS and Android. Photos go through Workers AI extraction; PDFs are converted first. One bad file never blocks the rest.
+              Take a photo or pick from your library. Receipts are read automatically once the client has signed the consent; until then they are saved for manual entry. Keep W-2s, 1099s and anything showing a full Social Security number in Documents. One bad file never blocks the rest.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            <ClientConsentCard clientId={clientId} compact />
             <div className="flex flex-wrap items-center gap-3">
               <Button
                 variant="ghost"

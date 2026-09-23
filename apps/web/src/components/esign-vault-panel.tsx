@@ -98,7 +98,7 @@ export function EsignVaultPanel({ clientId }: { clientId: string }) {
         <CardHeader className="pb-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2.5">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--color-primary)]/10 text-[var(--color-primary)]">
                 <ShieldCheck className="h-5 w-5" />
               </div>
               <div>
@@ -106,16 +106,16 @@ export function EsignVaultPanel({ clientId }: { clientId: string }) {
                   E-Signature & Compliance Vault
                 </CardTitle>
                 <CardDescription className="text-xs">
-                  Permanent statutory repository of executed engagement letters, tax authorizations, and disclosure records
+                  Signed engagement letters and disclosures, with their integrity records
                 </CardDescription>
               </div>
             </div>
             <div className="flex items-center gap-2">
               <Badge className="border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-mono text-[11px]">
-                15 U.S.C. § 7001 / UETA Sealed
+                SHA-256 recorded
               </Badge>
               <Badge className="bg-[var(--color-muted)] text-[var(--color-foreground)] font-mono text-[11px]">
-                7-Yr Audit Retention
+                Firm-isolated storage
               </Badge>
             </div>
           </div>
@@ -123,7 +123,7 @@ export function EsignVaultPanel({ clientId }: { clientId: string }) {
         <CardContent>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 pt-1">
             <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-muted)]/20 p-3">
-              <div className="text-xs text-[var(--color-muted-foreground)]">Signed & Certified</div>
+              <div className="text-xs text-[var(--color-muted-foreground)]">Signed</div>
               <div className="text-xl font-bold font-mono text-emerald-600 dark:text-emerald-400">
                 {signedCount}
               </div>
@@ -232,7 +232,7 @@ export function EsignVaultPanel({ clientId }: { clientId: string }) {
                               : "bg-amber-500/10 text-amber-600 border-amber-500/30 text-[10px]"
                           }
                         >
-                          {isSigned ? "Certified & Sealed" : "Pending Signature"}
+                          {isSigned ? "Signed" : "Pending Signature"}
                         </Badge>
                         <Badge className="bg-[var(--color-muted)] text-[var(--color-muted-foreground)] text-[10px] uppercase">
                           {rec.formType.replace(/_/g, " ")}
@@ -282,7 +282,7 @@ export function EsignVaultPanel({ clientId }: { clientId: string }) {
                           className="inline-flex items-center gap-1 rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-2.5 py-1.5 text-xs font-medium hover:bg-[var(--color-muted)]"
                         >
                           <FileCheck2 className="h-3.5 w-3.5 text-emerald-600" />
-                          View Certified PDF
+                          View signed PDF
                           <ExternalLink className="h-3 w-3 text-[var(--color-muted-foreground)]" />
                         </a>
                       )}
@@ -303,7 +303,7 @@ export function EsignVaultPanel({ clientId }: { clientId: string }) {
                         <Button
                           size="sm"
                           onClick={() => setActiveSignModal(rec)}
-                          className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white text-xs"
+                          className="h-8 bg-[var(--color-primary)] hover:opacity-90 text-[var(--color-primary-foreground)] text-xs"
                         >
                           <PenTool className="mr-1.5 h-3.5 w-3.5" />
                           Sign with Truepost E-Sign
@@ -331,7 +331,7 @@ export function EsignVaultPanel({ clientId }: { clientId: string }) {
 
             <CardHeader className="pb-3">
               <div className="flex items-center gap-2">
-                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600">
+                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--color-primary)]/10 text-[var(--color-primary)]">
                   <ShieldCheck className="h-5 w-5" />
                 </div>
                 <div>
@@ -339,7 +339,7 @@ export function EsignVaultPanel({ clientId }: { clientId: string }) {
                     Certificate of Completion & Audit Log
                   </CardTitle>
                   <CardDescription className="text-xs">
-                    Legal record retention compliant under 15 U.S.C. § 7001 & IRS Circular 230
+                    Who signed, when, from where, and the document's SHA-256 fingerprints
                   </CardDescription>
                 </div>
               </div>
@@ -384,7 +384,7 @@ export function EsignVaultPanel({ clientId }: { clientId: string }) {
                   </span>
                 </div>
                 <div className="flex flex-col gap-1">
-                  <span className="text-[var(--color-muted-foreground)]">Final Certified SHA-256:</span>
+                  <span className="text-[var(--color-muted-foreground)]">Final SHA-256:</span>
                   <span className="break-all text-[10px] text-emerald-600 dark:text-emerald-400">
                     {selectedAuditRecord.documentHash || "Digest sealed into PDF"}
                   </span>
@@ -392,7 +392,7 @@ export function EsignVaultPanel({ clientId }: { clientId: string }) {
               </div>
 
               <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 p-2.5 text-[11px] text-emerald-700 dark:text-emerald-300">
-                <strong>Statutory Retention Notice:</strong> This audit trail and the certified PDF are cryptographically anchored and archived to firm-isolated Cloudflare R2 storage for a mandatory 7-year retention period pursuant to IRS Circular 230 and state accountancy regulations.
+                <strong>Storage:</strong> This record and the signed PDF are kept in your firm's isolated Cloudflare R2 storage. Your firm sets, and is responsible for, its own record-retention period.
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-2">
@@ -401,10 +401,10 @@ export function EsignVaultPanel({ clientId }: { clientId: string }) {
                     href={apiUrl(selectedAuditRecord.sourceUrl)}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex items-center gap-1 rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700"
+                    className="inline-flex items-center gap-1 rounded-md bg-[var(--color-primary)] px-3 py-1.5 text-xs font-medium text-[var(--color-primary-foreground)] hover:opacity-90"
                   >
                     <Download className="h-3.5 w-3.5" />
-                    Download Certified PDF
+                    Download signed PDF
                   </a>
                 )}
                 <Button size="sm" variant="outline" onClick={() => setSelectedAuditRecord(null)}>

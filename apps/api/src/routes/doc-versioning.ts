@@ -87,9 +87,9 @@ docVersioningRoutes.get("/:clientId/signature-vault", async (c) => {
       originalHash: meta.originalHash || null,
       ipAddress: meta.ipAddress || null,
       sourceUrl: r.document_id ? `/api/clients/${client.id}/documents/${r.document_id}/source` : null,
-      tamperEvidentStatus: r.status === "signed" ? "Sealed & Tamper-Evident" : "Pending Signature",
+      tamperEvidentStatus: r.status === "signed" ? "Signed, SHA-256 recorded" : "Pending Signature",
       complianceNotice: isIrsEfileAuthorization(r.form_type)
-        ? "Tax e-file authorization is completed in the firm's validated e-file provider."
+        ? "IRS e-file authorizations are signed in the IRS e-file signatures panel."
         : "Ordinary-document signature record with certificate and integrity evidence.",
     };
   });

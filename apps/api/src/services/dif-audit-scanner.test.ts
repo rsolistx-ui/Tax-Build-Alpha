@@ -26,7 +26,7 @@ describe("dif-audit-scanner", () => {
     expect(report.rating).toBe("low_risk");
     expect(report.findings.length).toBe(0);
     expect(report.comminglingCount).toBe(0);
-    expect(report.defenseMemoPreview).toContain("Circular 230");
+    expect(report.defenseMemoPreview).toContain("PREPARER REVIEW REQUIRED");
     expect(report.defenseMemoPreview).toContain("LOW RISK");
   });
 
@@ -107,7 +107,7 @@ describe("dif-audit-scanner", () => {
     expect(safeHarborFinding?.codeCitation).toContain("Treas. Reg. § 1.263(a)-1(f)");
   });
 
-  it("compiles a formal Circular 230 Due Diligence Defense Memorandum", () => {
+  it("compiles draft pre-filing review notes that make no preparer representation", () => {
     const testData: DifInputData = {
       grossRevenue: 100000,
       totalExpenses: 80000,
@@ -117,9 +117,8 @@ describe("dif-audit-scanner", () => {
     };
 
     const report = computeDifAuditReport(testData);
-    expect(report.defenseMemoPreview).toContain("PRE-FILING DUE DILIGENCE & AUDIT DEFENSE MEMORANDUM");
-    expect(report.defenseMemoPreview).toContain("Treasury Circular 230 § 10.22");
-    expect(report.defenseMemoPreview).toContain("IRC § 6694(a)");
+    expect(report.defenseMemoPreview).toContain("PRE-FILING REVIEW NOTES (DRAFT)");
+    expect(report.defenseMemoPreview).not.toMatch(/substantial authority|PRACTITIONER DECLARATION|IRS DIF Risk Score/);
     expect(report.defenseMemoPreview).toContain("IRC § 274(n)");
   });
 });

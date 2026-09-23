@@ -113,7 +113,7 @@ difAuditRoutes.post("/:clientId/dif-audit/memo", async (c) => {
       JSON.stringify({
         taxYear: profile?.tax_year || new Date().getFullYear(),
         memoLength: memoText.length,
-        certifiedBy: c.get("userName"),
+        savedBy: c.get("userName"),
       }),
     ],
   );
@@ -121,6 +121,6 @@ difAuditRoutes.post("/:clientId/dif-audit/memo", async (c) => {
   return c.json({
     ok: true,
     eventId,
-    message: "Treasury Circular 230 Due Diligence Defense Memorandum permanently logged in audit vault.",
+    message: "Pre-filing review notes saved to the audit log.",
   });
 });

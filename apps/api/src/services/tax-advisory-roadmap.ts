@@ -485,7 +485,7 @@ export function generateAdvisoryRoadmap(
     section179.isApplicable,
   ].filter(Boolean).length;
 
-  const executiveSummary = `Comprehensive tax strategy analysis for ${clientName} identified ${applicableCount} high-leverage tax mitigation strategies across corporate structure, statutory deductions, qualified retirement shelters, and capital asset timing. Implementing these recommendations is projected to deliver approximately $${totalEstimatedAnnualSavings.toLocaleString()} in combined annual and first-year tax savings while remaining in full compliance with Treasury Circular 230 and Internal Revenue Code requirements.`;
+  const executiveSummary = `Comprehensive tax strategy analysis for ${clientName} identified ${applicableCount} high-leverage tax mitigation strategies across corporate structure, statutory deductions, qualified retirement shelters, and capital asset timing. Implementing these recommendations is projected to deliver approximately $${totalEstimatedAnnualSavings.toLocaleString()} in combined annual and first-year tax savings. Each strategy requires preparer review against the client's facts before it is recommended.`;
 
   // Action checklist by phase
   const actionChecklist: TaxAdvisoryRoadmap["actionChecklist"] = [
@@ -512,7 +512,7 @@ export function generateAdvisoryRoadmap(
   ];
 
   // Circular 230 Due Diligence Advisory Notice
-  const circular230AdvisoryNotice = `TREASURY CIRCULAR 230 NOTICE: Pursuant to IRS Circular 230 regulations governing practice before the Internal Revenue Service, this written tax advisory memorandum is prepared for the confidential use of ${clientName}. The tax planning calculations and recommendations contained herein are based upon historical ledger data and assumptions provided by management. Application of tax strategies depends upon the specific facts, circumstances, and substantiation maintained by the taxpayer. This analysis does not constitute a formal guarantee of tax results, and timely execution of legal agreements, payroll filings, and corporate minutes is required to substantiate positions upon examination.`;
+  const circular230AdvisoryNotice = `IMPORTANT: This draft tax planning analysis is prepared for the confidential use of ${clientName}. The tax planning calculations and recommendations contained herein are based upon historical ledger data and assumptions provided by management. Application of tax strategies depends upon the specific facts, circumstances, and substantiation maintained by the taxpayer. This analysis does not constitute a formal guarantee of tax results, and timely execution of legal agreements, payroll filings, and corporate minutes is required to substantiate positions upon examination.`;
 
   return {
     generatedAt: new Date().toISOString(),

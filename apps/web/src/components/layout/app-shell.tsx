@@ -1,4 +1,5 @@
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
+import { BrandMark } from "@/components/brand-mark";
 import { Bot, Building2, Calendar, ClipboardList, Clock, FolderKanban, Headphones, LayoutDashboard, Lightbulb, LogOut, Map, Sparkles, Users, Search, Settings } from "lucide-react";
 import { useEffect, useState } from "react";
 import { authClient } from "@/lib/auth-client";
@@ -60,7 +61,7 @@ export function AppShell({
         <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4 sm:px-6">
           <div className="flex items-center gap-6">
             <Link to="/" className="flex items-center gap-2.5 font-semibold tracking-tight">
-              <img src="/icons/icon-192.png" alt="Truepost" className="h-7 w-7 rounded-lg shadow-sm ring-1 ring-white/10 object-cover" />
+              <BrandMark className="h-7 w-7" />
               <span className="font-semibold tracking-tight text-slate-900 dark:text-slate-100 text-base">Truepost</span>
             </Link>
             <nav className="hidden items-center gap-1 sm:flex">
@@ -172,10 +173,10 @@ export function AppShell({
             ) : null}
             <button
               onClick={() => setVipOnboardingOpen(true)}
-              className="hidden items-center gap-1.5 rounded-full border border-emerald-400 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-800 hover:bg-emerald-100 dark:border-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300 sm:inline-flex transition-colors"
+              className="hidden items-center gap-1.5 rounded-full border border-[var(--color-primary)]/40 bg-[var(--color-primary)]/10 px-2.5 py-1 text-xs font-medium text-[var(--color-primary)] hover:bg-[var(--color-primary)]/15 sm:inline-flex transition-colors"
               title="VIP Practice Concierge & Launchpad"
             >
-              <Sparkles className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+              <Sparkles className="h-3.5 w-3.5" />
               VIP Concierge
             </button>
             <button

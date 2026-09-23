@@ -295,12 +295,12 @@ ${r.circular230AdvisoryNotice}
             className="text-xs h-8 gap-1.5 border-emerald-500/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/10"
           >
             {auditLogged ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" /> : <FileCheck2 className="h-3.5 w-3.5" />}
-            {auditLogged ? "Logged to Audit Vault" : "Log Circular 230 Memo"}
+            {auditLogged ? "Logged to audit log" : "Log advisory memo"}
           </Button>
           <Button
             size="sm"
             onClick={handlePrint}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs h-8 gap-1.5 shadow-sm"
+            className="bg-[var(--color-primary)] hover:opacity-90 text-[var(--color-primary-foreground)] text-xs h-8 gap-1.5 shadow-sm"
           >
             <Printer className="h-3.5 w-3.5" /> Print Executive PDF
           </Button>
@@ -362,9 +362,9 @@ ${r.circular230AdvisoryNotice}
             </div>
           </div>
           <div className="rounded-lg bg-white/60 dark:bg-black/20 p-2.5 border border-emerald-500/20">
-            <div className="text-[11px] text-[var(--color-muted-foreground)]">Compliance Standard</div>
+            <div className="text-[11px] text-[var(--color-muted-foreground)]">Status</div>
             <div className="text-base font-bold text-[var(--color-foreground)]">
-              Circular 230
+              Draft for review
             </div>
           </div>
         </div>
@@ -615,7 +615,7 @@ ${r.circular230AdvisoryNotice}
                     <CardTitle className="text-base font-bold">
                       2. Augusta Rule (IRC § 280A(g)) 14-Day Corporate Meeting Rental
                     </CardTitle>
-                    <Badge className="bg-emerald-600 text-white text-[10px]">
+                    <Badge className="bg-[var(--color-primary)] text-[var(--color-primary-foreground)] text-[10px]">
                       100% Tax-Free Income
                     </Badge>
                   </div>
@@ -699,7 +699,7 @@ ${r.circular230AdvisoryNotice}
                     <CardTitle className="text-base font-bold">
                       3. Solo 401(k) &amp; Cash Balance Defined Benefit Retirement Shelter
                     </CardTitle>
-                    <Badge className="bg-emerald-600 text-white text-[10px]">
+                    <Badge className="bg-[var(--color-primary)] text-[var(--color-primary-foreground)] text-[10px]">
                       {retirementShelter.cashBalanceEligible ? "Cash Balance Paired" : "Solo 401(k)"}
                     </Badge>
                   </div>
@@ -899,11 +899,11 @@ ${r.circular230AdvisoryNotice}
         </CardContent>
       </Card>
 
-      {/* Circular 230 Due Diligence Compliance Box */}
+      {/* Scope and limitations */}
       <div className="rounded-lg border border-stone-200 bg-stone-50 dark:border-stone-800 dark:bg-stone-900/40 p-4 space-y-2">
         <div className="text-[11px] font-bold uppercase tracking-wider text-stone-700 dark:text-stone-300 flex items-center gap-1.5">
           <FileCheck2 className="h-4 w-4 text-stone-500" />
-          Treasury Circular 230 § 10.22 Due Diligence Memorandum
+          Scope and limitations
         </div>
         <p className="text-[11px] text-[var(--color-muted-foreground)] leading-relaxed">
           {roadmap.circular230AdvisoryNotice}

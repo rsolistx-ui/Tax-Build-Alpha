@@ -14,6 +14,7 @@ const DocumentReviewPage = lazy(() => import("@/pages/document-review").then((mo
 const WorkQueuePage = lazy(() => import("@/pages/work-queue").then((module) => ({ default: module.WorkQueuePage })));
 const AgentDeskPage = lazy(() => import("@/pages/agent-desk").then((module) => ({ default: module.AgentDeskPage })));
 const PortalPage = lazy(() => import("@/pages/portal").then((module) => ({ default: module.PortalPage })));
+const ConsentPage = lazy(() => import("@/pages/consent").then((module) => ({ default: module.ConsentPage })));
 const SignPage = lazy(() => import("@/pages/sign").then((module) => ({ default: module.SignPage })));
 const ProjectsPage = lazy(() => import("@/pages/projects").then((module) => ({ default: module.ProjectsPage })));
 const CalendarPage = lazy(() => import("@/pages/calendar").then((module) => ({ default: module.CalendarPage })));
@@ -35,6 +36,7 @@ export default function App() {
         <Route path="/redeem" element={<Navigate to="/beta-redeem" replace />} />
         <Route path="/portal" element={<PortalPage />} />
         <Route path="/sign" element={<SignPage />} />
+        <Route path="/consent" element={<ConsentPage />} />
         <Route path="/signup" element={<SignupPage />} />
         <Route element={<ProtectedLayout />}>
           <Route path="/" element={<DashboardPage />} />

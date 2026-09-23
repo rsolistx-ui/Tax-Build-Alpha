@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* dark: utilities follow the in-app theme toggle (html.dark), not only the OS setting. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   --font-sans: "Aptos", "Segoe UI Variable", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
   --color-background: #f5f6f8;

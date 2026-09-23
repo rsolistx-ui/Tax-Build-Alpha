@@ -122,7 +122,7 @@ describe("TaxAdvisoryRoadmap Engine", () => {
   });
 
   describe("Master Advisory Roadmap Generator", () => {
-    it("assembles complete multi-strategy advisory roadmap with Circular 230 notice", () => {
+    it("assembles complete multi-strategy advisory roadmap with a scope notice", () => {
       const roadmap = generateAdvisoryRoadmap("client-123", "Apex Logistics LLC", {
         netProfit: 140000,
         industry: "transportation",
@@ -146,7 +146,8 @@ describe("TaxAdvisoryRoadmap Engine", () => {
         "mid_year",
         "year_end_filing",
       ]);
-      expect(roadmap.circular230AdvisoryNotice).toContain("TREASURY CIRCULAR 230 NOTICE");
+      expect(roadmap.circular230AdvisoryNotice).toContain("does not constitute a formal guarantee");
+      expect(roadmap.executiveSummary).not.toContain("full compliance");
       expect(roadmap.strategies.scorpOpt.isApplicable).toBe(true);
       expect(roadmap.strategies.augustaRule.isApplicable).toBe(true);
       expect(roadmap.strategies.retirementShelter.isApplicable).toBe(true);

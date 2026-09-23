@@ -131,7 +131,7 @@ export function AdminTokenGate({ onTokenChanged, className }: AdminTokenGateProp
               type="submit"
               size="sm"
               disabled={verifying || !inputToken.trim()}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs h-9 px-4 gap-1.5 shadow-sm"
+              className="bg-[var(--color-primary)] hover:opacity-90 text-[var(--color-primary-foreground)] text-xs h-9 px-4 gap-1.5 shadow-sm"
             >
               <KeyRound className="h-3.5 w-3.5" />
               {verifying ? "Validating Key..." : "Unlock Master Access"}

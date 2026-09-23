@@ -1,4 +1,5 @@
 import { createDb } from "../db";
+import { runConsentOutreach } from "./consent-outreach";
 import type { Env } from "../env";
 import { ReliabilityEngineerService } from "./reliability-engineer";
 import { handleReminderCron } from "./reminders";
@@ -37,6 +38,9 @@ export async function runScheduledOperations(env: Env): Promise<ScheduledOperati
   const morningBriefs = await Promise.all(firms.map((firm) => prepareMorningBrief(db, firm.id)));
   const morningRecommendationsCreated = morningBriefs.reduce((total, brief) => total + brief.recommendationsCreated, 0);
   const workflowSummary = await new WorkflowTemplateService(db).runDueSubscriptions();
+  // IRC § 7216 consent links go out on their own; a failure here never blocks the rest of the morning run.
+  const consentOutreach = await runConsentOutreach(db, env).catch((error) => { console.error("consent outreach failed", error); return null; });
+  if (consentOutreach) console.log(`consent outreach: ${consentOutreach.status}, sent ${consentOutreach.sent}, waiting ${consentOutreach.waiting}`);
 
   const pendingProfessionalReviews = Number(pending[0]?.count ?? 0);
   const notifier = new TelegramNotifierService(env);

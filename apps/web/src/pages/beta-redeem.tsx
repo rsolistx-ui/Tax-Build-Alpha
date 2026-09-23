@@ -111,14 +111,14 @@ export function BetaRedeemPage() {
 
         {submitted ? (
           /* Workstation Onboarding Hub */
-          <Card className="border-emerald-500/30 bg-[var(--color-card)] shadow-xl overflow-hidden">
-            <div className="bg-emerald-600 px-6 py-4 text-white">
+          <Card className="border-[var(--color-primary)]/30 bg-[var(--color-card)] shadow-xl overflow-hidden">
+            <div className="bg-[var(--color-primary)] px-6 py-4 text-[var(--color-primary-foreground)]">
               <div className="flex items-center gap-2 font-semibold text-sm">
                 <Sparkles className="h-4 w-4" />
                 <span>Practice Workspace Activated</span>
               </div>
-              <p className="text-xs text-emerald-100 mt-0.5">
-                Welcome, {name || "Practitioner"}. Your firm license and cryptographic ledger are ready.
+              <p className="text-xs text-[var(--color-primary-foreground)]/80 mt-0.5">
+                Welcome, {name || "Practitioner"}. Your firm workspace is ready.
               </p>
             </div>
 
@@ -128,7 +128,7 @@ export function BetaRedeemPage() {
                 <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-muted)] p-4 space-y-2">
                   <div className="flex items-center justify-between text-xs font-semibold">
                     <span className="flex items-center gap-1.5 text-[var(--color-foreground)]">
-                      <Monitor className="h-4 w-4 text-emerald-600" />
+                      <Monitor className="h-4 w-4 text-[var(--color-primary)]" />
                       Workstation Fast-Pass Code
                     </span>
                     <Badge className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 text-[10px]">
@@ -159,7 +159,7 @@ export function BetaRedeemPage() {
               {/* Action Buttons */}
               <div className="space-y-2.5">
                 <Button
-                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs h-10 gap-2 shadow-sm"
+                  className="w-full bg-[var(--color-primary)] hover:opacity-90 text-[var(--color-primary-foreground)] font-medium text-xs h-10 gap-2 shadow-sm"
                   onClick={() => navigate("/clients?tour=1")}
                 >
                   Enter Web Workspace Now <ArrowRight className="h-4 w-4" />
@@ -168,7 +168,7 @@ export function BetaRedeemPage() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <Button asChild variant="outline" className="text-xs h-9 gap-1.5 justify-center border-[var(--color-border)]">
                     <a href="/download/Truepost_0.1.0_x64-setup.exe" download>
-                      <Download className="h-3.5 w-3.5 text-emerald-600" />
+                      <Download className="h-3.5 w-3.5 text-[var(--color-primary)]" />
                       Download Desktop App
                     </a>
                   </Button>
@@ -200,7 +200,7 @@ export function BetaRedeemPage() {
             <CardHeader className="pb-4">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-base flex items-center gap-2">
-                  <ShieldCheck className="h-5 w-5 text-emerald-600" />
+                  <ShieldCheck className="h-5 w-5 text-[var(--color-primary)]" />
                   {isVerifiedLink ? "Verified Practice Invitation" : "Enter Invitation Token"}
                 </CardTitle>
                 <Badge className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 text-[10px]">

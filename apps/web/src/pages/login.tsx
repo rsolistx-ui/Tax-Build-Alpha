@@ -1,4 +1,5 @@
 import type { FormEvent } from "react";
+import { BrandMark } from "@/components/brand-mark";
 import { useState, useEffect, useRef } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { authClient } from "@/lib/auth-client";
@@ -48,6 +49,9 @@ export function LoginPage() {
   const [showSuperuserField, setShowSuperuserField] = useState(Boolean(getAdminToken()));
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [codeStep, setCodeStep] = useState(false);
+  const [code, setCode] = useState("");
+  const [useBackupCode, setUseBackupCode] = useState(false);
 
   // Turnstile State
   const [turnstileEnabled, setTurnstileEnabled] = useState(false);
@@ -179,7 +183,7 @@ export function LoginPage() {
     }
 
     // 3. Authenticate User Credentials
-    const { error: err } = await authClient.signIn.email({ email, password });
+    const { data, error: err } = await authClient.signIn.email({ email, password });
     setLoading(false);
 
     if (err) {
@@ -187,10 +191,33 @@ export function LoginPage() {
       return;
     }
 
+    // Accounts with two-step sign-in finish with a code from their authenticator app.
+    if ((data as { twoFactorRedirect?: boolean } | null)?.twoFactorRedirect) {
+      if (trimmedToken) setAdminToken(trimmedToken);
+      setCodeStep(true);
+      return;
+    }
+
     // A master token is an additional owner-console factor only. It cannot
     // create a browser session or recover a forgotten password by itself.
     if (trimmedToken) setAdminToken(trimmedToken);
 
+    navigate("/");
+  }
+
+  async function onCodeSubmit(e: FormEvent) {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+    const value = code.trim();
+    const { error: err } = useBackupCode
+      ? await authClient.twoFactor.verifyBackupCode({ code: value })
+      : await authClient.twoFactor.verifyTotp({ code: value.replace(/\s/g, "") });
+    setLoading(false);
+    if (err) {
+      setError(err.message || "That code did not work. Try the newest code in your app.");
+      return;
+    }
     navigate("/");
   }
 
@@ -225,14 +252,10 @@ export function LoginPage() {
     <div className="flex min-h-full items-center justify-center px-4 py-12">
       <div className="w-full max-w-md">
         <div className="mb-8 text-center">
-          <img
-            src="/icons/icon-192.png"
-            alt="Truepost"
-            className="mx-auto mb-3 h-12 w-12 rounded-xl shadow-md ring-1 ring-white/10 object-cover"
-          />
-          <h1 className="text-2xl font-semibold tracking-tight">Truepost · Practice OS</h1>
+          <BrandMark className="mx-auto mb-3 h-12 w-12" />
+          <h1 className="text-2xl font-semibold tracking-tight">Truepost</h1>
           <p className="mt-1 text-sm text-[var(--color-muted-foreground)]">
-            Sign in to your verified firm workspace
+            Sign in to your firm workspace
           </p>
         </div>
 
@@ -240,7 +263,7 @@ export function LoginPage() {
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
               <CardTitle className="text-base flex items-center gap-1.5">
-                <Lock className="h-4 w-4 text-emerald-600" /> Sign In
+                <Lock className="h-4 w-4 text-[var(--color-primary)]" /> Sign In
               </CardTitle>
               {/* Mode Toggle */}
               <div className="flex rounded-lg border border-[var(--color-border)] p-0.5 text-xs bg-[var(--color-muted)]">
@@ -260,7 +283,7 @@ export function LoginPage() {
                   onClick={() => setLoginMode("fast_pass")}
                   className={`rounded-md px-2.5 py-1 font-medium transition-all ${
                     loginMode === "fast_pass"
-                      ? "bg-[var(--color-card)] text-emerald-600 dark:text-emerald-400 shadow-xs font-semibold"
+                      ? "bg-[var(--color-card)] text-[var(--color-primary)] shadow-xs font-semibold"
                       : "text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)]"
                   }`}
                 >
@@ -276,7 +299,21 @@ export function LoginPage() {
           </CardHeader>
 
           <CardContent>
-            {loginMode === "password" ? (
+            {codeStep ? (
+              <form className="space-y-4" onSubmit={onCodeSubmit}>
+                <div className="space-y-1.5">
+                  <Label htmlFor="mfa-code" className="text-xs font-medium">
+                    {useBackupCode ? "Backup code" : "6-digit code from your authenticator app"}
+                  </Label>
+                  <Input id="mfa-code" value={code} onChange={(e) => setCode(e.target.value)} inputMode={useBackupCode ? "text" : "numeric"} autoComplete="one-time-code" autoFocus required />
+                </div>
+                {error ? <p role="alert" className="text-sm text-rose-600">{error}</p> : null}
+                <Button type="submit" className="w-full" disabled={loading || !code.trim()}>{loading ? "Checking…" : "Verify"}</Button>
+                <button type="button" className="w-full text-center text-xs text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)]" onClick={() => { setUseBackupCode((v) => !v); setCode(""); setError(null); }}>
+                  {useBackupCode ? "Use authenticator app code" : "Use a backup code instead"}
+                </button>
+              </form>
+            ) : loginMode === "password" ? (
               <form className="space-y-4" onSubmit={onPasswordSubmit}>
                 <div className="space-y-1.5">
                   <Label htmlFor="email" className="text-xs font-medium">
@@ -319,7 +356,7 @@ export function LoginPage() {
                     className="flex w-full items-center justify-between text-left text-xs font-medium text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)]"
                   >
                     <span className="flex items-center gap-1.5">
-                      <KeyRound className="h-3.5 w-3.5 text-emerald-600" />
+                      <KeyRound className="h-3.5 w-3.5 text-[var(--color-primary)]" />
                       <span>Owner Console Token (64 characters)</span>
                     </span>
                     {showSuperuserField ? (
@@ -354,14 +391,14 @@ export function LoginPage() {
                   <div className="flex flex-col items-center justify-center pt-1 pb-1">
                     <div id="turnstile-box" className="min-h-[65px] flex items-center justify-center" />
                     <p className="text-[10px] text-[var(--color-muted-foreground)] flex items-center gap-1 mt-1">
-                      <ShieldCheck className="h-3 w-3 text-emerald-600" /> Protected by Cloudflare Turnstile bot deterrence
+                      <ShieldCheck className="h-3 w-3 text-[var(--color-primary)]" /> Protected by Cloudflare Turnstile bot deterrence
                     </p>
                   </div>
                 ) : null}
 
                 {error ? <p className="text-xs text-rose-600 font-medium">{error}</p> : null}
 
-                <Button className="w-full text-xs h-9 bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5" type="submit" disabled={loading}>
+                <Button className="w-full text-xs h-9 bg-[var(--color-primary)] hover:opacity-90 text-[var(--color-primary-foreground)] gap-1.5" type="submit" disabled={loading}>
                   {loading ? (
                     <>
                       <Loader2 className="h-3.5 w-3.5 animate-spin" /> Verifying Credentials…
@@ -378,7 +415,7 @@ export function LoginPage() {
                 <div className="space-y-1.5">
                   <Label htmlFor="fastPass" className="text-xs flex items-center justify-between">
                     <span>6-Digit Workstation Fast-Pass Code</span>
-                    <span className="text-[10px] text-emerald-600 font-normal">No password needed</span>
+                    <span className="text-[10px] text-[var(--color-primary)] font-normal">No password needed</span>
                   </Label>
                   <Input
                     id="fastPass"
@@ -394,7 +431,7 @@ export function LoginPage() {
                 </div>
                 {fastPassError ? <p className="text-xs text-rose-600">{fastPassError}</p> : null}
                 <Button
-                  className="w-full text-xs h-9 bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5"
+                  className="w-full text-xs h-9 bg-[var(--color-primary)] hover:opacity-90 text-[var(--color-primary-foreground)] gap-1.5"
                   type="submit"
                   disabled={fastPassLoading || !fastPassCode.trim()}
                 >
@@ -406,7 +443,7 @@ export function LoginPage() {
 
             <div className="mt-5 pt-4 border-t border-[var(--color-border)] text-center text-xs text-[var(--color-muted-foreground)] space-y-1">
               <p>Have an invitation link or token?</p>
-              <Link to="/beta-redeem" className="text-emerald-600 dark:text-emerald-400 font-semibold hover:underline inline-flex items-center gap-1">
+              <Link to="/beta-redeem" className="text-[var(--color-primary)] font-semibold hover:underline inline-flex items-center gap-1">
                 Activate Your Practice License <ArrowRight className="h-3 w-3" />
               </Link>
             </div>
