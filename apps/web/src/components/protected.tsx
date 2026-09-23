@@ -12,6 +12,7 @@ type BetaStatus = {
   allowed: boolean;
   reason: string | null;
   entitlement?: { status: string; startsAt: string; expiresAt: string } | null;
+  mfaRequired?: boolean;
 };
 
 export function ProtectedLayout() {
@@ -64,8 +65,8 @@ export function ProtectedLayout() {
     return <LockedScreen reason={betaStatus.reason} />;
   }
 
-  // 16 CFR 314.4(c)(5): no client data until two-step sign-in is on.
-  if (!(session.user as { twoFactorEnabled?: boolean | null }).twoFactorEnabled) {
+  // 16 CFR 314.4(c)(5): no client data until two-step sign-in is on (enforced when the server sets REQUIRE_MFA).
+  if (betaStatus.mfaRequired && !(session.user as { twoFactorEnabled?: boolean | null }).twoFactorEnabled) {
     return <MfaEnrollment />;
   }
 

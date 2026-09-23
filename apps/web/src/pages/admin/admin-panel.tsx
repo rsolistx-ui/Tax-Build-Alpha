@@ -304,7 +304,7 @@ export function AdminPanel() {
           body: JSON.stringify({ email: inviteEmail.trim().toLowerCase(), betaDays: inviteDays }),
         }
       );
-      const link = `${window.location.origin}/redeem?token=${res.invitation.token}&email=${encodeURIComponent(res.invitation.email)}`;
+      const link = `${window.location.origin}/beta-redeem?token=${res.invitation.token}&email=${encodeURIComponent(res.invitation.email)}`;
       setGeneratedInviteLink(link);
       setLicensingMsg(`Invitation generated for ${res.invitation.email} (${res.invitation.betaDays} days duration)!`);
       await loadLicensingData();

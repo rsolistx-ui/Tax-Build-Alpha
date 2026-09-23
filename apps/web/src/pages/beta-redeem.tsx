@@ -228,7 +228,7 @@ export function BetaRedeemPage() {
                       64-Hex Invitation Key
                     </label>
                     <Input
-                      placeholder="Paste your 64-hex invitation token"
+                      placeholder="Paste your invitation token"
                       value={token}
                       onChange={(e) => setToken(e.target.value)}
                       required

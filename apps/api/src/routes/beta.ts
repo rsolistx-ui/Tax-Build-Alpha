@@ -220,8 +220,10 @@ betaRoutes.post("/redeem", async (c) => {
 betaRoutes.get("/status", requireSession, async (c) => {
   const db = createDb(c.env);
   const owner = isOwnerEmail(c.env, c.get("userEmail"));
+  // Mirrors the server-side switch in middleware/session.ts so the app only asks for an authenticator when it is enforced.
+  const mfaRequired = c.env.REQUIRE_MFA === "true";
   if (owner) {
-    return c.json({ isOwner: true, allowed: true, entitlement: null });
+    return c.json({ isOwner: true, allowed: true, entitlement: null, mfaRequired });
   }
   const [row] = await db.query<{ status: string; starts_at: string; expires_at: string }>(
     `SELECT status, starts_at, expires_at FROM beta_entitlements WHERE user_id = $1`,
@@ -236,6 +238,7 @@ betaRoutes.get("/status", requireSession, async (c) => {
     allowed: decision.allowed,
     reason: decision.allowed ? null : decision.reason,
     entitlement: row ? { status: row.status, startsAt: row.starts_at, expiresAt: row.expires_at } : null,
+    mfaRequired,
   });
 });
 
