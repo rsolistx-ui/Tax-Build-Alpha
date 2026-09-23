@@ -41,7 +41,7 @@ export type ConsentParties = { preparerName: string; taxpayerName: string; reade
 
 /** § 301.7216-2(d)(1) needs no consent for US-located auxiliary-service recipients; consent is required once any reader is outside the US. */
 export function consentRequired(readers: DocumentReader[]): boolean {
-  return readers.some((r) => !r.usOnly);
+  return readers.some((r) => !r.usOnly || r.substantive);
 }
 
 function readerList(readers: DocumentReader[]): string {
@@ -63,10 +63,10 @@ export function buildConsentText(kind: ConsentKind, parties: ConsentParties): st
       consentTitle(kind).toUpperCase(),
       "Federal law requires this consent form be provided to you. Unless authorized by law, we cannot disclose your tax return information to third parties for purposes other than those related to the preparation and filing of your tax return without your consent. If you consent to the disclosure of your tax return information, Federal law may not protect your tax return information from further use or distribution.",
       "You are not required to complete this form. Because our ability to disclose your tax return information to another tax return preparer affects the tax return preparation service(s) that we provide to you and its (their) cost, we may decline to provide you with tax return preparation services or change the terms (including the cost) of the tax return preparation services that we provide to you if you do not sign this form. If you agree to the disclosure of your tax return information, your consent is valid for the amount of time that you specify. If you do not specify the duration of your consent, your consent is valid for one year from the date of signature.",
-      ...(consentRequired(parties.readers) ? ["This consent to disclose may result in your tax return information being disclosed to a tax return preparer located outside the United States."] : []),
+      ...(parties.readers.some((r) => !r.usOnly) ? ["This consent to disclose may result in your tax return information being disclosed to a tax return preparer located outside the United States."] : []),
       who,
       "What would be disclosed. Images and copies of receipts, invoices, and bank and credit card statements that you or we upload to your account in Truepost; the details read from them, such as dates, merchant names, amounts, and payment methods; and your business name, entity type, industry, and state, together with our categorization instructions for your account.",
-      `Who would receive it. ${PLATFORM_RECIPIENT.label}, and the automated document-reading services Truepost uses: ${readerList(parties.readers)}.${consentRequired(parties.readers) ? " These services may process information outside the United States." : " These services process information only in the United States."}`,
+      `Who would receive it. ${PLATFORM_RECIPIENT.label}, and the automated document-reading services Truepost uses: ${readerList(parties.readers)}.${parties.readers.some((r) => !r.usOnly) ? " These services may process information outside the United States." : " These services process information only in the United States."}`,
       "Why. So these services can read your documents automatically and suggest the date, merchant, amount, and category of each item. We review every suggestion before it is used in your books or tax return.",
       "What is not included. Do not submit W-2s, 1099s, tax returns, or other documents that show your full Social Security number for automatic reading. We handle those documents without sending them to these services.",
       "If you do not sign. We will enter your documents by hand instead.",

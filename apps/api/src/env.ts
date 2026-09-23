@@ -61,6 +61,19 @@ export type Env = {
   AZURE_DI_KEY?: string;
   /** Region the resource was created in, e.g. "eastus". Must be a US region. */
   AZURE_DI_REGION?: string;
+  /** Backup US-only reader: Amazon Textract. Region must be a US region, e.g. "us-east-1". */
+  AWS_TEXTRACT_REGION?: string;
+  AWS_TEXTRACT_ACCESS_KEY_ID?: string;
+  AWS_TEXTRACT_SECRET_ACCESS_KEY?: string;
+  /** "true" once the AWS Organizations AI services opt-out policy is applied; Textract stays off until then. */
+  AWS_AI_OPT_OUT_CONFIRMED?: string;
+  /** Optional US-only category suggestions (Azure OpenAI, Standard regional deployment in a US region). */
+  AZURE_OPENAI_ENDPOINT?: string;
+  AZURE_OPENAI_KEY?: string;
+  AZURE_OPENAI_DEPLOYMENT?: string;
+  AZURE_OPENAI_REGION?: string;
+  /** Must be "standard" (regional). Global and Data Zone deployments may process outside the US. */
+  AZURE_OPENAI_DEPLOYMENT_TYPE?: string;
   /** "true" blocks every authenticated API call from accounts without two-step sign-in (16 CFR 314.4(c)(5)). */
   REQUIRE_MFA?: string;
   /** Identity-verification (KBA) vendor for remote IRS 8878/8879 e-signatures: "lexisnexis" | "experian". Unset keeps remote e-signing off. */

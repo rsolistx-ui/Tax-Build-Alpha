@@ -48,7 +48,7 @@ describe("Azure Document Intelligence (US-only reading)", () => {
   it("refuses a non-US region instead of reading", () => {
     const env = { US_ONLY_READING: "true", AZURE_DI_ENDPOINT: "https://x", AZURE_DI_KEY: "k", AZURE_DI_REGION: "westeurope" } as unknown as Env;
     expect(activeDocumentReaders(env)).toEqual([]);
-    expect(() => getLlmProvider(env)).toThrow(/US AZURE_DI_REGION/);
+    expect(() => getLlmProvider(env)).toThrow(/configured US reader/);
   });
 
   it("still requires consent when a non-US reader is configured", () => {

@@ -1,7 +1,8 @@
 import type { Db, DbStatement } from "../db";
 import type { Env } from "../env";
 import { newId } from "../lib/id";
-import { activeDocumentReaders, getLlmProvider, type ReceiptBusinessContext, type ReceiptExtraction } from "../providers/llm";
+import { activeDocumentReaders, getLlmProvider, usCategorizerConfig, type ReceiptBusinessContext, type ReceiptExtraction } from "../providers/llm";
+import { suggestCategory } from "../providers/llm/azure-openai-categorizer";
 import { consentRequired, hasDocumentReadingConsent } from "./taxpayer-consent";
 import { validateReceipt } from "../services/receipt-validation";
 import type { ClientRow } from "../services/clients";
@@ -154,6 +155,12 @@ export async function ingestReceiptForClient(
     });
     const withMemory = await applyCorrectionMemory(db, client.id, extraction);
     extraction = applyDeterministicMarkdownRules(withMemory.extraction, context.markdownRules);
+    // US-only readers extract fields only; her rules and memory come first, then an optional US-pinned suggestion.
+    const categorizer = !extraction.category ? usCategorizerConfig(env) : null;
+    if (categorizer) {
+      const suggested = await suggestCategory(categorizer, extraction, context).catch(() => null);
+      if (suggested) extraction = { ...extraction, category: suggested };
+    }
     const rememberedCategory = withMemory.rememberedCategory;
     const validation = validateReceipt(extraction);
 
