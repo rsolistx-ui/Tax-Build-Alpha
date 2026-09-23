@@ -180,7 +180,7 @@ BEGIN
   NEW.updated_at = NOW();
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql.
+$$ LANGUAGE plpgsql;
 
 CREATE TRIGGER trigger_stripe_connect_accounts_updated_at
   BEFORE UPDATE ON stripe_connect_accounts

@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS contractor_w9_records (
   ein_ssn_last4 TEXT,
   email TEXT,
   has_w9 BOOLEAN NOT NULL DEFAULT FALSE,
-  w9_document_id TEXT REFERENCES documents(id) ON DELETE SET NULL,
+  w9_document_id TEXT REFERENCES client_documents(id) ON DELETE SET NULL,
   notes TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

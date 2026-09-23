@@ -32,6 +32,30 @@ async function runQuery(query) {
 
 const checks = [
   {
+    label: "receipts.notes column (migration 0060 — export/preview threw 'column notes does not exist' on every call before this pass)",
+    query: `SELECT 1 FROM information_schema.columns WHERE table_name = 'receipts' AND column_name = 'notes'`,
+  },
+  {
+    label: "document_classifications table (migration 0059 — was never created by any migration; every receipt upload failed at this final INSERT before this pass)",
+    query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'document_classifications'`,
+  },
+  {
+    label: "stripe_connect_accounts table (migration 0034 — file had a trailing-period syntax error until this pass, never applied before)",
+    query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'stripe_connect_accounts'`,
+  },
+  {
+    label: "stripe_customers table (migration 0034)",
+    query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'stripe_customers'`,
+  },
+  {
+    label: "receipts.is_potential_duplicate column (migration 0040 — referenced a nonexistent 'documents' table until this pass, never applied before)",
+    query: `SELECT 1 FROM information_schema.columns WHERE table_name = 'receipts' AND column_name = 'is_potential_duplicate'`,
+  },
+  {
+    label: "contractor_w9_records table (1099 radar, migration 0040)",
+    query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'contractor_w9_records'`,
+  },
+  {
     label: "time_entries table (time tracking tied to invoicing, migration 0056)",
     query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'time_entries'`,
   },
