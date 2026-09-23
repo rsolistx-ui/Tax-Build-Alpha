@@ -24,4 +24,6 @@ src-tauri/gen
 *.token
 # Never keep an administrator access token in the repository tree.
 Truepost Admin Hex Key.txt
+Truepost-*TOKEN*.txt
+Truepost-*Credentials*.txt
 !apps/web/public/download/Truepost_0.1.0_x64-setup.exe

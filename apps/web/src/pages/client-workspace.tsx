@@ -764,7 +764,7 @@ export function ClientWorkspacePage() {
       {tab === "upload" ? (
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2">Upload tray <span className="rounded bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800">PWA ready — works on iOS and Android</span></CardTitle>
+            <CardTitle className="flex items-center gap-2">Upload tray <span className="rounded bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800">PWA ready: works on iOS and Android</span></CardTitle>
             <CardDescription>
               Take a photo or pick from your library. Receipts are read automatically once the client has signed the consent; until then they are saved for manual entry. Keep W-2s, 1099s and anything showing a full Social Security number in Documents. One bad file never blocks the rest.
             </CardDescription>

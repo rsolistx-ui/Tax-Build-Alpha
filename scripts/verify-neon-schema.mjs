@@ -32,6 +32,10 @@ async function runQuery(query) {
 
 const checks = [
   {
+    label: "audit_events entity_type/entity_id columns (migration 0068)",
+    query: `SELECT 1 FROM information_schema.columns WHERE table_name = 'audit_events' AND column_name = 'entity_id'`,
+  },
+  {
     label: "audit_events accepts firm_id/event/metadata shape (migration 0067)",
     query: `SELECT 1 FROM information_schema.columns WHERE table_name = 'audit_events' AND column_name = 'metadata'`,
   },

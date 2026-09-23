@@ -1,5 +1,5 @@
 import { betterAuth } from "better-auth";
-import { twoFactor } from "better-auth/plugins";
+import { captcha, twoFactor } from "better-auth/plugins";
 import type { Env } from "./env";
 
 /**
@@ -14,6 +14,7 @@ export function createAuth(env: Env) {
     "http://localhost:3000",
   ];
   if (env.APP_ORIGIN) trustedOrigins.push(env.APP_ORIGIN);
+  const turnstileSecret = turnstileConfigured(env) ? env.CF_TURNSTILE_SECRET_KEY!.trim() : null;
 
   return betterAuth({
     database: env.AUTH_DB,
@@ -27,7 +28,11 @@ export function createAuth(env: Env) {
     },
     trustedOrigins,
     // Multi-factor sign-in (FTC Safeguards Rule, 16 CFR 314.4(c)(5)).
-    plugins: [twoFactor({ issuer: "Truepost" })],
+    // Turnstile is checked by the server on sign-in and password reset, not only in the browser.
+    plugins: [
+      twoFactor({ issuer: "Truepost" }),
+      ...(turnstileSecret ? [captcha({ provider: "cloudflare-turnstile", secretKey: turnstileSecret })] : []),
+    ],
     advanced: {
       defaultCookieAttributes: {
         sameSite: "lax",
@@ -38,3 +43,8 @@ export function createAuth(env: Env) {
 }
 
 export type Auth = ReturnType<typeof createAuth>;
+
+/** Both keys are required: enforcing without a site key would leave no way to pass the check. */
+export function turnstileConfigured(env: Env): boolean {
+  return Boolean(env.CF_TURNSTILE_SITE_KEY?.trim() && env.CF_TURNSTILE_SECRET_KEY?.trim());
+}

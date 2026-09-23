@@ -3,7 +3,7 @@ import { BrandMark } from "@/components/brand-mark";
 import { useState, useEffect, useRef } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { authClient } from "@/lib/auth-client";
-import { setAdminToken, getAdminToken } from "@/lib/api";
+import { setAdminToken, getAdminToken, apiUrl } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -68,7 +68,7 @@ export function LoginPage() {
     let isMounted = true;
     async function checkTurnstile() {
       try {
-        const res = await fetch("/api/auth/turnstile/config");
+        const res = await fetch(apiUrl("/api/auth/turnstile/config"));
         if (!res.ok) return;
         const data = (await res.json()) as { enabled: boolean; siteKey: string | null };
         if (isMounted && data.enabled && data.siteKey) {
@@ -139,37 +139,11 @@ export function LoginPage() {
     setLoading(true);
     setError(null);
 
-    // 1. Turnstile Bot Challenge Verification
-    if (turnstileEnabled) {
-      if (!turnstileToken) {
-        setLoading(false);
-        setError("Please complete the Cloudflare security verification before signing in.");
-        return;
-      }
-      try {
-        const verifyRes = await fetch("/api/auth/turnstile/verify", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ token: turnstileToken }),
-        });
-        const verifyData = (await verifyRes.json().catch(() => ({}))) as {
-          success?: boolean;
-          error?: string;
-        };
-        if (!verifyRes.ok || !verifyData.success) {
-          setLoading(false);
-          setError(verifyData.error || "Cloudflare security verification failed. Please try again.");
-          if (turnstileWidgetId.current && window.turnstile) {
-            window.turnstile.reset(turnstileWidgetId.current);
-          }
-          setTurnstileToken(null);
-          return;
-        }
-      } catch (err: any) {
-        setLoading(false);
-        setError(err?.message || "Failed to reach security verification service.");
-        return;
-      }
+    // 1. Cloudflare Turnstile: the server checks this single-use token on the sign-in request.
+    if (turnstileEnabled && !turnstileToken) {
+      setLoading(false);
+      setError("Please complete the Cloudflare security check before signing in.");
+      return;
     }
 
     // 2. Validate Superuser 64-hex Token if provided
@@ -183,10 +157,16 @@ export function LoginPage() {
     }
 
     // 3. Authenticate User Credentials
-    const { data, error: err } = await authClient.signIn.email({ email, password });
+    const { data, error: err } = await authClient.signIn.email(
+      { email, password },
+      turnstileToken ? { headers: { "x-captcha-response": turnstileToken } } : undefined,
+    );
     setLoading(false);
 
     if (err) {
+      // The token was spent on this attempt; a retry needs a fresh check.
+      if (turnstileWidgetId.current && window.turnstile) window.turnstile.reset(turnstileWidgetId.current);
+      setTurnstileToken(null);
       setError(err.message || "Sign in failed. Check your email and password.");
       return;
     }
