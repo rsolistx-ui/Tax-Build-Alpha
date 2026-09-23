@@ -1,9 +1,10 @@
 import type { FormEvent } from "react";
 import { BrandMark } from "@/components/brand-mark";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { authClient } from "@/lib/auth-client";
 import { setAdminToken, getAdminToken } from "@/lib/api";
+import { deviceSupportsFingerprint } from "@/lib/passkey-support";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -12,6 +13,7 @@ import {
   Monitor,
   ArrowRight,
   ShieldCheck,
+  Fingerprint,
   KeyRound,
   ChevronDown,
   ChevronUp,
@@ -34,6 +36,26 @@ export function LoginPage() {
   const [code, setCode] = useState("");
   const [codeMethod, setCodeMethod] = useState<"otp" | "totp" | "backup">("otp");
   const [codeNotice, setCodeNotice] = useState<string | null>(null);
+  // Fingerprint sign-in is offered only when this device can do it.
+  const [fingerprintAvailable, setFingerprintAvailable] = useState(false);
+
+  useEffect(() => {
+    void deviceSupportsFingerprint().then(setFingerprintAvailable);
+  }, []);
+
+  async function onFingerprintSignIn() {
+    setLoading(true);
+    setError(null);
+    const result = await authClient.signIn.passkey();
+    setLoading(false);
+    if (result?.error) {
+      setError("Fingerprint sign-in did not finish. If you have not turned it on for this device yet, sign in with your password first and choose Turn on when offered.");
+      return;
+    }
+    const trimmedToken = masterToken.trim();
+    if (/^[0-9a-fA-F]{64}$/.test(trimmedToken)) setAdminToken(trimmedToken);
+    navigate("/");
+  }
 
   // Fast-Pass State
   const [fastPassCode, setFastPassCode] = useState("");
@@ -295,6 +317,11 @@ export function LoginPage() {
                     </>
                   )}
                 </Button>
+                {fingerprintAvailable ? (
+                  <Button type="button" variant="outline" className="w-full gap-2" disabled={loading} onClick={() => void onFingerprintSignIn()}>
+                    <Fingerprint className="h-4 w-4" /> Sign in with fingerprint
+                  </Button>
+                ) : null}
               </form>
             ) : (
               <form className="space-y-4" onSubmit={onFastPassSubmit}>

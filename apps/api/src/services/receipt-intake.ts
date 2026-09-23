@@ -269,6 +269,7 @@ export async function ingestReceiptForClient(
   } catch (error) {
     const requestId = crypto.randomUUID();
     const message = error instanceof Error ? error.message : "extract failed";
+    console.error(`[${requestId}] receipt ${receiptId} extraction failed: ${message}`);
     const validationPayload = JSON.stringify({
       status: "fail",
       checks: [

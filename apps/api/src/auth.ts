@@ -1,5 +1,7 @@
 import { betterAuth } from "better-auth";
 import { twoFactor } from "better-auth/plugins";
+import { APIError } from "better-auth/api";
+import { passkey } from "@better-auth/passkey";
 import type { Env } from "./env";
 import { sendEmail } from "./services/signature-reminders";
 
@@ -15,6 +17,7 @@ export function createAuth(env: Env) {
     "http://localhost:3000",
   ];
   if (env.APP_ORIGIN) trustedOrigins.push(env.APP_ORIGIN);
+  const appOrigin = env.APP_ORIGIN || env.BETTER_AUTH_URL || "http://localhost:5173";
 
   return betterAuth({
     database: env.AUTH_DB,
@@ -29,7 +32,19 @@ export function createAuth(env: Env) {
     trustedOrigins,
     // Multi-factor sign-in (FTC Safeguards Rule, 16 CFR 314.4(c)(5)).
     // The second step is a 6-digit code emailed at sign-in, so no authenticator app is needed.
-    plugins: [twoFactor({ issuer: "Truepost", otpOptions: { sendOTP: async ({ user, otp }) => { await sendSignInCode(env, user.email, otp); }, period: 10, storeOTP: "hashed", allowedAttempts: 5 } })],
+    plugins: [
+      twoFactor({ issuer: "Truepost", otpOptions: { sendOTP: async ({ user, otp }) => { await sendSignInCode(env, user.email, otp); }, period: 10, storeOTP: "hashed", allowedAttempts: 5 } }),
+      // Fingerprint / face / device-PIN sign-in. The device must verify the person (not just a tap),
+      // which makes a passkey two factors on its own: the device and the fingerprint or PIN.
+      passkey({
+        rpID: new URL(appOrigin).hostname,
+        rpName: "Truepost",
+        origin: trustedOrigins,
+        authenticatorSelection: { authenticatorAttachment: "platform", residentKey: "required", userVerification: "required" },
+        registration: { afterVerification: async ({ verification }) => { requireUserVerified(verification.registrationInfo?.userVerified); } },
+        authentication: { afterVerification: async ({ verification }) => { requireUserVerified(verification.authenticationInfo.userVerified); } },
+      }),
+    ],
     advanced: {
       defaultCookieAttributes: {
         sameSite: "lax",
@@ -40,6 +55,11 @@ export function createAuth(env: Env) {
 }
 
 export type Auth = ReturnType<typeof createAuth>;
+
+/** Rejects a passkey ceremony where the device did not confirm fingerprint, face or PIN. */
+export function requireUserVerified(userVerified: boolean | undefined): void {
+  if (!userVerified) throw new APIError("UNAUTHORIZED", { message: "Your device did not confirm your fingerprint, face or PIN. Try again." });
+}
 
 /** Emails the sign-in code. Addresses at the reserved example.com domain cannot receive mail, so nothing is sent to them. */
 export async function sendSignInCode(env: Env, email: string, code: string, deps: { fetch?: typeof fetch } = {}): Promise<boolean> {

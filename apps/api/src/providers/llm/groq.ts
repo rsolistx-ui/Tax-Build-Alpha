@@ -14,12 +14,14 @@ export function createGroqProvider(apiKey: string): LlmProvider {
         throw new Error("Groq image fallback does not accept PDF receipt evidence");
       }
       const firstBytes = Array.isArray(bytes) ? bytes[0] : bytes;
-      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      const request = () => fetch("https://api.groq.com/openai/v1/chat/completions", {
         method: "POST",
         headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
         body: JSON.stringify({
           model: MODEL,
           temperature: 0.1,
+          // Groq's free tier caps output at 1,000 tokens per minute; its default request (2,048) is refused outright.
+          max_completion_tokens: 1000,
           response_format: { type: "json_object" },
           messages: [
             { role: "system", content: "You extract accounting evidence from receipts. Return JSON only." },
@@ -30,6 +32,15 @@ export function createGroqProvider(apiKey: string): LlmProvider {
           ],
         }),
       });
+      let response = await request();
+      // The free tier limits output per minute and says how long to wait; retry once when that wait is short.
+      if (response.status === 429) {
+        const waitSeconds = groqRetryAfterSeconds(await response.clone().text());
+        if (waitSeconds !== null && waitSeconds <= 15) {
+          await new Promise((resolve) => setTimeout(resolve, Math.ceil(waitSeconds * 1000) + 250));
+          response = await request();
+        }
+      }
       if (!response.ok) throw new Error(`Groq error ${response.status}: ${(await response.text()).slice(0, 500)}`);
       const data = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
       const extraction = normalizeExtraction(safeJson(data.choices?.[0]?.message?.content ?? "{}"));
@@ -37,6 +48,12 @@ export function createGroqProvider(apiKey: string): LlmProvider {
       return extraction;
     },
   };
+}
+
+/** Reads "Please try again in 2.94s" from a Groq rate-limit response; null when absent. */
+export function groqRetryAfterSeconds(body: string): number | null {
+  const match = /try again in ([0-9.]+)s/i.exec(body);
+  return match ? Number(match[1]) : null;
 }
 
 function receiptPrompt(filename: string, context?: ReceiptBusinessContext): string {

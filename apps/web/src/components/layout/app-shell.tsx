@@ -1,4 +1,5 @@
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
+import { PasskeyOffer } from "@/components/passkey-offer";
 import { BrandMark } from "@/components/brand-mark";
 import { Bot, Building2, Calendar, ClipboardList, Clock, FolderKanban, Headphones, LayoutDashboard, Lightbulb, LogOut, Map, Sparkles, Users, Search, Settings } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -216,6 +217,7 @@ export function AppShell({
       </header>
       <div className="pt-3"><PwaInstallBanner /></div>
       <main className="mx-auto max-w-6xl px-4 py-6 pb-24 sm:px-6 sm:py-8">
+        <PasskeyOffer />
         <Outlet />
       </main>
       <nav className="fixed inset-x-3 bottom-3 z-30 grid grid-cols-5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-card)]/95 p-1 shadow-lg backdrop-blur sm:hidden" aria-label="Primary navigation">

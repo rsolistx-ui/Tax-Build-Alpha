@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { sendSignInCode } from "./auth";
+import { requireUserVerified, sendSignInCode } from "./auth";
 import type { Env } from "./env";
 
 const env = { RESEND_API_KEY: "k", SENDER_EMAIL: "Truepost <notifications@example.org>", REPLY_TO_EMAIL: "owner@example.org" } as Env;
@@ -18,5 +18,13 @@ describe("sendSignInCode", () => {
     const fetch = vi.fn();
     expect(await sendSignInCode(env, "folio-smoke-abc@example.com", "123456", { fetch })).toBe(false);
     expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("requireUserVerified", () => {
+  it("accepts a passkey only when the device confirmed fingerprint, face or PIN", () => {
+    expect(() => requireUserVerified(true)).not.toThrow();
+    expect(() => requireUserVerified(false)).toThrow(/fingerprint, face or PIN/);
+    expect(() => requireUserVerified(undefined)).toThrow();
   });
 });
