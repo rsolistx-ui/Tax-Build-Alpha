@@ -32,7 +32,8 @@ export function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [codeStep, setCodeStep] = useState(false);
   const [code, setCode] = useState("");
-  const [useBackupCode, setUseBackupCode] = useState(false);
+  const [codeMethod, setCodeMethod] = useState<"otp" | "totp" | "backup">("otp");
+  const [codeNotice, setCodeNotice] = useState<string | null>(null);
 
   // Fast-Pass State
   const [fastPassCode, setFastPassCode] = useState("");
@@ -63,10 +64,13 @@ export function LoginPage() {
       return;
     }
 
-    // Accounts with two-step sign-in finish with a code from their authenticator app.
-    if ((data as { twoFactorRedirect?: boolean } | null)?.twoFactorRedirect) {
+    // Accounts with two-step sign-in finish with a code: emailed by default, or from an authenticator app if one is set up.
+    const redirect = data as { twoFactorRedirect?: boolean; twoFactorMethods?: string[] } | null;
+    if (redirect?.twoFactorRedirect) {
       if (trimmedToken) setAdminToken(trimmedToken);
       setCodeStep(true);
+      if (redirect.twoFactorMethods?.includes("totp")) setCodeMethod("totp");
+      else await sendEmailCode();
       return;
     }
 
@@ -77,17 +81,29 @@ export function LoginPage() {
     navigate("/");
   }
 
+  async function sendEmailCode() {
+    setCodeMethod("otp");
+    setCode("");
+    setError(null);
+    setCodeNotice(null);
+    const { error: err } = await authClient.twoFactor.sendOtp();
+    if (err) setError(err.message || "We could not email a code. Try again.");
+    else setCodeNotice(`We emailed a 6-digit code to ${email}. It expires in 10 minutes.`);
+  }
+
   async function onCodeSubmit(e: FormEvent) {
     e.preventDefault();
     setLoading(true);
     setError(null);
     const value = code.trim();
-    const { error: err } = useBackupCode
+    const { error: err } = codeMethod === "backup"
       ? await authClient.twoFactor.verifyBackupCode({ code: value })
-      : await authClient.twoFactor.verifyTotp({ code: value.replace(/\s/g, "") });
+      : codeMethod === "totp"
+        ? await authClient.twoFactor.verifyTotp({ code: value.replace(/\s/g, "") })
+        : await authClient.twoFactor.verifyOtp({ code: value.replace(/\s/g, "") });
     setLoading(false);
     if (err) {
-      setError(err.message || "That code did not work. Try the newest code in your app.");
+      setError(err.message || "That code did not work. Try the newest code.");
       return;
     }
     navigate("/");
@@ -175,15 +191,21 @@ export function LoginPage() {
               <form className="space-y-4" onSubmit={onCodeSubmit}>
                 <div className="space-y-1.5">
                   <Label htmlFor="mfa-code" className="text-xs font-medium">
-                    {useBackupCode ? "Backup code" : "6-digit code from your authenticator app"}
+                    {codeMethod === "backup" ? "Backup code" : codeMethod === "totp" ? "6-digit code from your authenticator app" : "6-digit code from your email"}
                   </Label>
-                  <Input id="mfa-code" value={code} onChange={(e) => setCode(e.target.value)} inputMode={useBackupCode ? "text" : "numeric"} autoComplete="one-time-code" autoFocus required />
+                  <Input id="mfa-code" value={code} onChange={(e) => setCode(e.target.value)} inputMode={codeMethod === "backup" ? "text" : "numeric"} autoComplete="one-time-code" autoFocus required />
+                  {codeMethod === "otp" && codeNotice ? <p className="text-xs text-[var(--color-muted-foreground)]">{codeNotice} Check your spam folder if it has not arrived.</p> : null}
                 </div>
                 {error ? <p role="alert" className="text-sm text-rose-600">{error}</p> : null}
                 <Button type="submit" className="w-full" disabled={loading || !code.trim()}>{loading ? "Checking…" : "Verify"}</Button>
-                <button type="button" className="w-full text-center text-xs text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)]" onClick={() => { setUseBackupCode((v) => !v); setCode(""); setError(null); }}>
-                  {useBackupCode ? "Use authenticator app code" : "Use a backup code instead"}
+                <button type="button" className="w-full text-center text-xs text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)]" onClick={() => void sendEmailCode()}>
+                  {codeMethod === "otp" ? "Send a new code" : "Email me a code instead"}
                 </button>
+                {codeMethod === "totp" ? (
+                  <button type="button" className="w-full text-center text-xs text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)]" onClick={() => { setCodeMethod("backup"); setCode(""); setError(null); }}>
+                    Use a backup code instead
+                  </button>
+                ) : null}
               </form>
             ) : loginMode === "password" ? (
               <form className="space-y-4" onSubmit={onPasswordSubmit}>

@@ -102,6 +102,20 @@ function Remove-TempFile([string]$Path) {
   }
 }
 
+# The emailed sign-in code cannot reach the reserved example.com test inboxes, so the synthetic
+# account is marked as two-step enrolled directly in the auth database (infrastructure access, like
+# seed-invite). Refuses anything but a folio-smoke-*@example.com address.
+function Enable-SmokeTwoStep([string]$SmokeEmail) {
+  if ($SmokeEmail -notmatch '^folio-smoke-[a-z0-9-]+@example\.com$') { throw "Refusing to change two-step sign-in for $SmokeEmail." }
+  Push-Location (Join-Path $PSScriptRoot "..\apps\api")
+  try {
+    $null = & npx wrangler d1 execute folio-db --remote --command "UPDATE user SET twoFactorEnabled = 1 WHERE email = '$SmokeEmail'" 2>&1
+    if ($LASTEXITCODE -ne 0) { throw "Could not enroll the smoke account in two-step sign-in." }
+  } finally {
+    Pop-Location
+  }
+}
+
 function New-SampleReceiptPng([string]$Path) {
   Add-Type -AssemblyName System.Drawing
   $bitmap = New-Object System.Drawing.Bitmap 900, 1200
@@ -206,6 +220,7 @@ try {
     "$BaseUrl/api/beta/redeem"
   )
   Remove-TempFile $redeemPayloadPath
+  Enable-SmokeTwoStep $email
 
   Write-Host "Verifying the Better Auth production session..."
   $me = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/me")
@@ -1612,6 +1627,7 @@ try {
   $redeemPayloadPathC = New-JsonPayloadFile $redeemBodyC
   $null = Invoke-CurlJson @("-c", $cookieJarC, "-b", $cookieJarC, "-H", "Content-Type: application/json", "-H", "Origin: $BaseUrl", "--data-binary", "@$redeemPayloadPathC", "$BaseUrl/api/beta/redeem")
   Remove-TempFile $redeemPayloadPathC
+  Enable-SmokeTwoStep $emailC
 
   $meC = Invoke-CurlJson @("-c", $cookieJarC, "-b", $cookieJarC, "$BaseUrl/api/me")
   $firmCId = [string]$meC.firm.id
