@@ -1,6 +1,7 @@
 import { AlertTriangle, FileSpreadsheet } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import type { Pnl } from "@/types/pnl";
+import { SpendingPieChart, getCategoryColor, useIsDark } from "@/components/spending-pie-chart";
 
 function Summary({ label, value }: { label: string; value: number }) {
   return (
@@ -22,6 +23,9 @@ export function PnlPanel({
   onSelectExpenseCategory: (category: string) => void;
   onSelectIncomeCategory: (category: string) => void;
 }) {
+  const isDark = useIsDark();
+  const sortedExpenses = [...(pnl?.categorizedExpenses ?? [])].sort((a, b) => b.total - a.total);
+
   return (
     <Card>
       <CardHeader>
@@ -82,24 +86,37 @@ export function PnlPanel({
 
             <div>
               <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--color-muted-foreground)]">Expenses by category</p>
+              {sortedExpenses.length > 0 ? <SpendingPieChart categorizedExpenses={sortedExpenses} /> : null}
               <div className="space-y-2">
-                {(pnl?.categorizedExpenses ?? []).map((row) => (
+                {sortedExpenses.map((row, i) => (
                   <button
                     type="button"
                     key={row.category}
                     onClick={() => onSelectExpenseCategory(row.category)}
                     className="flex w-full items-center justify-between rounded-md border border-[var(--color-border)] px-3 py-3 text-left text-sm hover:bg-[var(--color-muted)]/60"
                   >
-                    <div>
-                      <span className="font-medium capitalize">{row.category}</span>
-                      <p className="text-xs text-[var(--color-muted-foreground)]">
-                        {row.receiptCount} receipt line(s){row.bankCount > 0 ? `, ${row.bankCount} no-receipt bank txn(s)` : ""}
-                      </p>
+                    <div className="flex items-start gap-2">
+                      <span
+                        className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full"
+                        style={{
+                          background:
+                            sortedExpenses.length > 8 && i >= 7
+                              ? "#98968f"
+                              : getCategoryColor(i, isDark),
+                        }}
+                        aria-hidden="true"
+                      />
+                      <div>
+                        <span className="font-medium capitalize">{row.category}</span>
+                        <p className="text-xs text-[var(--color-muted-foreground)]">
+                          {row.receiptCount} receipt line(s){row.bankCount > 0 ? `, ${row.bankCount} no-receipt bank txn(s)` : ""}
+                        </p>
+                      </div>
                     </div>
                     <span className="font-medium">${Number(row.total).toFixed(2)}</span>
                   </button>
                 ))}
-                {!pnl?.categorizedExpenses?.length ? (
+                {sortedExpenses.length === 0 ? (
                   <p className="text-sm text-[var(--color-muted-foreground)]">No business expenses in this period.</p>
                 ) : null}
               </div>
