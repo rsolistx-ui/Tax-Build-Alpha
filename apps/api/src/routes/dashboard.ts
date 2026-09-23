@@ -194,7 +194,8 @@ dashboardRoutes.get("/", async (c) => {
   for (const row of receiptRows) {
     const period = periodByClient.get(row.client_id);
     const date = row.extracted_date ? String(row.extracted_date) : null;
-    if (period && !inPeriod(date, period.startDate, period.endDate)) continue;
+    // An undated receipt cannot be ruled out of any period, so it stays visible until dated.
+    if (period && date && !inPeriod(date, period.startDate, period.endDate)) continue;
     const list = receiptsByClient.get(row.client_id) ?? [];
     const clientCurrency = currencyByClient.get(row.client_id) || "USD";
     list.push({

@@ -61,7 +61,16 @@ internalRoutes.post("/smoke-cleanup", async (c) => {
       )).map((r) => r.r2_key)
     : [];
 
-  await db.query(`DELETE FROM firms WHERE id = $1`, [firm.id]);
+  // Append-only records block deletes; this flag (transaction-local, synthetic firms only) lets cleanup remove them.
+  await db.transaction([
+    { query: `SELECT set_config('truepost.synthetic_cleanup', 'on', true)` },
+    { query: `DELETE FROM efile_kba_attempts WHERE authorization_id IN (SELECT id FROM efile_authorizations WHERE firm_id = $1)`, params: [firm.id] },
+    { query: `DELETE FROM efile_signature_evidence WHERE firm_id = $1`, params: [firm.id] },
+    { query: `DELETE FROM efile_authorizations WHERE firm_id = $1`, params: [firm.id] },
+    { query: `DELETE FROM taxpayer_consents WHERE firm_id = $1`, params: [firm.id] },
+    { query: `DELETE FROM firm_agreements WHERE firm_id = $1`, params: [firm.id] },
+    { query: `DELETE FROM firms WHERE id = $1`, params: [firm.id] },
+  ]);
 
   const betaMetadataFailures: string[] = [];
   try {

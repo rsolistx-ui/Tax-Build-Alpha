@@ -32,6 +32,14 @@ async function runQuery(query) {
 
 const checks = [
   {
+    label: "audit_events accepts firm_id/event/metadata shape (migration 0067)",
+    query: `SELECT 1 FROM information_schema.columns WHERE table_name = 'audit_events' AND column_name = 'metadata'`,
+  },
+  {
+    label: "synthetic cleanup guard on append-only triggers (migration 0066)",
+    query: `SELECT 1 FROM pg_proc WHERE proname = 'guard_taxpayer_consent_mutation' AND prosrc LIKE '%truepost.synthetic_cleanup%'`,
+  },
+  {
     label: "firm_agreements table (service agreement acceptance, migration 0065)",
     query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'firm_agreements'`,
   },

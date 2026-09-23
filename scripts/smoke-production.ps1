@@ -241,6 +241,24 @@ try {
     throw "Client creation did not return an id."
   }
 
+  # IRC 7216: when outside reading services are configured, a client must sign the
+  # disclosure consent before receipts are read. Sign it the way a client would.
+  function Confirm-SmokeClientConsent([string]$ConsentClientId) {
+    $consentStatus = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$ConsentClientId/consents")
+    if ($consentStatus.documentReading.required -and -not $consentStatus.documentReading.covered) {
+      Write-Host "Signing the client disclosure consent through the public consent link..."
+      $consentLink = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-X", "POST", "$BaseUrl/api/clients/$ConsentClientId/consents/link")
+      $consentToken = [System.Uri]::UnescapeDataString(([string]$consentLink.consentUrl -split '#token=')[-1])
+      $consentBodyPath = [System.IO.Path]::GetTempFileName()
+      Set-Content -Path $consentBodyPath -Value '{"kind":"disclosure_document_reading","authorized":true,"typedName":"Smoke Test Taxpayer"}' -NoNewline -Encoding ascii
+      $signed = Invoke-CurlJson @("-H", "Authorization: Bearer $consentToken", "-H", "Content-Type: application/json", "--data-binary", "@$consentBodyPath", "$BaseUrl/api/consent/sign")
+      Remove-Item $consentBodyPath -ErrorAction SilentlyContinue
+      if (-not $signed.expiresOn) { throw "Consent signing did not return an expiry date." }
+      Write-Host "Consent signed; valid until $($signed.expiresOn)."
+    }
+  }
+  Confirm-SmokeClientConsent $clientId
+
   Write-Host "Uploading receipt evidence and waiting for Workers AI extraction..."
   $upload = Invoke-CurlJson @(
     "-c", $cookieJar,
@@ -262,6 +280,7 @@ try {
   Write-Host "Provider: $($receipt.provider)"
   Write-Host "Model:    $($receipt.model)"
   Write-Host "Merchant: $($receipt.extracted_merchant)"
+  Write-Host "Date:     $($receipt.extracted_date)"
   Write-Host "Total:    $($receipt.extracted_total)"
   Write-Host "Lines:    $(@($receipt.lineItems).Count)"
   Write-Host "Validation: $($receipt.validation_status)"
@@ -1407,6 +1426,7 @@ try {
   if (@($residualReviewAction).Count -gt 0) { throw "Confirming Client B's document should clear its document_review action, but it is still present." }
 
   Write-Host "Verifying canonical readiness reconciliation using an uncategorized filed-receipt line (not bank triage)..."
+  Confirm-SmokeClientConsent $clientBId
   $clientBReceiptUpload = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-F", "file=@$ReceiptPath", "$BaseUrl/api/clients/$clientBId/receipts")
   $clientBReceiptId = [string]$clientBReceiptUpload.receipt.id
   if (-not $clientBReceiptId) { throw "Client B receipt upload did not return an extracted receipt." }
@@ -1444,7 +1464,7 @@ try {
   if ($pnlBBefore.completeness.isComplete) { throw "P&L must be incomplete while a filed receipt has an uncategorized line." }
   $dashboardBBefore = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/dashboard")
   $dashRowBBefore = @($dashboardBBefore.clients) | Where-Object { $_.id -eq $clientBId } | Select-Object -First 1
-  if ($dashRowBBefore.readiness -eq "ready") { throw "The Operations dashboard must not mark Client B Ready while a receipt line is uncategorized." }
+  if ($dashRowBBefore.readiness -eq "ready") { throw "The Operations dashboard must not mark Client B Ready while a receipt line is uncategorized. P&L completeness: $($pnlBBefore.completeness | ConvertTo-Json -Compress -Depth 5). Dashboard row: $($dashRowBBefore | ConvertTo-Json -Compress -Depth 5). Receipt date extracted: [$($clientBReceipt.extracted_date)], after correction: [$(((Invoke-CurlJson @('-c', $cookieJar, '-b', $cookieJar, "$BaseUrl/api/clients/$clientBId/receipts/$clientBReceiptId")).receipt.extracted_date))]" }
   $overviewBBefore = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientBId/overview")
   if ($overviewBBefore.financialStatus.pnlCompleteness) { throw "Client B's own overview must not report books complete while a receipt line is uncategorized." }
   $readinessBBefore = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientBId/tax-readiness/2026")

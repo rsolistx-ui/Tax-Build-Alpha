@@ -42,6 +42,11 @@ export function validateReceipt(extraction: ReceiptExtraction): ReceiptValidatio
     });
   }
 
+  // Without a date the receipt cannot be placed in a tax year or meet IRC § 274(d) substantiation.
+  checks.push(extraction.date
+    ? { code: "date_present", label: "Receipt date", status: "pass", message: "Receipt date is present." }
+    : { code: "date_present", label: "Receipt date", status: "warning", message: "No receipt date was extracted. Enter the date from the receipt before filing." });
+
   if (extraction.lineItems.length === 0) {
     checks.push({
       code: "line_items_present",

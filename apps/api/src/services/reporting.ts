@@ -412,7 +412,7 @@ export async function getUncategorizedReceiptLineCounts(db: Db, clientIds: strin
      )
      SELECT r.client_id, COUNT(*)::text AS count
      FROM receipts r
-     JOIN receipt_line_items li ON li.receipt_id = r.id
+     LEFT JOIN receipt_line_items li ON li.receipt_id = r.id -- a line-less receipt counts once, as the P&L does
      JOIN client_profiles cp ON cp.client_id = r.client_id
      LEFT JOIN categories cat_li ON cat_li.client_id = r.client_id
        AND (LOWER(cat_li.slug) = LOWER(NULLIF(li.category, '')) OR LOWER(cat_li.name) = LOWER(NULLIF(li.category, '')))
@@ -456,7 +456,7 @@ export async function getUncategorizedReceiptLines(
      )
      SELECT r.client_id, r.id AS receipt_id, r.extracted_merchant AS merchant, r.extracted_date AS date
      FROM receipts r
-     JOIN receipt_line_items li ON li.receipt_id = r.id
+     LEFT JOIN receipt_line_items li ON li.receipt_id = r.id -- a line-less receipt counts once, as the P&L does
      JOIN client_profiles cp ON cp.client_id = r.client_id
      JOIN periods p ON p.client_id = r.client_id
      LEFT JOIN categories cat_li ON cat_li.client_id = r.client_id
@@ -466,8 +466,8 @@ export async function getUncategorizedReceiptLines(
        AND UPPER(r.extracted_currency) = UPPER(cp.default_currency)
        AND COALESCE(cat_li.id, cat_receipt.id, r.category_id) IS NULL
        AND NOT EXISTS (SELECT 1 FROM receipt_conflict rc WHERE rc.receipt_id = r.id)
-       AND (p.start_date IS NULL OR r.extracted_date >= p.start_date)
-       AND (p.end_date IS NULL OR r.extracted_date <= p.end_date)
+       AND (p.start_date IS NULL OR r.extracted_date IS NULL OR r.extracted_date >= p.start_date)
+       AND (p.end_date IS NULL OR r.extracted_date IS NULL OR r.extracted_date <= p.end_date)
      ORDER BY r.client_id, r.extracted_date DESC NULLS LAST`,
     [periods.map((p) => ({ client_id: p.clientId, start_date: p.startDate, end_date: p.endDate }))],
   );
