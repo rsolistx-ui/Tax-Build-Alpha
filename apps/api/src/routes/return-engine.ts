@@ -4,12 +4,14 @@ import { createDb } from "../db";
 import type { Env } from "../env";
 import type { AuthedVars } from "../middleware/session";
 import { requireSession } from "../middleware/session";
+import { requireActiveBeta } from "../middleware/beta";
 import { ensureFirm } from "../services/firm";
 import { getClient } from "../services/clients";
 import { createReturn, submitReturn, ackReturn, rejectReturn, resolveRejection, voidReturn } from "../services/return-engine";
 
 export const returnEngineRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 returnEngineRoutes.use("*", requireSession);
+returnEngineRoutes.use("*", requireActiveBeta);
 
 returnEngineRoutes.post("/:clientId/returns", async (c) => {
   const db = createDb(c.env); const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));

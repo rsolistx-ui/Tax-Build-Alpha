@@ -40,11 +40,13 @@ export function UniversalCommandPalette({
   onClose,
   onOpenVoiceModal,
   onOpenMobileModal,
+  onOpenSupportModal,
 }: {
   isOpen: boolean;
   onClose: () => void;
   onOpenVoiceModal?: () => void;
   onOpenMobileModal?: () => void;
+  onOpenSupportModal?: () => void;
 }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -217,13 +219,13 @@ export function UniversalCommandPalette({
         icon: Headphones,
         run: () => {
           onClose();
-          navigate("/support");
+          onOpenSupportModal?.();
         },
       }
     );
 
     return list;
-  }, [clients, currentClientId, navigate, onClose, onOpenVoiceModal, onOpenMobileModal]);
+  }, [clients, currentClientId, navigate, onClose, onOpenVoiceModal, onOpenMobileModal, onOpenSupportModal]);
 
   // Filter actions based on search query
   const filteredActions = useMemo(() => {

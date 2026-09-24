@@ -274,6 +274,7 @@ export function AppShell({
         isOpen={commandPaletteOpen}
         onClose={() => setCommandPaletteOpen(false)}
         onOpenVoiceModal={() => setVoiceModalOpen(true)}
+        onOpenSupportModal={() => setSupportModalOpen(true)}
       />
     </div>
   );
