@@ -21,6 +21,7 @@ import { buildWorkbook } from "../services/excel";
 import { buildBankTransactionsCsv, validateSingleSourceSelection } from "../services/bank-export";
 import { buildWorkbookFilename, buildBankCsvFilename } from "../services/filenames";
 import { newId } from "../lib/id";
+import { canReadSignedRecords, SIGNED_RECORD_DOCUMENT_SQL } from "../services/firm-roles";
 
 export const reportRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 
@@ -320,11 +321,14 @@ reportRoutes.get("/:clientId/export/clean-exit-manifest", async (c) => {
   const client = await getClient(db, clientId, firm.id);
   if (!client) return c.json({ error: "Not found" }, 404);
 
+  // Bookkeepers and read-only members get the inventory without signed records.
+  const hideSigned = !canReadSignedRecords(c.get("firmRole") ?? "read_only");
   const [documents, receipts, signatures] = await Promise.all([
     db.query<{ id: string; filename: string; content_type: string | null; size_bytes: number | null; document_type: string; tax_year: number | null; status: string; source_hash: string; uploaded_at: string }>(
       `SELECT id, filename, content_type, size_bytes, document_type, tax_year, status, source_hash, uploaded_at
-       FROM client_documents WHERE client_id = $1 ORDER BY uploaded_at ASC`,
-      [client.id],
+       FROM client_documents WHERE client_id = $1 AND ($2::boolean = false OR NOT ${SIGNED_RECORD_DOCUMENT_SQL})
+       ORDER BY uploaded_at ASC`,
+      [client.id, hideSigned],
     ),
     db.query<{ id: string; filename: string; content_type: string | null; r2_key: string; status: string; extracted_date: string | null; extracted_merchant: string | null; extracted_total: string | null; created_at: string }>(
       `SELECT id, filename, content_type, r2_key, status, extracted_date, extracted_merchant, extracted_total, created_at
@@ -356,7 +360,7 @@ reportRoutes.get("/:clientId/export/clean-exit-manifest", async (c) => {
       ...receipt,
       sourcePath: `/api/clients/${client.id}/receipts/${receipt.id}/source`,
     })),
-    signatureRequests: signatures,
+    signatureRequests: hideSigned ? [] : signatures,
   };
   const filename = `truepost-clean-exit-${client.name.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || client.id}.json`;
   return new Response(JSON.stringify(manifest, null, 2), {

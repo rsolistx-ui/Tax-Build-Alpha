@@ -5,27 +5,33 @@ import type { Env } from "../env";
 import type { AuthedVars } from "../middleware/session";
 import { ensureFirm } from "../services/firm";
 import { getClient } from "../services/clients";
-import { listVersions, createVersion, listSignatureRequests, createSignatureRequest } from "../services/doc-versioning";
+import { listVersions, listSignatureRequests, createSignatureRequest } from "../services/doc-versioning";
 import { newId } from "../lib/id";
 import { getValidDocuSignConfig, createDocuSignEnvelope, voidDocuSignEnvelope } from "../services/docu-sign";
 import { signDocumentToken } from "../lib/signed-url";
 import { NativeEsignService } from "../services/native-esign";
 import { IRS_EFILE_SIGNATURE_PROVIDER_MESSAGE, isIrsEfileAuthorization } from "../services/tax-signature-policy";
 import { issueSigningAccessLink } from "../services/signature-access";
+import { canReadSignedRecords, SIGNED_RECORD_DOCUMENT_SQL } from "../services/firm-roles";
 
 export const docVersioningRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 
 docVersioningRoutes.get("/:clientId/documents/:docId/versions", async (c) => {
   const db = createDb(c.env); const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
   const client = await getClient(db, c.req.param("clientId"), firm.id); if (!client) return c.json({ error: "Client not found" }, 404);
-  return c.json({ versions: await listVersions(db, c.req.param("docId")) });
+  // The document must belong to this client (and be a record this role may read).
+  const hideSigned = !canReadSignedRecords(c.get("firmRole") ?? "read_only");
+  const [doc] = await db.query<{ id: string }>(
+    `SELECT id FROM client_documents WHERE id=$1 AND client_id=$2 AND ($3::boolean = false OR NOT ${SIGNED_RECORD_DOCUMENT_SQL})`,
+    [c.req.param("docId"), client.id, hideSigned],
+  );
+  if (!doc) return c.json({ error: "Document not found" }, 404);
+  const versions = await listVersions(db, doc.id);
+  return c.json({ versions: versions.map(({ r2_key: _r2Key, ...v }: any) => v) });
 });
-docVersioningRoutes.post("/:clientId/documents/:docId/versions", async (c) => {
-  const db = createDb(c.env); const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
-  const client = await getClient(db, c.req.param("clientId"), firm.id); if (!client) return c.json({ error: "Client not found" }, 404);
-  const body = z.object({ r2Key: z.string() }).parse(await c.req.json());
-  return c.json({ version: await createVersion(db, firm.id, c.req.param("docId"), body.r2Key, c.get("userId")) }, 201);
-});
+// No public route creates versions: services call createVersion with keys they
+// wrote themselves. A client-supplied storage key could point at another
+// firm's file, which the signed-url route would then serve.
 docVersioningRoutes.get("/:clientId/signature-requests", async (c) => {
   const db = createDb(c.env); const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
   const client = await getClient(db, c.req.param("clientId"), firm.id); if (!client) return c.json({ error: "Client not found" }, 404);
@@ -361,7 +367,11 @@ docVersioningRoutes.get("/:clientId/documents/:docId/signed-url", async (c) => {
   const db = createDb(c.env); const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
   const client = await getClient(db, c.req.param("clientId"), firm.id); if (!client) return c.json({ error: "Client not found" }, 404);
   const docId = c.req.param("docId");
-  const [doc] = await db.query<any>(`SELECT id, r2_key FROM client_documents WHERE id=$1 AND client_id=$2`, [docId, client.id]);
+  const hideSigned = !canReadSignedRecords(c.get("firmRole") ?? "read_only");
+  const [doc] = await db.query<any>(
+    `SELECT id, r2_key FROM client_documents WHERE id=$1 AND client_id=$2 AND ($3::boolean = false OR NOT ${SIGNED_RECORD_DOCUMENT_SQL})`,
+    [docId, client.id, hideSigned],
+  );
   if (!doc) return c.json({ error: "Document not found" }, 404);
   const [version] = await db.query<any>(`SELECT r2_key FROM document_versions WHERE document_id=$1 ORDER BY version DESC LIMIT 1`, [docId]);
   if (!(version?.r2_key ?? doc.r2_key)) return c.json({ error: "No document content available" }, 404);

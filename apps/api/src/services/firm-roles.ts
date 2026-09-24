@@ -56,6 +56,20 @@ const SIGNED_RECORD_READS: RegExp[] = [
   new RegExp(`^${CLIENT}/consents/(printable|[^/]+/text)$`),
 ];
 
+/** Owners and preparers may read signed records; bookkeepers and read-only members may not. */
+export function canReadSignedRecords(role: FirmRole): boolean {
+  return role === "owner" || role === "preparer";
+}
+
+/**
+ * SQL condition, true for a client_documents row that is a signed record:
+ * an engagement letter, or any document a signature request points at (the
+ * signed PDF replaces the document's file when native e-sign completes).
+ * Document routes add NOT (...) for roles that cannot read signed records.
+ */
+export const SIGNED_RECORD_DOCUMENT_SQL = `(client_documents.document_type = 'engagement_letter' OR EXISTS (
+  SELECT 1 FROM signature_requests sr WHERE sr.document_id = client_documents.id AND sr.client_id = client_documents.client_id))`;
+
 const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
 export function firmRoleAllows(role: FirmRole, method: string, path: string): boolean {

@@ -11,6 +11,7 @@ import { isValidReadinessState, isProfessionalApprovalState, suggestReadinessSta
 import { runTaxDiagnostics } from "../services/tax-diagnostics";
 import { generateChecklist, priorYearChecklistCarryover, isValidChecklistStatus, suggestDocumentType, sha256Hex, isValidDocumentType, isSupportedUpload, MAX_UPLOAD_BYTES, isValidTaxYear } from "../services/documents";
 import { getUncategorizedReceiptLines, summarizeUncategorizedReceiptLines, assemblePnlReport, isAccrualUnsupported } from "../services/reporting";
+import { canReadSignedRecords, SIGNED_RECORD_DOCUMENT_SQL } from "../services/firm-roles";
 
 export const workspaceRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 
@@ -467,10 +468,12 @@ workspaceRoutes.get("/:clientId/documents", async (c) => {
   const { db, client } = await authorizedClient(c);
   if (!client) return c.json({ error: "Not found" }, 404);
   const status = c.req.query("status") || null;
+  const hideSigned = !canReadSignedRecords(c.get("firmRole") ?? "read_only");
   const documents = await db.query(
     `SELECT id, filename, content_type, size_bytes, document_type, tax_year, document_date, source_label, checklist_item_id, status, duplicate_of_document_id, uploaded_at, reviewed_at
-     FROM client_documents WHERE client_id = $1 AND ($2::text IS NULL OR status = $2) ORDER BY uploaded_at DESC LIMIT 200`,
-    [client.id, status],
+     FROM client_documents WHERE client_id = $1 AND ($2::text IS NULL OR status = $2)
+       AND ($3::boolean = false OR NOT ${SIGNED_RECORD_DOCUMENT_SQL}) ORDER BY uploaded_at DESC LIMIT 200`,
+    [client.id, status, hideSigned],
   );
   return c.json({ documents });
 });
@@ -527,9 +530,11 @@ workspaceRoutes.post("/:clientId/documents", async (c) => {
 workspaceRoutes.get("/:clientId/documents/:documentId/source", async (c) => {
   const { db, client } = await authorizedClient(c);
   if (!client) return c.json({ error: "Not found" }, 404);
+  const hideSigned = !canReadSignedRecords(c.get("firmRole") ?? "read_only");
   const [document] = await db.query<{ r2_key: string; content_type: string | null; filename: string }>(
-    `SELECT r2_key, content_type, filename FROM client_documents WHERE id = $1 AND client_id = $2`,
-    [c.req.param("documentId"), client.id],
+    `SELECT r2_key, content_type, filename FROM client_documents WHERE id = $1 AND client_id = $2
+       AND ($3::boolean = false OR NOT ${SIGNED_RECORD_DOCUMENT_SQL})`,
+    [c.req.param("documentId"), client.id, hideSigned],
   );
   if (!document) return c.json({ error: "Not found" }, 404);
   const object = await c.env.RECEIPTS.get(document.r2_key);

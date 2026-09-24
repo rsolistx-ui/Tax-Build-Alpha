@@ -1,4 +1,5 @@
 import { createMiddleware } from "hono/factory";
+import type { FirmRole } from "../services/firm-roles";
 import type { Env } from "../env";
 import { createAuth } from "../auth";
 
@@ -6,6 +7,8 @@ export type AuthedVars = {
   userId: string;
   userEmail: string;
   userName: string;
+  /** Set by requireActiveBeta. Unset means the gate did not run; readers treat that as read_only. */
+  firmRole?: FirmRole;
 };
 
 export const requireSession = createMiddleware<{

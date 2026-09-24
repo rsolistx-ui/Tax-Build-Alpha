@@ -165,8 +165,12 @@ export function ClientWorkspacePage() {
   const { clientId = "" } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const focusId = searchParams.get("focus");
-  const initialTab = (VALID_TABS as string[]).includes(searchParams.get("tab") ?? "")
-    ? (searchParams.get("tab") as Tab)
+  const firmRole = useFirmRole();
+  // A tab the role cannot open (e.g. a shared ?tab=billing link) falls back to Overview.
+  const tabAllowed = (t: Tab) => (t !== "billing" || canSeeBilling(firmRole)) && (t !== "esign" || canSeeSignedRecords(firmRole));
+  const requestedTab = searchParams.get("tab") as Tab | null;
+  const initialTab = requestedTab && (VALID_TABS as string[]).includes(requestedTab) && tabAllowed(requestedTab)
+    ? requestedTab
     : "overview";
   const [pinnedTaxYear, setPinnedTaxYear] = useState<number | null>(() => {
     const value = searchParams.get("taxYear");
@@ -386,7 +390,6 @@ export function ClientWorkspacePage() {
     return { succeeded, failed, pending, processing, total: batch.length };
   }, [batch]);
 
-  const firmRole = useFirmRole();
   const tabs = useMemo(
     () => [
       { id: "overview" as const, label: "Overview", icon: LayoutDashboard },
@@ -413,7 +416,7 @@ export function ClientWorkspacePage() {
       { id: "mileage" as const, label: "Mileage log", icon: Landmark },
       { id: "home-office" as const, label: "Home office", icon: Landmark },
       { id: "export" as const, label: "Close Packet", icon: FileDown },
-    ].filter((t) => (t.id !== "billing" || canSeeBilling(firmRole)) && (t.id !== "esign" || canSeeSignedRecords(firmRole))),
+    ].filter((t) => tabAllowed(t.id)),
     [review.length, firmRole],
   );
 
@@ -427,7 +430,8 @@ export function ClientWorkspacePage() {
   );
   const activeTool = tabs.find((item) => item.id === tab);
 
-  function changeTab(nextTab: Tab) {
+  function changeTab(requested: Tab) {
+    const nextTab = tabAllowed(requested) ? requested : "overview";
     setTab(nextTab);
     setError(null);
   }

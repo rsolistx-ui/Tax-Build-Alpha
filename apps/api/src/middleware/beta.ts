@@ -38,6 +38,7 @@ export function isValidAdminMasterToken(env: Env, tokenHeader?: string | null): 
  */
 export const requireActiveBeta = createMiddleware<{ Bindings: Env; Variables: AuthedVars }>(async (c, next) => {
   if (isOwnerEmail(c.env, c.get("userEmail"))) {
+    c.set("firmRole", "owner");
     await next();
     return;
   }
@@ -71,9 +72,10 @@ export const requireActiveBeta = createMiddleware<{ Bindings: Env; Variables: Au
   }
 
   if (!firmRoleAllows(role, c.req.method, c.req.path)) {
-    return c.json({ error: "Your role in this firm does not allow this change.", code: "FIRM_ROLE_FORBIDDEN", role }, 403);
+    return c.json({ error: "Your role in this firm does not allow this.", code: "FIRM_ROLE_FORBIDDEN", role }, 403);
   }
 
+  c.set("firmRole", role);
   await next();
 });
 

@@ -1280,6 +1280,35 @@ try {
     $bookkeeperBillingRead = Get-HttpStatusOnly "$BaseUrl/api/billing/$clientId/invoices" $cookieJarS
     $bookkeeperEfileRead = Get-HttpStatusOnly "$BaseUrl/api/clients/$clientId/efile-authorizations" $cookieJarS
     $bookkeeperConsentStatusRead = Get-HttpStatusOnly "$BaseUrl/api/clients/$clientId/consents" $cookieJarS
+    # A document with a signature request is a signed record; an ordinary upload is not.
+    $plainDocPath = Join-Path $env:TEMP "folio-smoke-plain-$([guid]::NewGuid().ToString('N')).pdf"
+    $signedDocPath = Join-Path $env:TEMP "folio-smoke-signed-$([guid]::NewGuid().ToString('N')).pdf"
+    [System.IO.File]::WriteAllText($plainDocPath, "Folio smoke ordinary document fixture")
+    [System.IO.File]::WriteAllText($signedDocPath, "Folio smoke signature document fixture")
+    try {
+      $plainDoc = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-F", "file=@$plainDocPath;type=application/pdf", "$BaseUrl/api/clients/$clientId/documents")
+      $signedDoc = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-F", "file=@$signedDocPath;type=application/pdf", "$BaseUrl/api/clients/$clientId/documents")
+    } finally {
+      Remove-TempFile $plainDocPath
+      Remove-TempFile $signedDocPath
+    }
+    $sigReqPath = New-JsonPayloadFile (@{ documentId = [string]$signedDoc.id; formType = "document"; recipients = @() } | ConvertTo-Json -Compress)
+    $null = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-H", "Content-Type: application/json", "--data-binary", "@$sigReqPath", "$BaseUrl/api/clients/$clientId/signature-requests")
+    Remove-TempFile $sigReqPath
+    $bookkeeperDocIds = @((Invoke-CurlJson @("-c", $cookieJarS, "-b", $cookieJarS, "$BaseUrl/api/clients/$clientId/documents")).documents | ForEach-Object { [string]$_.id })
+    $ownerDocIds = @((Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/documents")).documents | ForEach-Object { [string]$_.id })
+    if ($bookkeeperDocIds -contains [string]$signedDoc.id) { throw "A bookkeeper's document list includes a signature-request document." }
+    if ($bookkeeperDocIds -notcontains [string]$plainDoc.id) { throw "A bookkeeper's document list is missing an ordinary document." }
+    if ($ownerDocIds -notcontains [string]$signedDoc.id) { throw "The owner's document list is missing the signature-request document." }
+    $bookkeeperSignedSource = Get-HttpStatusOnly "$BaseUrl/api/clients/$clientId/documents/$($signedDoc.id)/source" $cookieJarS
+    $bookkeeperSignedUrl = Get-HttpStatusOnly "$BaseUrl/api/clients/$clientId/documents/$($signedDoc.id)/signed-url" $cookieJarS
+    $bookkeeperPlainSource = Get-HttpStatusOnly "$BaseUrl/api/clients/$clientId/documents/$($plainDoc.id)/source" $cookieJarS
+    $ownerSignedSource = Get-HttpStatusOnly "$BaseUrl/api/clients/$clientId/documents/$($signedDoc.id)/source" $cookieJar
+    if ($bookkeeperSignedSource -ne "404" -or $bookkeeperSignedUrl -ne "404") { throw "A bookkeeper reached a signed-record file (source $bookkeeperSignedSource, signed-url $bookkeeperSignedUrl); expected 404." }
+    if ($bookkeeperPlainSource -ne "200") { throw "A bookkeeper could not open an ordinary document (HTTP $bookkeeperPlainSource)." }
+    if ($ownerSignedSource -ne "200") { throw "The owner could not open the signature-request document (HTTP $ownerSignedSource)." }
+    $bookkeeperManifest = Invoke-CurlJson @("-c", $cookieJarS, "-b", $cookieJarS, "$BaseUrl/api/clients/$clientId/export/clean-exit-manifest")
+    if (@($bookkeeperManifest.signatureRequests).Count -ne 0 -or (@($bookkeeperManifest.documents | ForEach-Object { [string]$_.id }) -contains [string]$signedDoc.id)) { throw "A bookkeeper's clean-exit inventory includes signed records." }
     if ($bookkeeperBillingRead -ne "403") { throw "A bookkeeper read firm billing (HTTP $bookkeeperBillingRead); expected 403." }
     if ($bookkeeperEfileRead -ne "403") { throw "A bookkeeper read e-file authorizations (HTTP $bookkeeperEfileRead); expected 403." }
     if ($bookkeeperConsentStatusRead -ne "200") { throw "A bookkeeper could not read consent status (HTTP $bookkeeperConsentStatusRead); expected 200." }
@@ -1288,7 +1317,7 @@ try {
     $null = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-X", "DELETE", "$BaseUrl/api/firm/staff/$staffUserId")
     $removedStaffStatus = Get-HttpStatusOnly "$BaseUrl/api/clients" $cookieJarS
     if ($removedStaffStatus -ne "401" -and $removedStaffStatus -ne "403") { throw "Removed staff member still reached /api/clients (HTTP $removedStaffStatus)." }
-    Write-Host "Staff seats verified: bookkeeper joined firm $firmId, sign-off, invites, invoicing, M-3, billing and e-file reads refused (403), consent status readable, removal cut access (HTTP $removedStaffStatus)."
+    Write-Host "Staff seats verified: bookkeeper joined firm $firmId, sign-off, invites, invoicing, M-3, billing and e-file reads refused (403), signed documents hidden from list, download, link and inventory, consent status readable, removal cut access (HTTP $removedStaffStatus)."
   } finally {
     Remove-TempFile $cookieJarS
   }
