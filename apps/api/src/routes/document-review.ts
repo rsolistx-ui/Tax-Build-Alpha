@@ -64,7 +64,7 @@ documentReviewRoutes.patch("/review/:documentId", async (c) => {
   const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
   const body = (await c.req.json()) as DocumentReviewAction;
   const documentId = c.req.param("documentId");
-  const result = await applyDocumentReviewAction(db, firm.id, documentId, c.get("userId"), body);
+  const result = await applyDocumentReviewAction(db, firm.id, documentId, c.get("userId"), body, !canReadSignedRecords(c.get("firmRole") ?? "read_only"));
   if (!result.ok) return c.json({ error: result.error }, result.status as 400 | 404);
   // Terminal actions (confirm/mark_duplicate/mark_not_needed) resolve the
   // review queue's reason for showing this document - the caller removes

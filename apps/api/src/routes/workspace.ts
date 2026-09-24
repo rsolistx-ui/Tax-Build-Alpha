@@ -11,7 +11,7 @@ import { isValidReadinessState, isProfessionalApprovalState, suggestReadinessSta
 import { runTaxDiagnostics } from "../services/tax-diagnostics";
 import { generateChecklist, priorYearChecklistCarryover, isValidChecklistStatus, suggestDocumentType, sha256Hex, isValidDocumentType, isSupportedUpload, MAX_UPLOAD_BYTES, isValidTaxYear } from "../services/documents";
 import { getUncategorizedReceiptLines, summarizeUncategorizedReceiptLines, assemblePnlReport, isAccrualUnsupported } from "../services/reporting";
-import { canReadSignedRecords, SIGNED_RECORD_DOCUMENT_SQL } from "../services/firm-roles";
+import { canReadSignedRecords, SIGNED_RECORD_DOCUMENT_SQL, signedRecordDocumentSql } from "../services/firm-roles";
 
 export const workspaceRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 
@@ -588,12 +588,15 @@ export async function applyDocumentReviewAction(
   documentId: string,
   actorUserId: string,
   body: DocumentReviewAction,
+  hideSigned: boolean,
 ): Promise<{ ok: true; terminal: boolean } | { ok: false; status: number; error: string }> {
+  // hideSigned: the caller's role cannot read signed records, so a signed
+  // record is treated as not found (no metadata, no changes).
   const [document] = await db.query<{ id: string; client_id: string; status: string; document_type: string; tax_year: number | null; firm_id: string }>(
     `SELECT cd.id, cd.client_id, cd.status, cd.document_type, cd.tax_year, c.firm_id
      FROM client_documents cd JOIN clients c ON c.id = cd.client_id
-     WHERE cd.id = $1 AND c.firm_id = $2`,
-    [documentId, firmId],
+     WHERE cd.id = $1 AND c.firm_id = $2 AND ($3::boolean = false OR NOT ${signedRecordDocumentSql("cd")})`,
+    [documentId, firmId, hideSigned],
   );
   if (!document) return { ok: false, status: 404, error: "Not found" };
 
@@ -752,7 +755,7 @@ workspaceRoutes.patch("/:clientId/documents/:documentId", async (c) => {
   if (!client) return c.json({ error: "Not found" }, 404);
   const body = (await c.req.json()) as DocumentReviewAction;
   const documentId = c.req.param("documentId");
-  const result = await applyDocumentReviewAction(db, firm.id, documentId, c.get("userId"), body);
+  const result = await applyDocumentReviewAction(db, firm.id, documentId, c.get("userId"), body, !canReadSignedRecords(c.get("firmRole") ?? "read_only"));
   if (!result.ok) return c.json({ error: result.error }, result.status as 400 | 404);
   const document = result.terminal ? null : await loadReviewDocument(db, documentId, firm.id);
   return c.json({ ok: true, terminal: result.terminal, document });

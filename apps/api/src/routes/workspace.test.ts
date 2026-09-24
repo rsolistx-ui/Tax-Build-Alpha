@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { Db, DbStatement } from "../db";
-import { applyDocumentReviewAction, checkReadinessTransitionAllowed, taxYearRange, countResolvedBankTxns } from "./workspace";
+import { applyDocumentReviewAction as applyReviewAction, checkReadinessTransitionAllowed, taxYearRange, countResolvedBankTxns, type DocumentReviewAction } from "./workspace";
+
+// These tests act as a role that may read signed records.
+const applyDocumentReviewAction = (db: Db, firmId: string, documentId: string, actor: string, body: DocumentReviewAction) =>
+  applyReviewAction(db, firmId, documentId, actor, body, false);
 
 type Rows = Record<string, unknown[]>;
 
@@ -382,5 +386,28 @@ describe("countResolvedBankTxns", () => {
 
   it("does not count unresolved triage states", () => {
     expect(countResolvedBankTxns([{ triage: "unclassified" }, { triage: "review" }, { triage: null }])).toBe(0);
+  });
+});
+
+describe("applyDocumentReviewAction signed records", () => {
+  it("treats a signed record as not found for a role that cannot read signed records, without writing", async () => {
+    const seen: Array<{ sql: string; params: unknown[] }> = [];
+    const transactionCalls: DbStatement[][] = [];
+    const db: Db = {
+      async query<T>(sql: string, params: unknown[] = []) {
+        seen.push({ sql, params });
+        return [] as T[]; // the signed-record filter excludes the row
+      },
+      async transaction<T>(statements: DbStatement[]) {
+        transactionCalls.push(statements);
+        return statements.map(() => []) as T[][];
+      },
+    };
+    const result = await applyReviewAction(db, "firm_1", "doc_signed", "user_bk", { action: "confirm" }, true);
+    expect(result).toEqual({ ok: false, status: 404, error: "Not found" });
+    const lookup = seen.find((q) => q.sql.includes("cd.id, cd.client_id, cd.status"));
+    expect(lookup?.sql).toContain("signature_requests");
+    expect(lookup?.params).toEqual(["doc_signed", "firm_1", true]);
+    expect(transactionCalls).toHaveLength(0);
   });
 });
