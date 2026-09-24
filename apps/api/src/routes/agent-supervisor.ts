@@ -23,6 +23,7 @@ import {
   createDocuSignEnvelope,
 } from "../services/docu-sign";
 import { getEngagement } from "../services/engagements";
+import { canReadSignedRecords } from "../services/firm-roles";
 
 export const agentSupervisorRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 
@@ -64,9 +65,14 @@ agentSupervisorRoutes.get("/:clientId/agent-tasks", async (c) => {
   const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
   const client = await getClient(db, c.req.param("clientId"), firm.id);
   if (!client) return c.json({ error: "Not found" }, 404);
+  // Engagement-letter drafts become signed records when approved; roles that
+  // cannot read signed records do not see or act on them.
+  const hideSigned = !canReadSignedRecords(c.get("firmRole") ?? "read_only");
   const tasks = await db.query(
-    `SELECT * FROM agent_tasks WHERE client_id = $1 AND firm_id = $2 ORDER BY created_at DESC LIMIT 200`,
-    [client.id, firm.id],
+    `SELECT * FROM agent_tasks WHERE client_id = $1 AND firm_id = $2
+       AND ($3::boolean = false OR action_type <> 'engagement_letter_draft')
+     ORDER BY created_at DESC LIMIT 200`,
+    [client.id, firm.id, hideSigned],
   );
   return c.json({ tasks });
 });
@@ -96,6 +102,9 @@ agentSupervisorRoutes.patch("/:clientId/agent-tasks/:taskId", async (c) => {
     [taskId, client.id, firm.id],
   );
   if (!task) return c.json({ error: "Task was not found or is no longer awaiting approval" }, 404);
+  if (task.action_type === "engagement_letter_draft" && !canReadSignedRecords(c.get("firmRole") ?? "read_only")) {
+    return c.json({ error: "Task was not found or is no longer awaiting approval" }, 404);
+  }
 
   const approved = body.action === "approve";
   const newStatus = approved ? "approved" : "dismissed";

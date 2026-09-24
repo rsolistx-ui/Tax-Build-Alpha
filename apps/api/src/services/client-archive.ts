@@ -34,7 +34,7 @@ export async function buildClientArchive(db: Db, env: Pick<Env, "RECEIPTS">, fir
   const [receipts, bank, documents, mileage, consents, efile, audit] = await Promise.all([
     db.query(`SELECT * FROM receipts WHERE client_id=$1 ORDER BY created_at`, [clientId]),
     db.query(`SELECT * FROM bank_transactions WHERE client_id=$1 ORDER BY 1`, [clientId]),
-    db.query(`SELECT * FROM client_documents WHERE client_id=$1 ORDER BY created_at`, [clientId]),
+    db.query(`SELECT * FROM client_documents WHERE client_id=$1 ORDER BY uploaded_at`, [clientId]),
     db.query(`SELECT * FROM mileage_trips WHERE client_id=$1 AND deleted_at IS NULL ORDER BY trip_date`, [clientId]),
     db.query(`SELECT id, consent_kind, taxpayer_name, signature_method, signed_at, expires_on, revoked_at, revocation_note, text_sha256, consent_text FROM taxpayer_consents WHERE client_id=$1 ORDER BY signed_at`, [clientId]),
     db.query(`SELECT ea.id, ea.form_type, ea.tax_year, ea.taxpayer_role, ea.taxpayer_name, ea.status, ev.method, ev.signed_at, ev.signed_hash, ev.signed_r2_key, ev.retain_until, ev.identity_check

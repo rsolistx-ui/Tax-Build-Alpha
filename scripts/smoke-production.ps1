@@ -1308,6 +1308,10 @@ try {
     if ($bookkeeperPlainSource -ne "200") { throw "A bookkeeper could not open an ordinary document (HTTP $bookkeeperPlainSource)." }
     if ($ownerSignedSource -ne "200") { throw "The owner could not open the signature-request document (HTTP $ownerSignedSource)." }
     $bookkeeperManifest = Invoke-CurlJson @("-c", $cookieJarS, "-b", $cookieJarS, "$BaseUrl/api/clients/$clientId/export/clean-exit-manifest")
+    $ownerArchiveStatus = Get-HttpStatusOnly "$BaseUrl/api/clients/$clientId/export-archive" $cookieJar
+    $bookkeeperArchiveStatus = Get-HttpStatusOnly "$BaseUrl/api/clients/$clientId/export-archive" $cookieJarS
+    if ($ownerArchiveStatus -ne "200") { throw "The owner's clean-exit ZIP returned HTTP $ownerArchiveStatus." }
+    if ($bookkeeperArchiveStatus -ne "403") { throw "A bookkeeper downloaded the clean-exit ZIP (HTTP $bookkeeperArchiveStatus); expected 403." }
     if (@($bookkeeperManifest.signatureRequests).Count -ne 0 -or (@($bookkeeperManifest.documents | ForEach-Object { [string]$_.id }) -contains [string]$signedDoc.id)) { throw "A bookkeeper's clean-exit inventory includes signed records." }
     if ($bookkeeperBillingRead -ne "403") { throw "A bookkeeper read firm billing (HTTP $bookkeeperBillingRead); expected 403." }
     if ($bookkeeperEfileRead -ne "403") { throw "A bookkeeper read e-file authorizations (HTTP $bookkeeperEfileRead); expected 403." }

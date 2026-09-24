@@ -53,6 +53,8 @@ const PREPARER_UP: RegExp[] = [
 // because receipt reading waits on it.
 const SIGNED_RECORD_READS: RegExp[] = [
   new RegExp(`^${CLIENT}/(efile-authorizations|signature-requests|signature-vault)(/|$)`),
+  // The clean-exit ZIP bundles signed engagement letters, signed e-file PDFs and consent text.
+  new RegExp(`^${CLIENT}/export-archive$`),
   new RegExp(`^${CLIENT}/consents/(printable|[^/]+/text)$`),
 ];
 

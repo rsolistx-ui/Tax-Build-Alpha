@@ -31,6 +31,7 @@ describe("firmRoleAllows", () => {
       "/api/clients/cli_1/signature-requests",
       "/api/clients/cli_1/consents/printable",
       "/api/clients/cli_1/consents/con_1/text",
+      "/api/clients/cli_1/export-archive",
     ]) {
       expect(firmRoleAllows("preparer", "GET", path), path).toBe(true);
       expect(firmRoleAllows("bookkeeper", "GET", path), path).toBe(false);

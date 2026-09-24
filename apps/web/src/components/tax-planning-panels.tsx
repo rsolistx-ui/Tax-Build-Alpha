@@ -4,6 +4,7 @@ import { api, apiUrl } from "@/lib/api";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { formatDate } from "@/lib/formatters";
+import { canSeeSignedRecords, useFirmRole } from "@/lib/firm-role";
 
 const inputClass = "h-9 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-3 text-sm";
 const usd = (n: number) => n.toLocaleString("en-US", { style: "currency", currency: "USD" });
@@ -213,6 +214,8 @@ export function HomeOfficePanel({ clientId }: { clientId: string }) {
 
 /** Downloads every file and record for this client (service agreement section 9). */
 export function ExportArchiveButton({ clientId }: { clientId: string }) {
+  // The archive includes signed records, which bookkeepers and read-only members cannot open.
+  const allowed = canSeeSignedRecords(useFirmRole());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   async function download() {
@@ -227,6 +230,7 @@ export function ExportArchiveButton({ clientId }: { clientId: string }) {
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Export failed."); }
     finally { setBusy(false); }
   }
+  if (!allowed) return null;
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] p-4">
       <div>

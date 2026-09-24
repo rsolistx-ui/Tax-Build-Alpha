@@ -11,6 +11,7 @@ import { listM3, createM3, addM3Line } from "../services/tax-m3";
 import { priorYearCompare } from "../services/tax-prior-year";
 import { listExtensions, createExtension } from "../services/tax-extensions";
 import { form1099Threshold } from "../services/form-1099-threshold";
+import { canReadSignedRecords, SIGNED_RECORD_DOCUMENT_SQL } from "../services/firm-roles";
 
 export const taxExtendedRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 
@@ -190,8 +191,9 @@ taxExtendedRoutes.get("/:clientId/1099-radar", async (c) => {
   ).catch(() => []);
 
   const w9Docs = await db.query<{ filename: string }>(
-    `SELECT filename FROM client_documents WHERE client_id = $1 AND (filename ILIKE '%w9%' OR filename ILIKE '%w-9%')`,
-    [client.id],
+    `SELECT filename FROM client_documents WHERE client_id = $1 AND (filename ILIKE '%w9%' OR filename ILIKE '%w-9%')
+       AND ($2::boolean = false OR NOT ${SIGNED_RECORD_DOCUMENT_SQL})`,
+    [client.id, !canReadSignedRecords(c.get("firmRole") ?? "read_only")],
   ).catch(() => []);
 
   let total1099Spend = 0;
