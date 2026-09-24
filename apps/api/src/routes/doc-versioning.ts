@@ -3,7 +3,6 @@ import { z } from "zod";
 import { createDb } from "../db";
 import type { Env } from "../env";
 import type { AuthedVars } from "../middleware/session";
-import { requireSession } from "../middleware/session";
 import { ensureFirm } from "../services/firm";
 import { getClient } from "../services/clients";
 import { listVersions, createVersion, listSignatureRequests, createSignatureRequest } from "../services/doc-versioning";
@@ -15,7 +14,6 @@ import { IRS_EFILE_SIGNATURE_PROVIDER_MESSAGE, isIrsEfileAuthorization } from ".
 import { issueSigningAccessLink } from "../services/signature-access";
 
 export const docVersioningRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
-docVersioningRoutes.use("*", requireSession);
 
 docVersioningRoutes.get("/:clientId/documents/:docId/versions", async (c) => {
   const db = createDb(c.env); const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));

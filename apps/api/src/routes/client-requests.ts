@@ -3,8 +3,6 @@ import { z } from "zod";
 import { createDb } from "../db";
 import type { Env } from "../env";
 import type { AuthedVars } from "../middleware/session";
-import { requireSession } from "../middleware/session";
-import { requireActiveBeta } from "../middleware/beta";
 import { ensureFirm } from "../services/firm";
 import { getClient } from "../services/clients";
 import {
@@ -21,8 +19,6 @@ import { createPortalLink, revokePortalLink } from "../services/portal";
 import { isoTimestampSchema } from "../services/date-validation";
 
 export const clientRequestRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
-clientRequestRoutes.use("*", requireSession);
-clientRequestRoutes.use("*", requireActiveBeta);
 
 const REQUEST_TYPES = [
   "missing_receipt", "transaction_explanation", "bank_statement", "w2", "1099", "k1",

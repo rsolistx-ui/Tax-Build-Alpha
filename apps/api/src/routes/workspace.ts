@@ -2,8 +2,6 @@ import { Hono } from "hono";
 import { createDb, type Db, type DbStatement } from "../db";
 import type { Env } from "../env";
 import type { AuthedVars } from "../middleware/session";
-import { requireSession } from "../middleware/session";
-import { requireActiveBeta } from "../middleware/beta";
 import { ensureFirm } from "../services/firm";
 import { getClient } from "../services/clients";
 import { newId } from "../lib/id";
@@ -15,8 +13,6 @@ import { generateChecklist, isValidChecklistStatus, suggestDocumentType, sha256H
 import { getUncategorizedReceiptLines, summarizeUncategorizedReceiptLines, assemblePnlReport, isAccrualUnsupported } from "../services/reporting";
 
 export const workspaceRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
-workspaceRoutes.use("*", requireSession);
-workspaceRoutes.use("*", requireActiveBeta);
 
 async function authorizedClient(c: { env: Env; get(key: "userId" | "userName"): string; req: { param(name: string): string } }) {
   const db = createDb(c.env);

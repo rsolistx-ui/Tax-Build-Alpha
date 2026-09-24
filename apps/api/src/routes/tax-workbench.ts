@@ -10,8 +10,6 @@ import { runTaxDiagnostics } from "../services/tax-diagnostics";
 import { checkReadinessTransitionAllowed, computeCanonicalReadiness, taxYearRange } from "./workspace";
 
 export const taxWorkbenchRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
-taxWorkbenchRoutes.use("*", requireSession);
-taxWorkbenchRoutes.use("*", requireActiveBeta);
 
 /**
  * One client's tax-year workbench: the single readiness row (tax_year_readiness,

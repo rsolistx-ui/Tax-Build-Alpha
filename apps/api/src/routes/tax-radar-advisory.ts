@@ -3,16 +3,12 @@ import { z } from "zod";
 import { createDb } from "../db";
 import type { Env } from "../env";
 import type { AuthedVars } from "../middleware/session";
-import { requireSession } from "../middleware/session";
-import { requireActiveBeta } from "../middleware/beta";
 import { ensureFirm } from "../services/firm";
 import { getClient } from "../services/clients";
 import { TaxRadarAdvisoryService } from "../services/tax-radar-advisory";
 import { assemblePnlReport } from "../services/reporting";
 
 export const taxRadarAdvisoryRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
-taxRadarAdvisoryRoutes.use("*", requireSession);
-taxRadarAdvisoryRoutes.use("*", requireActiveBeta);
 
 // 1099 Radar Scan
 taxRadarAdvisoryRoutes.get("/:clientId/1099-radar", async (c) => {

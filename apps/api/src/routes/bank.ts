@@ -3,8 +3,6 @@ import { z } from "zod";
 import { createDb, type DbStatement } from "../db";
 import type { Env } from "../env";
 import type { AuthedVars } from "../middleware/session";
-import { requireSession } from "../middleware/session";
-import { requireActiveBeta } from "../middleware/beta";
 import { newId } from "../lib/id";
 import { ensureFirm } from "../services/firm";
 import { getClient } from "../services/clients";
@@ -21,8 +19,6 @@ import {
 import { delegateBankImportAgent } from "../services/agent-supervisor";
 
 export const bankRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
-bankRoutes.use("*", requireSession);
-bankRoutes.use("*", requireActiveBeta);
 
 const mappingSchema = z.object({
   date: z.string().min(1),

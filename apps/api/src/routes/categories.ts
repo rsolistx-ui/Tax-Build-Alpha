@@ -3,15 +3,11 @@ import { z } from "zod";
 import { createDb } from "../db";
 import type { Env } from "../env";
 import type { AuthedVars } from "../middleware/session";
-import { requireSession } from "../middleware/session";
-import { requireActiveBeta } from "../middleware/beta";
 import { ensureFirm } from "../services/firm";
 import { getClient } from "../services/clients";
 import { newId } from "../lib/id";
 
 export const categoryRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
-categoryRoutes.use("*", requireSession);
-categoryRoutes.use("*", requireActiveBeta);
 
 categoryRoutes.get("/:clientId/categories", async (c) => {
   const db = createDb(c.env);

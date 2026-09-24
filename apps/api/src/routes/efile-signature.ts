@@ -3,7 +3,6 @@ import { z } from "zod";
 import { createDb } from "../db";
 import type { Env } from "../env";
 import type { AuthedVars } from "../middleware/session";
-import { requireSession } from "../middleware/session";
 import { ensureFirm } from "../services/firm";
 import { getClient } from "../services/clients";
 import { issueSigningAccessLink, claimSigningAccess, consumeSigningAccess, releaseSigningAccess } from "../services/signature-access";
@@ -41,7 +40,6 @@ async function fileBytes(form: FormData, field = "file"): Promise<Uint8Array> {
 /* ---------- Staff routes, mounted at /api/clients ---------- */
 
 export const efileSignatureRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
-efileSignatureRoutes.use("*", requireSession);
 
 async function scope(c: any) {
   const db = createDb(c.env);

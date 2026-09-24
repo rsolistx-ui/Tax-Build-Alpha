@@ -3,7 +3,6 @@ import { z } from "zod";
 import { createDb } from "../db";
 import type { Env } from "../env";
 import type { AuthedVars } from "../middleware/session";
-import { requireSession } from "../middleware/session";
 import { ensureFirm } from "../services/firm";
 import { getClient } from "../services/clients";
 import { computeEstimatedTax } from "../services/estimated-tax";
@@ -13,7 +12,6 @@ import { computeHomeOffice } from "../services/home-office";
 
 /** Quarterly estimated-tax worksheet and mileage log, mounted at /api/clients. */
 export const taxPlanningRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
-taxPlanningRoutes.use("*", requireSession);
 
 async function scope(c: any) {
   const db = createDb(c.env);

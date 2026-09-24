@@ -25,8 +25,6 @@ import {
 import { getEngagement } from "../services/engagements";
 
 export const agentSupervisorRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
-agentSupervisorRoutes.use("*", requireSession);
-agentSupervisorRoutes.use("*", requireActiveBeta);
 
 export const agentDeskRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 agentDeskRoutes.use("*", requireSession);

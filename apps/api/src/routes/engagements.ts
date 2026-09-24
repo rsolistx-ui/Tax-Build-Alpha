@@ -3,16 +3,12 @@ import { z } from "zod";
 import { createDb } from "../db";
 import type { Env } from "../env";
 import type { AuthedVars } from "../middleware/session";
-import { requireSession } from "../middleware/session";
-import { requireActiveBeta } from "../middleware/beta";
 import { ensureFirm } from "../services/firm";
 import { getClient } from "../services/clients";
 import { createEngagement, getEngagement, isEngagementStatus, listEngagementsWithProgress, updateEngagementDetails, updateEngagementStatus } from "../services/engagements";
 import { calendarDateSchema, taxYearSchema } from "../services/date-validation";
 
 export const engagementRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
-engagementRoutes.use("*", requireSession);
-engagementRoutes.use("*", requireActiveBeta);
 
 const SERVICE_TYPES = [
   "bookkeeping", "monthly_close", "quarterly_work", "tax_1040", "tax_1065",

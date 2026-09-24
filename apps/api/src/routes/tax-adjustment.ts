@@ -3,8 +3,6 @@ import { z } from "zod";
 import { createDb } from "../db";
 import type { Env } from "../env";
 import type { AuthedVars } from "../middleware/session";
-import { requireSession } from "../middleware/session";
-import { requireActiveBeta } from "../middleware/beta";
 import { ensureFirm } from "../services/firm";
 import { getClient } from "../services/clients";
 import { newId } from "../lib/id";
@@ -27,8 +25,6 @@ import {
 } from "../services/tax-form-mappings";
 
 export const taxAdjustmentRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
-taxAdjustmentRoutes.use("*", requireSession);
-taxAdjustmentRoutes.use("*", requireActiveBeta);
 
 // Create tax adjustment journal
 taxAdjustmentRoutes.post("/:clientId/tax-adjustments", async (c) => {

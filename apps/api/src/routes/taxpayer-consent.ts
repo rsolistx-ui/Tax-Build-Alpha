@@ -3,7 +3,6 @@ import { z } from "zod";
 import { createDb } from "../db";
 import type { Env } from "../env";
 import type { AuthedVars } from "../middleware/session";
-import { requireSession } from "../middleware/session";
 import { ensureFirm } from "../services/firm";
 import { getClient } from "../services/clients";
 import {
@@ -24,7 +23,6 @@ const kindSchema = z.enum(CONSENT_KINDS as [ConsentKind, ...ConsentKind[]]);
 /* ---------- Staff routes, mounted at /api/clients ---------- */
 
 export const consentRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
-consentRoutes.use("*", requireSession);
 
 async function scope(c: any) {
   const db = createDb(c.env);

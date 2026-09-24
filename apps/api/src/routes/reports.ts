@@ -2,8 +2,6 @@ import { Hono } from "hono";
 import { createDb } from "../db";
 import type { Env } from "../env";
 import type { AuthedVars } from "../middleware/session";
-import { requireSession } from "../middleware/session";
-import { requireActiveBeta } from "../middleware/beta";
 import { ensureFirm } from "../services/firm";
 import { getClient } from "../services/clients";
 import { isValidCalendarDate } from "../services/pnl";
@@ -25,8 +23,6 @@ import { buildWorkbookFilename, buildBankCsvFilename } from "../services/filenam
 import { newId } from "../lib/id";
 
 export const reportRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
-reportRoutes.use("*", requireSession);
-reportRoutes.use("*", requireActiveBeta);
 
 function parseDateBound(value: string | undefined): { ok: true; date: string | null } | { ok: false } {
   if (!value) return { ok: true, date: null };

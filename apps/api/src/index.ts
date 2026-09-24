@@ -166,6 +166,10 @@ app.get("/api/me", requireSession, requireActiveBeta, async (c) => {
   });
 });
 
+// Every sub-app below is mounted at /api/clients, and a sub-app's use("*")
+// applies to the whole prefix, so per-file session/beta middleware ran once
+// per sub-app (25 session lookups per request). Gate the prefix exactly once.
+app.use("/api/clients/*", requireSession, requireActiveBeta);
 app.route("/api/clients", clientRoutes);
 app.route("/api/clients", categoryRoutes);
 app.route("/api/clients", receiptRoutes);

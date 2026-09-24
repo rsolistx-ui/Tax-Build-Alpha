@@ -2,8 +2,6 @@ import { Hono } from "hono";
 import { createDb } from "../db";
 import type { Env } from "../env";
 import type { AuthedVars } from "../middleware/session";
-import { requireSession } from "../middleware/session";
-import { requireActiveBeta } from "../middleware/beta";
 import { ensureFirm } from "../services/firm";
 import { getClient } from "../services/clients";
 import { getClientProfile } from "../services/client-profile";
@@ -12,8 +10,6 @@ import { computeDifAuditReport, type DifInputData } from "../services/dif-audit-
 import { newId } from "../lib/id";
 
 export const difAuditRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
-difAuditRoutes.use("*", requireSession);
-difAuditRoutes.use("*", requireActiveBeta);
 
 difAuditRoutes.get("/:clientId/dif-audit", async (c) => {
   const db = createDb(c.env);

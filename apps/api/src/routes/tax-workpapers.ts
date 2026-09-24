@@ -3,13 +3,11 @@ import { z } from "zod";
 import { createDb } from "../db";
 import type { Env } from "../env";
 import type { AuthedVars } from "../middleware/session";
-import { requireSession } from "../middleware/session";
 import { ensureFirm } from "../services/firm";
 import { getClient } from "../services/clients";
 import { getTaxWorkpaper, upsertTaxWorkpaper } from "../services/tax-workpapers";
 
 export const taxWorkpaperRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
-taxWorkpaperRoutes.use("*", requireSession);
 
 taxWorkpaperRoutes.get("/:clientId/tax-workpaper/:taxYear", async (c) => {
   const db = createDb(c.env);

@@ -3,8 +3,6 @@ import { z } from "zod";
 import { createDb } from "../db";
 import type { Env } from "../env";
 import type { AuthedVars } from "../middleware/session";
-import { requireSession } from "../middleware/session";
-import { requireActiveBeta } from "../middleware/beta";
 import { ensureFirm } from "../services/firm";
 import { getClient } from "../services/clients";
 import { listCarryforwards, createCarryforward, utilizeCarryforward } from "../services/tax-carryforwards";
@@ -14,8 +12,6 @@ import { priorYearCompare } from "../services/tax-prior-year";
 import { listExtensions, createExtension } from "../services/tax-extensions";
 
 export const taxExtendedRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
-taxExtendedRoutes.use("*", requireSession);
-taxExtendedRoutes.use("*", requireActiveBeta);
 
 taxExtendedRoutes.get("/:clientId/carryforwards", async (c) => {
   const db = createDb(c.env); const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
