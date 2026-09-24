@@ -2,7 +2,25 @@
 
 **Written:** 2026-09-22 (updated same day after the e-file signing build, see §4). This replaces the previous handoff, which was stale (it predated the last ~180 files of changes). Everything below is verified against the actual codebase and a live production smoke test, not assumed.
 
-## Status: core loop is real and verified live. Native e-sign is the next real milestone.
+## Status: core loop is real and verified live. M6 (native e-sign) done; M7 (Tax Workbench) shipped 2026-09-24; M8 (return engine) not started.
+
+## 0. Session of 2026-09-24 (latest; read this first)
+
+All committed, pushed, deployed, and verified with a passing production smoke test (last: Worker version `abe3f3b8`, commit `fb08503`).
+
+**M7 Tax Workbench** (`/workbench`, header nav + command palette):
+- Firm-wide prep status per tax year (`GET /api/workbench/:taxYear`), per-client detail (`GET /api/clients/:id/workbench/:taxYear`): readiness blockers, tax diagnostics, bookkeeping gaps, checklist, workpaper/M-1/mappings, each deep-linked to the fixing tab.
+- "Set up standard mappings" (form suggested from entity type; new Schedule C template), prior-year income/expenses/net vs this year, one-click copy of last year's document checklist (`POST /tax-readiness/:taxYear/checklist/prefill-prior-year`).
+- One readiness gate: `PUT /tax-readiness/:taxYear` (`checkReadinessTransitionAllowed`) now also blocks ready_for_preparation / preparation_started / complete on any tax diagnostic error (e.g. NO_MAPPINGS). The old PATCH workbench route and `services/tax-workbench.ts` are gone.
+
+**Bugs fixed (all were live in production):** workbench and return-engine gate read nonexistent `client_profiles.readiness_state`; `tax_form_mappings` firm-wide UNIQUE blocked a second client (migration `0069`); seed-defaults exceeded the 50-subrequest cap; organizer prefill queried nonexistent receipts columns; createReturn audit insert was invalid SQL swallowed by `.catch`; palette "support" and "phone upload" items were dead controls.
+
+**Platform facts learned (important):**
+- **Hono sub-app `use("*")` applies to the whole mount prefix.** With 25 sub-apps at `/api/clients`, every client request ran the session check 25x and the beta check 19x. Now gated once in `index.ts` (`app.use("/api/clients/*", requireSession, requireActiveBeta)`); `client-prefix-middleware.test.ts` forbids per-file `use("*")` on those sub-apps. Do not add middleware inside those route files.
+- **Workers free plan: 50 subrequests per request; every `db.query` is one.** Never loop queries per row; use one multi-row INSERT. Also a per-request CPU cap: `exceededCpu` 503s were seen on ordinary routes (smoke test retries 502/503/504, which hides them). Owner intends to buy Workers Paid ($5/mo).
+- **Workers Logs is on** (`[observability]` in `apps/api/wrangler.toml`); search a 500's `requestId` in dashboard > Workers & Pages > folio-api > Logs. The wrangler OAuth token cannot query logs via API. `wrangler tail --status error` shows only uncaught exceptions/CPU limits, not handled 500s.
+
+**Next (no keys needed):** M8 return engine is the remaining milestone and should not be started casually. Open owner items are unchanged: email-code enrollment, fingerprint test, password change, Azure/Turnstile/admin-email keys, attorney review, Workers Paid.
 
 A full production pipeline test passed end-to-end this session (exit 0): receipt upload → R2 → Workers AI extraction → per-client rule categorization → validation → review → filing → P&L → bank CSV import → matching → exceptions → client portal → professional review → close, plus cross-tenant isolation, tax-year readiness, and engagement automation. This was not a code-read — it was a real synthetic tenant created, exercised, and cleaned up against `https://folio-api.rsolistx.workers.dev`.
 
