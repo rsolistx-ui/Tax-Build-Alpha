@@ -362,7 +362,7 @@ taxAdjustmentRoutes.post("/:clientId/tax-form-mappings/seed-defaults", async (c)
   if (!client) return c.json({ error: "Client not found" }, 404);
 
   const body = z.object({
-    taxForm: z.enum(["1040", "1120", "1120S", "1065", "state_CA", "state_NY"]),
+    taxForm: z.enum(["1040", "SchC", "1120", "1120S", "1065", "state_CA", "state_NY"]),
     taxYear: z.number().int().min(2000).max(2100),
   }).parse(await c.req.json());
 

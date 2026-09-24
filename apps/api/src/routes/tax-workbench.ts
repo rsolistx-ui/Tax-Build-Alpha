@@ -8,6 +8,9 @@ import { ensureFirm } from "../services/firm";
 import { getClient } from "../services/clients";
 import { runTaxDiagnostics } from "../services/tax-diagnostics";
 import { checkReadinessTransitionAllowed, computeCanonicalReadiness, taxYearRange } from "./workspace";
+import { assemblePnlReport, isAccrualUnsupported } from "../services/reporting";
+import { priorYearChecklistCarryover } from "../services/documents";
+import { suggestTaxFormForEntity } from "../services/tax-form-mappings";
 
 export const taxWorkbenchRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 
@@ -25,8 +28,8 @@ taxWorkbenchRoutes.get("/:clientId/workbench/:taxYear", async (c) => {
 
   const [readiness] = await db.query<{ status: string; notes: string | null; updated_at: string }>(
     `SELECT status, notes, updated_at FROM tax_year_readiness WHERE client_id = $1 AND tax_year = $2`, [client.id, taxYear]);
-  const [profileRow] = await db.query<{ accounting_basis: string | null; default_currency: string }>(
-    `SELECT accounting_basis, default_currency FROM client_profiles WHERE client_id = $1`, [client.id]);
+  const [profileRow] = await db.query<{ accounting_basis: string | null; default_currency: string; entity_type: string | null }>(
+    `SELECT accounting_basis, default_currency, entity_type FROM client_profiles WHERE client_id = $1`, [client.id]);
   const { startDate, endDate } = taxYearRange(taxYear);
   const { row } = await computeCanonicalReadiness(db, client, (profileRow?.default_currency || "USD").toUpperCase(), taxYear, profileRow?.accounting_basis ?? null, startDate, endDate);
   const diagnostics = await runTaxDiagnostics(db, client.id, taxYear);
@@ -40,6 +43,19 @@ taxWorkbenchRoutes.get("/:clientId/workbench/:taxYear", async (c) => {
             (SELECT COUNT(*) FROM tax_form_mappings WHERE client_id = $2 AND tax_year = $3)::text AS mappings`,
     [firm.id, client.id, taxYear]);
   const readyCheck = await checkReadinessTransitionAllowed(db, client, taxYear, "ready_for_preparation");
+
+  // Prior-year comparison: the same canonical P&L used everywhere else, for
+  // this year and last year. Null when the client's basis is not reportable.
+  const pnlTotals = async (year: number) => {
+    const range = taxYearRange(year);
+    const report = await assemblePnlReport(db, client.id, range.startDate, range.endDate);
+    return isAccrualUnsupported(report) ? null : { income: report.income, expenses: report.expenses, net: report.net };
+  };
+  const checklistRows = (year: number) => db.query<{ doc_type: string; custom_label: string | null; status: string }>(
+    `SELECT doc_type, custom_label, status FROM document_checklist_items WHERE client_id = $1 AND tax_year = $2`, [client.id, year]);
+  const [currentTotals, priorTotals, priorChecklist, currentChecklist] = await Promise.all([
+    pnlTotals(taxYear), pnlTotals(taxYear - 1), checklistRows(taxYear - 1), checklistRows(taxYear),
+  ]);
 
   return c.json({
     client: { id: client.id, name: client.name },
@@ -60,6 +76,14 @@ taxWorkbenchRoutes.get("/:clientId/workbench/:taxYear", async (c) => {
     },
     checklist: { total: Number(checklist?.total ?? 0), outstanding: Number(checklist?.outstanding ?? 0) },
     sources: { workpaper: Boolean(sources?.workpaper), m1Status: sources?.m1_status ?? null, mappingCount: Number(sources?.mappings ?? 0) },
+    entityType: profileRow?.entity_type ?? null,
+    suggestedTaxForm: suggestTaxFormForEntity(profileRow?.entity_type),
+    priorYear: {
+      taxYear: taxYear - 1,
+      current: currentTotals,
+      prior: priorTotals,
+      checklistCarryoverCount: priorYearChecklistCarryover(priorChecklist, currentChecklist).length,
+    },
   });
 });
 

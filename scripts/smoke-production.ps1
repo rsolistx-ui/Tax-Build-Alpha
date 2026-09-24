@@ -1432,6 +1432,43 @@ try {
     throw "A blocked readiness change still altered Client A's status to '$($clientAReadinessAfterBlock.status)'."
   }
 
+  Write-Host "Seeding Schedule C mappings for two clients in one firm (per-client uniqueness, migration 0069)..."
+  $seedBody = @{ taxForm = "SchC"; taxYear = 2026 } | ConvertTo-Json -Compress
+  foreach ($seedClientId in @($clientAId, $clientBId)) {
+    $seedPayloadPath = New-JsonPayloadFile $seedBody
+    $seedResult = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-H", "Content-Type: application/json", "-X", "POST", "--data-binary", "@$seedPayloadPath", "$BaseUrl/api/clients/$seedClientId/tax-form-mappings/seed-defaults")
+    Remove-TempFile $seedPayloadPath
+    if ([int]$seedResult.seeded -lt 30) { throw "Schedule C seeding for $seedClientId returned $($seedResult.seeded) line(s), expected the full template." }
+  }
+  $clientAWorkbenchSeeded = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientAId/workbench/2026")
+  if ([int]$clientAWorkbenchSeeded.sources.mappingCount -lt 30) { throw "Workbench mapping count did not reflect the seeded Schedule C lines." }
+  if (@($clientAWorkbenchSeeded.diagnostics) | Where-Object { $_.code -eq "NO_MAPPINGS" }) { throw "NO_MAPPINGS diagnostic persisted after seeding mappings." }
+
+  Write-Host "Verifying prior-year checklist prefill copies last year's documents once, never twice..."
+  $priorItemBody = @{ taxYear = 2025; docType = "other"; customLabel = "Smoke prior-year lease" } | ConvertTo-Json -Compress
+  $priorItemPayloadPath = New-JsonPayloadFile $priorItemBody
+  $priorItem = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-H", "Content-Type: application/json", "-X", "POST", "--data-binary", "@$priorItemPayloadPath", "$BaseUrl/api/clients/$clientAId/checklist")
+  Remove-TempFile $priorItemPayloadPath
+  if ([int]$clientAWorkbenchSeeded.priorYear.checklistCarryoverCount -ne 0) { throw "Carryover count should be 0 before any prior-year checklist existed." }
+  $prefillFirst = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-X", "POST", "$BaseUrl/api/clients/$clientAId/tax-readiness/2026/checklist/prefill-prior-year")
+  $prefillSecond = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-X", "POST", "$BaseUrl/api/clients/$clientAId/tax-readiness/2026/checklist/prefill-prior-year")
+  if ([int]$prefillFirst.added -ne 1 -or [int]$prefillSecond.added -ne 0) {
+    throw "Prior-year prefill should add 1 then 0, got $($prefillFirst.added) then $($prefillSecond.added)."
+  }
+  $clientAReadinessPrefilled = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientAId/tax-readiness/2026")
+  $prefilledItem = @($clientAReadinessPrefilled.checklist) | Where-Object { $_.custom_label -eq "Smoke prior-year lease" -and $_.status -eq "expected" } | Select-Object -First 1
+  if (-not $prefilledItem) {
+    throw "The prefilled prior-year document is not on the 2026 checklist as expected."
+  }
+  # Restore Client A to no open checklist work so later dashboard assertions are unaffected.
+  $naBody = @{ status = "not_applicable" } | ConvertTo-Json -Compress
+  $naPayloadPath = New-JsonPayloadFile $naBody
+  foreach ($restoreId in @($prefilledItem.id, $priorItem.id)) {
+    $null = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-H", "Content-Type: application/json", "-X", "PATCH", "--data-binary", "@$naPayloadPath", "$BaseUrl/api/clients/$clientAId/checklist/$restoreId")
+  }
+  Remove-TempFile $naPayloadPath
+  if ($null -eq $clientAWorkbenchSeeded.priorYear) { throw "Workbench did not return the prior-year comparison block." }
+
   Write-Host "Setting up Client B missing-document and document-review scenario..."
   $clientBProfileBody = @{ entity_type = "llc"; tax_year = 2026; profile = @{ taxPrepRequired = $true } } | ConvertTo-Json -Compress
   $clientBProfilePayloadPath = New-JsonPayloadFile $clientBProfileBody

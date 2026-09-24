@@ -9,7 +9,7 @@ import { buildClientDashboardRow, buildDocumentWorkflowActions, buildUncategoriz
 import type { AnyDisposition } from "../services/pnl";
 import { isValidReadinessState, isProfessionalApprovalState, suggestReadinessState, type TaxReadinessState } from "../services/tax-readiness";
 import { runTaxDiagnostics } from "../services/tax-diagnostics";
-import { generateChecklist, isValidChecklistStatus, suggestDocumentType, sha256Hex, isValidDocumentType, isSupportedUpload, MAX_UPLOAD_BYTES, isValidTaxYear } from "../services/documents";
+import { generateChecklist, priorYearChecklistCarryover, isValidChecklistStatus, suggestDocumentType, sha256Hex, isValidDocumentType, isSupportedUpload, MAX_UPLOAD_BYTES, isValidTaxYear } from "../services/documents";
 import { getUncategorizedReceiptLines, summarizeUncategorizedReceiptLines, assemblePnlReport, isAccrualUnsupported } from "../services/reporting";
 
 export const workspaceRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
@@ -375,6 +375,35 @@ workspaceRoutes.post("/:clientId/tax-readiness/:taxYear/checklist/generate", asy
     await insertAudit(db, client.id, c.get("userId"), "checklist_generated", { existingCount: existing.length }, { addedCount: toInsert.length, taxYear });
   }
   return c.json({ added: toInsert.length, skippedExisting: generated.length - toInsert.length });
+});
+
+/** Organizer prefill: expect this year every document the client had on last year's checklist. */
+workspaceRoutes.post("/:clientId/tax-readiness/:taxYear/checklist/prefill-prior-year", async (c) => {
+  const { db, client } = await authorizedClient(c);
+  if (!client) return c.json({ error: "Not found" }, 404);
+  const taxYear = Number(c.req.param("taxYear"));
+  if (!Number.isInteger(taxYear)) return c.json({ error: "taxYear must be an integer" }, 400);
+
+  const rowsFor = (year: number) => db.query<{ doc_type: string; custom_label: string | null; status: string }>(
+    `SELECT doc_type, custom_label, status FROM document_checklist_items WHERE client_id = $1 AND tax_year = $2 ORDER BY created_at`,
+    [client.id, year],
+  );
+  const toInsert = priorYearChecklistCarryover(await rowsFor(taxYear - 1), await rowsFor(taxYear));
+  if (toInsert.length > 0) {
+    // One statement, not one per item: each query is a subrequest and the free plan caps them at 50.
+    const params: unknown[] = [client.id, taxYear];
+    const values = toInsert.map((item) => {
+      params.push(newId("chk"), item.docType, item.customLabel);
+      const n = params.length;
+      return `($${n - 2}, $1, $2, $${n - 1}, $${n}, 'expected')`;
+    });
+    await db.query(
+      `INSERT INTO document_checklist_items (id, client_id, tax_year, doc_type, custom_label, status) VALUES ${values.join(", ")}`,
+      params,
+    );
+    await insertAudit(db, client.id, c.get("userId"), "checklist_prefilled_from_prior_year", null, { addedCount: toInsert.length, taxYear, fromTaxYear: taxYear - 1 });
+  }
+  return c.json({ added: toInsert.length });
 });
 
 workspaceRoutes.post("/:clientId/checklist", async (c) => {

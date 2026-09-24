@@ -703,27 +703,34 @@ export function ExtensionsPanel({ clientId }: { clientId: string }) {
   );
 }
 
-export function OrganizerPanel({ clientId, taxForm }: { clientId: string; taxForm: string }) {
+export function OrganizerPanel({ clientId, taxForm, taxYear }: { clientId: string; taxForm: string; taxYear: number }) {
   const [checklist, setChecklist] = useState<any[]>([]);
-  const [prefillEnabled, setPrefillEnabled] = useState(false);
+  const [prefillResult, setPrefillResult] = useState<string | null>(null);
   useEffect(() => {
-    const url = prefillEnabled ? `/api/clients/${clientId}/tax-organizer/${taxForm}?prefill=1` : `/api/clients/${clientId}/tax-organizer/${taxForm}`;
-    api<{ checklist: any[] }>(url).then((d) => setChecklist(d.checklist)).catch(() => {});
-  }, [clientId, taxForm, prefillEnabled]);
+    api<{ checklist: any[] }>(`/api/clients/${clientId}/tax-organizer/${taxForm}`).then((d) => setChecklist(d.checklist)).catch(() => {});
+  }, [clientId, taxForm]);
+  async function prefillFromPriorYear() {
+    try {
+      const r = await api<{ added: number }>(`/api/clients/${clientId}/tax-readiness/${taxYear}/checklist/prefill-prior-year`, { method: "POST" });
+      setPrefillResult(r.added === 0 ? `Nothing to copy from ${taxYear - 1}.` : `Added ${r.added} document(s) from ${taxYear - 1} to the ${taxYear} checklist.`);
+    } catch (e) {
+      setPrefillResult(e instanceof Error ? e.message : "Could not copy last year's checklist.");
+    }
+  }
   return (
     <Card>
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
           <CardTitle className="text-sm">Organizer — {taxForm}</CardTitle>
-          <label className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={prefillEnabled} onChange={(e) => setPrefillEnabled(e.target.checked)} /> Prefill from prior year</label>
+          <Button size="sm" variant="outline" onClick={() => void prefillFromPriorYear()}>Copy {taxYear - 1} checklist</Button>
         </div>
       </CardHeader>
       <CardContent className="space-y-1">
+        {prefillResult ? <p className="text-xs text-[var(--color-muted-foreground)]">{prefillResult}</p> : null}
         {checklist.length === 0 ? <p className="text-sm text-[var(--color-muted-foreground)]">No organizer items.</p> : checklist.map((c: any) => (
           <div key={c.code} className="flex items-center gap-2 rounded-md border border-[var(--color-border)] px-3 py-2 text-sm">
             <span>{c.label}</span>
             {c.required ? <Badge className="bg-red-100 text-red-800">required</Badge> : null}
-            {c.prefilled ? <Badge className="bg-blue-100 text-blue-800">from prior year</Badge> : null}
           </div>
         ))}
       </CardContent>

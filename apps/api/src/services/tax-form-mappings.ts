@@ -111,33 +111,50 @@ export async function deleteTaxFormMapping(db: Db, firmId: string, mappingId: st
   await db.query(`DELETE FROM tax_form_mappings WHERE id = $1 AND firm_id = $2`, [mappingId, firmId]);
 }
 
+export type SeedableTaxForm = "1040" | "SchC" | "1120" | "1120S" | "1065" | "state_CA" | "state_NY";
+
+/**
+ * Best-effort default form for a client's free-text entity type. Only a
+ * suggestion: the professional picks the form before anything is seeded.
+ */
+export function suggestTaxFormForEntity(entityType: string | null | undefined): SeedableTaxForm {
+  const e = (entityType ?? "").toLowerCase().replace(/[\s-]+/g, "_");
+  if (e.includes("s_corp") || e === "scorp" || e.includes("1120s")) return "1120S";
+  if (e.includes("c_corp") || e === "ccorp" || e === "corporation" || e.includes("1120")) return "1120";
+  if (e.includes("partnership") || e.includes("1065")) return "1065";
+  if (e.includes("sole") || e.includes("llc") || e.includes("schedule_c") || e === "schc") return "SchC";
+  return "1040";
+}
+
 export async function seedDefaultTaxFormMappings(
   db: Db,
   firmId: string,
   clientId: string,
-  taxForm: "1040" | "1120" | "1120S" | "1065" | "state_CA" | "state_NY",
+  taxForm: SeedableTaxForm,
   taxYear: number
 ): Promise<number> {
   const templates = getDefaultTaxFormTemplates(taxForm, taxYear);
-  let seeded = 0;
+  if (templates.length === 0) return 0;
 
-  for (const entry of templates) {
-    const existing = await db.query<any>(
-      `SELECT id FROM tax_form_mappings WHERE firm_id = $1 AND client_id = $2 AND tax_form = $3 AND tax_year = $4 AND form_line_code = $5`,
-      [firmId, clientId, taxForm, taxYear, entry.formLineCode],
-    );
-    if (existing.length > 0) continue;
-
-    await createTaxFormMapping(db, firmId, clientId, {
-      taxForm,
-      taxYear,
-      formLineCode: entry.formLineCode,
-      formLineLabel: entry.formLineLabel,
-      mappingType: "direct",
-      sortOrder: entry.sortOrder,
-    });
-    seeded++;
-  }
+  // One statement: each db.query is a Neon HTTP subrequest, and the Workers
+  // free plan allows 50 per request. The old per-line check/insert/re-read
+  // loop made ~90 for Schedule C and failed. Existing lines are skipped by
+  // the per-client unique index (idx_tax_mapping_unique).
+  const params: unknown[] = [firmId, clientId, taxForm, taxYear];
+  const values = templates.map((entry) => {
+    params.push(newId("tfm"), entry.formLineCode, entry.formLineLabel, entry.sortOrder);
+    const n = params.length;
+    return `($${n - 3}, $1, $2, $3, $4, $${n - 2}, $${n - 1}, 'direct', $${n}, TRUE, NOW(), NOW())`;
+  });
+  const inserted = await db.query<{ id: string }>(
+    `INSERT INTO tax_form_mappings
+      (id, firm_id, client_id, tax_form, tax_year, form_line_code, form_line_label, mapping_type, sort_order, is_active, created_at, updated_at)
+     VALUES ${values.join(", ")}
+     ON CONFLICT (firm_id, client_id, tax_form, tax_year, form_line_code) WHERE client_id IS NOT NULL DO NOTHING
+     RETURNING id`,
+    params,
+  );
+  const seeded = inserted.length;
   return seeded;
 }
 
@@ -243,6 +260,39 @@ function getDefaultTaxFormTemplates(taxForm: string, taxYear: number): Array<{
       { formLineCode: "1065_18", formLineLabel: "Other deductions", sortOrder: 18 },
       { formLineCode: "1065_19", formLineLabel: "Total deductions", sortOrder: 19 },
       { formLineCode: "1065_20", formLineLabel: "Ordinary business income (loss)", sortOrder: 20 },
+    ],
+    // Schedule C (Form 1040), Profit or Loss From Business: Parts I and II line numbers.
+    "SchC": [
+      { formLineCode: "SchC_1", formLineLabel: "Gross receipts or sales", sortOrder: 1 },
+      { formLineCode: "SchC_2", formLineLabel: "Returns and allowances", sortOrder: 2 },
+      { formLineCode: "SchC_4", formLineLabel: "Cost of goods sold", sortOrder: 4 },
+      { formLineCode: "SchC_6", formLineLabel: "Other income", sortOrder: 6 },
+      { formLineCode: "SchC_7", formLineLabel: "Gross income", sortOrder: 7 },
+      { formLineCode: "SchC_8", formLineLabel: "Advertising", sortOrder: 8 },
+      { formLineCode: "SchC_9", formLineLabel: "Car and truck expenses", sortOrder: 9 },
+      { formLineCode: "SchC_10", formLineLabel: "Commissions and fees", sortOrder: 10 },
+      { formLineCode: "SchC_11", formLineLabel: "Contract labor", sortOrder: 11 },
+      { formLineCode: "SchC_13", formLineLabel: "Depreciation and section 179", sortOrder: 13 },
+      { formLineCode: "SchC_14", formLineLabel: "Employee benefit programs", sortOrder: 14 },
+      { formLineCode: "SchC_15", formLineLabel: "Insurance (other than health)", sortOrder: 15 },
+      { formLineCode: "SchC_16a", formLineLabel: "Interest: mortgage", sortOrder: 16 },
+      { formLineCode: "SchC_16b", formLineLabel: "Interest: other", sortOrder: 17 },
+      { formLineCode: "SchC_17", formLineLabel: "Legal and professional services", sortOrder: 18 },
+      { formLineCode: "SchC_18", formLineLabel: "Office expense", sortOrder: 19 },
+      { formLineCode: "SchC_19", formLineLabel: "Pension and profit-sharing plans", sortOrder: 20 },
+      { formLineCode: "SchC_20a", formLineLabel: "Rent or lease: vehicles, machinery, equipment", sortOrder: 21 },
+      { formLineCode: "SchC_20b", formLineLabel: "Rent or lease: other business property", sortOrder: 22 },
+      { formLineCode: "SchC_21", formLineLabel: "Repairs and maintenance", sortOrder: 23 },
+      { formLineCode: "SchC_22", formLineLabel: "Supplies", sortOrder: 24 },
+      { formLineCode: "SchC_23", formLineLabel: "Taxes and licenses", sortOrder: 25 },
+      { formLineCode: "SchC_24a", formLineLabel: "Travel", sortOrder: 26 },
+      { formLineCode: "SchC_24b", formLineLabel: "Deductible meals", sortOrder: 27 },
+      { formLineCode: "SchC_25", formLineLabel: "Utilities", sortOrder: 28 },
+      { formLineCode: "SchC_26", formLineLabel: "Wages", sortOrder: 29 },
+      { formLineCode: "SchC_27b", formLineLabel: "Other expenses", sortOrder: 30 },
+      { formLineCode: "SchC_28", formLineLabel: "Total expenses", sortOrder: 31 },
+      { formLineCode: "SchC_30", formLineLabel: "Business use of home", sortOrder: 32 },
+      { formLineCode: "SchC_31", formLineLabel: "Net profit or (loss)", sortOrder: 33 },
     ],
     "state_CA": [
       { formLineCode: "CA_1", formLineLabel: "Federal taxable income", sortOrder: 1 },

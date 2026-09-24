@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatDate } from "@/lib/formatters";
 
@@ -34,7 +35,26 @@ type Workbench = {
   };
   checklist: { total: number; outstanding: number };
   sources: { workpaper: boolean; m1Status: string | null; mappingCount: number };
+  suggestedTaxForm: string;
+  priorYear: {
+    taxYear: number;
+    current: Totals | null;
+    prior: Totals | null;
+    checklistCarryoverCount: number;
+  };
 };
+
+type Totals = { income: number; expenses: number; net: number };
+
+const SEEDABLE_FORMS = [
+  { id: "SchC", label: "Schedule C (sole proprietor)" },
+  { id: "1040", label: "Form 1040" },
+  { id: "1120S", label: "Form 1120-S (S corp)" },
+  { id: "1065", label: "Form 1065 (partnership)" },
+  { id: "1120", label: "Form 1120 (C corp)" },
+];
+
+const money = (n: number) => n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 
 const STATES = [
   "not_started",
@@ -189,6 +209,24 @@ function Row({ text, value, to, warn }: { text: string; value: string | number; 
   );
 }
 
+function MappingSetup({ suggested, disabled, onSetup }: { suggested: string; disabled: boolean; onSetup: (taxForm: string) => void }) {
+  const [taxForm, setTaxForm] = useState(suggested);
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-md border border-[var(--color-border)] px-3 py-2 text-sm">
+      <span className="mr-auto">No form mappings yet</span>
+      <select
+        className="h-8 rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-2 text-xs"
+        value={taxForm}
+        onChange={(e) => setTaxForm(e.target.value)}
+        aria-label="Tax form"
+      >
+        {SEEDABLE_FORMS.map((f) => <option key={f.id} value={f.id}>{f.label}{f.id === suggested ? " (suggested)" : ""}</option>)}
+      </select>
+      <Button size="sm" disabled={disabled} onClick={() => onSetup(taxForm)}>Set up standard mappings</Button>
+    </div>
+  );
+}
+
 function ClientWorkbench({ clientId, taxYear, onStatusChanged }: { clientId: string; taxYear: number; onStatusChanged: () => void }) {
   const [wb, setWb] = useState<Workbench | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -216,6 +254,20 @@ function ClientWorkbench({ clientId, taxYear, onStatusChanged }: { clientId: str
       onStatusChanged();
     } catch (e) {
       setSaveError(`${e instanceof Error ? e.message : "Failed to update."} Resolve the blockers below first.`);
+    } finally {
+      setSaving(false);
+      await load();
+    }
+  }
+
+  async function runAction(path: string, body?: unknown) {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await api(path, { method: "POST", body: body === undefined ? undefined : JSON.stringify(body) });
+      onStatusChanged();
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : "Action failed.");
     } finally {
       setSaving(false);
       await load();
@@ -305,6 +357,53 @@ function ClientWorkbench({ clientId, taxYear, onStatusChanged }: { clientId: str
             <Row text="Workpaper" value={wb.sources.workpaper ? "Started" : "None"} to={clientTab(clientId, "workpaper", taxYear)} />
             <Row text="M-1 reconciliation" value={wb.sources.m1Status ? label(wb.sources.m1Status) : "None"} to={clientTab(clientId, "workpaper", taxYear)} />
           </div>
+          {wb.sources.mappingCount === 0 ? (
+            <MappingSetup
+              suggested={wb.suggestedTaxForm}
+              disabled={saving}
+              onSetup={(taxForm) => void runAction(`/api/clients/${clientId}/tax-form-mappings/seed-defaults`, { taxForm, taxYear })}
+            />
+          ) : null}
+        </section>
+
+        <section className="space-y-2">
+          <h3 className="text-sm font-semibold">Compared with {wb.priorYear.taxYear}</h3>
+          {wb.priorYear.current && wb.priorYear.prior ? (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-[var(--color-muted-foreground)]">
+                  <th className="py-1 font-medium" />
+                  <th className="py-1 text-right font-medium">{wb.priorYear.taxYear}</th>
+                  <th className="py-1 text-right font-medium">{wb.taxYear}</th>
+                  <th className="py-1 text-right font-medium">Change</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(["income", "expenses", "net"] as const).map((k) => {
+                  const prior = wb.priorYear.prior![k];
+                  const current = wb.priorYear.current![k];
+                  return (
+                    <tr key={k} className="border-t border-[var(--color-border)]">
+                      <td className="py-1.5">{label(k)}</td>
+                      <td className="py-1.5 text-right tabular-nums">{money(prior)}</td>
+                      <td className="py-1.5 text-right tabular-nums">{money(current)}</td>
+                      <td className="py-1.5 text-right tabular-nums">{money(current - prior)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          ) : (
+            <p className="text-sm text-[var(--color-muted-foreground)]">Not available: this client's accounting basis is not reportable here.</p>
+          )}
+          {wb.priorYear.checklistCarryoverCount > 0 ? (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-[var(--color-border)] px-3 py-2 text-sm">
+              <span>{wb.priorYear.checklistCarryoverCount} document(s) from the {wb.priorYear.taxYear} checklist are not on this year's list</span>
+              <Button size="sm" variant="outline" disabled={saving} onClick={() => void runAction(`/api/clients/${clientId}/tax-readiness/${taxYear}/checklist/prefill-prior-year`)}>
+                Copy {wb.priorYear.taxYear} checklist
+              </Button>
+            </div>
+          ) : null}
         </section>
       </CardContent>
     </Card>

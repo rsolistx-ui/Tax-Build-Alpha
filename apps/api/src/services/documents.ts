@@ -141,6 +141,26 @@ export function generateChecklist(input: ChecklistGenerationInput): GeneratedChe
   return items;
 }
 
+type ChecklistRow = { doc_type: string; custom_label: string | null; status: string };
+
+/**
+ * Organizer prefill from the prior year: every document the client had on
+ * last year's checklist (anything not marked not_applicable) is expected
+ * again this year, unless this year's checklist already has it. Custom items
+ * all share doc_type "other", so the label is part of the identity.
+ */
+export function priorYearChecklistCarryover(prior: readonly ChecklistRow[], current: readonly ChecklistRow[]): GeneratedChecklistItem[] {
+  const key = (r: { doc_type: string; custom_label: string | null }) => `${r.doc_type}|${r.custom_label ?? ""}`;
+  const have = new Set(current.map(key));
+  const out: GeneratedChecklistItem[] = [];
+  for (const r of prior) {
+    if (r.status === "not_applicable" || have.has(key(r))) continue;
+    have.add(key(r));
+    out.push({ docType: r.doc_type as ChecklistDocType, customLabel: r.custom_label });
+  }
+  return out;
+}
+
 export function isDuplicateCandidate(newHash: string, existingHashes: readonly string[]): boolean {
   return existingHashes.includes(newHash);
 }

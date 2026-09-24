@@ -16,14 +16,9 @@ taxOrganizerRoutes.get("/:clientId/tax-organizer/:taxForm", async (c) => {
   const client = await getClient(db, c.req.param("clientId"), firm.id);
   if (!client) return c.json({ error: "Client not found" }, 404);
   const taxForm = c.req.param("taxForm");
-  const prefilledOnly = c.req.query("prefill") === "1";
-  let checklist = getOrganizerChecklist(taxForm);
-  if (prefilledOnly) {
-    const prior = await db.query<any>(`SELECT source_code FROM receipts WHERE firm_id=$1 AND client_id=$2 AND category=$3`, [firm.id, client.id, taxForm]);
-    const prefilled = new Set(prior.map((r: any) => r.source_code));
-    checklist = checklist.map((c) => ({ ...c, prefilled: prefilled.has(c.code) }));
-  }
-  return c.json({ checklist, taxForm });
+  // Prior-year prefill lives on the document checklist
+  // (POST /tax-readiness/:taxYear/checklist/prefill-prior-year).
+  return c.json({ checklist: getOrganizerChecklist(taxForm), taxForm });
 });
 
 taxOrganizerRoutes.get("/:clientId/tax-diagnostics/:taxYear", async (c) => {

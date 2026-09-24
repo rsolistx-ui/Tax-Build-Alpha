@@ -32,6 +32,11 @@ async function runQuery(query) {
 
 const checks = [
   {
+    label: "tax_form_mappings unique per client, not per firm (migration 0069)",
+    query: `SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'tax_form_mappings_firm_id_tax_form_tax_year_form_line_code_key')
+            AND EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_tax_mapping_unique')`,
+  },
+  {
     label: "audit_events entity_type/entity_id columns (migration 0068)",
     query: `SELECT 1 FROM information_schema.columns WHERE table_name = 'audit_events' AND column_name = 'entity_id'`,
   },

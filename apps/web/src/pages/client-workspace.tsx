@@ -637,7 +637,7 @@ export function ClientWorkspacePage() {
             <StateModsPanel clientId={clientId} taxYear={pinnedTaxYear ?? profile?.tax_year ?? new Date().getFullYear()} />
             <M3Panel clientId={clientId} taxYear={pinnedTaxYear ?? profile?.tax_year ?? new Date().getFullYear()} />
             <PriorYearPanel clientId={clientId} taxYear={pinnedTaxYear ?? profile?.tax_year ?? new Date().getFullYear()} />
-            <OrganizerPanel clientId={clientId} taxForm={profile?.entity_type === "c_corp" ? "1120" : profile?.entity_type === "s_corp" ? "1120S" : profile?.entity_type === "partnership" ? "1065" : "1040"} />
+            <OrganizerPanel clientId={clientId} taxYear={pinnedTaxYear ?? profile?.tax_year ?? new Date().getFullYear()} taxForm={profile?.entity_type === "c_corp" ? "1120" : profile?.entity_type === "s_corp" ? "1120S" : profile?.entity_type === "partnership" ? "1065" : "1040"} />
             <DiagnosticsPanel clientId={clientId} taxYear={pinnedTaxYear ?? profile?.tax_year ?? new Date().getFullYear()} />
           </div>
         </div>
