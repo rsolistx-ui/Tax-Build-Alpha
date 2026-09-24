@@ -2,9 +2,82 @@
 
 **Written:** 2026-09-22 (updated same day after the e-file signing build, see §4). This replaces the previous handoff, which was stale (it predated the last ~180 files of changes). Everything below is verified against the actual codebase and a live production smoke test, not assumed.
 
-## Status: core loop is real and verified live. M6 (native e-sign) done; M7 (Tax Workbench) shipped 2026-09-24; M8 (return engine) not started.
+## Status: core loop verified live. M6 (native e-sign) and M7 (Tax Workbench) done. Staff seats, roles and the Schedule C handoff to the preparer's tax software shipped 2026-09-24. Truepost does not compute or e-file returns (decision 2026-09-24: hand off to MyTAXPrepOffice instead; no 1040/MeF build for the 2027 season).
 
-## 0. Session of 2026-09-24 (latest; read this first)
+## 0. Session of 2026-09-24, afternoon (latest; read this first)
+
+Everything is committed and pushed to `main` (last commit `9cf6785`) and deployed (Worker `e5fd1662`). Neon migrations 0070 and 0071 are applied and `node scripts/verify-neon-schema.mjs` passes. Tests: 627 api, 84 web, 42 script. Market and gap analysis written up as a Claude doc: https://claude.ai/artifact/1vnuSfcSnxUBciTvw2ZrLR
+
+**Shipped (commits 74d6aad, a4ca80d, 3f535d8, 129f63d, bf5856c, 158cc3e, 9cf6785):**
+- **Phase 0 correctness.**
+  - Fake e-file endpoints removed. `submit`/`ack`/`reject`/`resolve-rejection` used to mark returns "transmitted" with a made-up MeF id.
+  - 1099-NEC/MISC threshold by payment year (`services/form-1099-threshold.ts`): $600 through 2025, $2,000 after (OBBBA). Attorney gross proceeds (1099-MISC box 10) stay at $600.
+  - The smoke test now fails the run if any request needed a 502/503/504 retry.
+  - W-9 "request" copy is honest: it records only and emails nothing.
+- **Schedule C handoff** (migration 0070 `category_tax_lines`).
+  - `services/tax-handoff.ts` and `routes/tax-handoff.ts`: `GET /api/clients/:id/tax-handoff/:year`, `.../xlsx`, `PUT .../lines`.
+  - Categories get a suggested line from their name; the preparer can override it (audited). Unassigned amounts are flagged, never dumped into 27b.
+  - The UI is the client workspace **Tax Bridge & 1099** tab (`components/tax-handoff-panel.tsx`), linked from the workbench. Phyllis files with MyTAXPrepOffice; the handoff gives line totals to key in.
+- **Staff seats, no cap** (migration 0071).
+  - Owners invite from the **Team** page (`/team`, `routes/firm-staff.ts`). Invites reuse `beta_invitations` with `firm_id`/`firm_role`, and redemption joins the owner's firm.
+  - Staff access follows the firm owner's entitlement (`loadAccessEntitlement` in `services/firm.ts`). One firm per user (unique index).
+  - Emails that already have an account can't be invited yet.
+- **Roles** owner / preparer / bookkeeper / read_only, all in `services/firm-roles.ts`.
+  - `firmRoleAllows` runs inside `requireActiveBeta`, which also sets `c.get("firmRole")`.
+  - Writes: money, staff and client deletion are owner-only; tax judgment and signatures are preparer and up.
+  - Reads: billing is owner-only; e-file records, the signature vault and consent text are preparer and up.
+  - A guard test (`firm-roles.test.ts`) scans every `/api/clients` write route and fails if one is unclassified. Classify new routes there.
+- **Signed records hidden from bookkeeper and read_only.** A signed record is an engagement letter or any document a `signature_requests` row points at; see `signedRecordDocumentSql`. Filtered in:
+  - the document list, source, signed-url, version history, review queue, and both review PATCHes
+  - the clean-exit manifest and ZIP
+  - agent-task lists (both) and engagement-draft approval
+  - download tokens, which are now scoped: `lib/signed-url.ts` `"unsigned"` tokens are re-checked at redemption.
+- **Security fixes found on the way.**
+  - Removed `POST /documents/:docId/versions`. It accepted any storage key, so a user could fetch another firm's file through signed-url.
+  - Version history is now scoped to the client.
+  - The clean-exit ZIP had 500'd for every client (sorted by a nonexistent `client_documents.created_at`).
+
+**Verification status:**
+- The full `scripts/smoke-production.ps1` last passed on Worker 63719ca6. Later runs stopped at Workers AI receipt extraction because the free daily allowance (10,000 neurons, resets 00:00 UTC) ran out. That is before any changed code.
+- **First thing next session: run the full smoke test.** It now also covers staff and roles, signed-document hiding and the ZIP.
+- Role changes after that were verified with a 24-assertion live script (owner and bookkeeper sessions, self-cleaning). It was not committed; its checks mirror the smoke staff step.
+- Seven auditor passes ran. All RED/AMBER findings are fixed, except the one below that was left by design.
+
+**Commands (PowerShell, from the repo root):**
+```
+# Deploy (builds web and deploys the Worker)
+npm run deploy:api
+
+# Apply ONE Neon migration (never replay all; 0012 is not idempotent), then verify
+$env:DATABASE_URL = ((Get-Content "apps\api\.dev.vars" | Where-Object { $_ -like 'DATABASE_URL=*' }) -replace '^DATABASE_URL=','').Trim('"')
+node scripts/neon-migrate.mjs migrations/neon/<file>.sql
+node scripts/verify-neon-schema.mjs
+
+# Full production smoke test (about 5 minutes, self-cleaning, uses Workers AI allowance)
+$env:SMOKE_CLEANUP_TOKEN = ((Get-Content "$env:OneDrive\Desktop\Truepost-SMOKE_CLEANUP_TOKEN.txt") | Where-Object { $_ -match '^[0-9a-f]{64}$' } | Select-Object -First 1)
+.\scripts\smoke-production.ps1 -BaseUrl https://folio-api.rsolistx.workers.dev
+```
+- A GateGuard hook asks for facts before the first Bash of a session and the first Write/Edit of each file. Answer it and retry.
+- Owner credentials for live checks are in `Truepost-Owner-Credentials.txt` on the desktop. Read them programmatically; never echo them.
+
+**Left as designed / open:**
+- The 1099 radar shows W-9 request status to bookkeepers. That's bookkeeping, and those requests have no document. It's a one-line change if the owner wants it hidden.
+- Next build is **client assignment**: staff see only the clients the owner assigns, with a per-person "sees all" switch. About 3 to 4 hours.
+- Pre-existing, not yet fixed:
+  - `POST /:clientId/signature-requests` does not check that `documentId` belongs to that client.
+  - The S-Corp calculator uses the 2024 Social Security wage base ($168,600).
+  - A duplicate, shadowed `GET /1099-radar` still lives in `routes/tax-radar-advisory.ts` with $600.
+  - The Team link is in the desktop header only.
+- The owner wants estimates in **hours**, not weeks.
+
+**Owner to-dos (unchanged unless noted):**
+- Email-code enrollment. Walkthrough given: sign in, **Confirm your email**, **Email me a code**, enter the 6 digits.
+- Fingerprint test, password change.
+- **Workers Paid and Resend Pro.** The owner says both are coming soon. Resend free is 100 emails a day, and sign-in codes depend on it.
+- Keys: Azure DI, Textract, Turnstile, admin email, Telegram.
+- Attorney review, WISP.
+
+## 0a. Session of 2026-09-24, morning
 
 All committed, pushed, deployed, and verified with a passing production smoke test (last: Worker version `71ee7f2c`). Independently audited twice (auditor agent); see "Audit follow-up" below.
 
