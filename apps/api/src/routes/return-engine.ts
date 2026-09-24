@@ -5,7 +5,7 @@ import type { Env } from "../env";
 import type { AuthedVars } from "../middleware/session";
 import { ensureFirm } from "../services/firm";
 import { getClient } from "../services/clients";
-import { createReturn, submitReturn, ackReturn, rejectReturn, resolveRejection, voidReturn } from "../services/return-engine";
+import { createReturn, voidReturn } from "../services/return-engine";
 
 export const returnEngineRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 
@@ -18,28 +18,6 @@ returnEngineRoutes.post("/:clientId/returns", async (c) => {
     try { const { appendSyncEvent, firePushes } = await import("../services/sync"); await appendSyncEvent(db, firm.id, c.get("userId"), "tax_return", ret?.id ?? client.id, "create", { taxYear: body.taxYear, formType: body.formType }); await firePushes(db, c.get("userId"), "Tax return created", `${body.formType} ${body.taxYear}`); } catch {}
     return c.json({ return: ret }, 201);
   } catch (e: any) { return c.json({ error: e.message }, 400); }
-});
-returnEngineRoutes.post("/:clientId/returns/:returnId/submit", async (c) => {
-  const db = createDb(c.env); const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
-  const client = await getClient(db, c.req.param("clientId"), firm.id); if (!client) return c.json({ error: "Client not found" }, 404);
-  try { return c.json({ return: await submitReturn(db, firm.id, client.id, c.req.param("returnId")) }); } catch (e: any) { return c.json({ error: e.message }, 400); }
-});
-returnEngineRoutes.post("/:clientId/returns/:returnId/ack", async (c) => {
-  const db = createDb(c.env); const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
-  const client = await getClient(db, c.req.param("clientId"), firm.id); if (!client) return c.json({ error: "Client not found" }, 404);
-  const body = await c.req.json().catch(() => ({} as any));
-  try { return c.json({ return: await ackReturn(db, firm.id, client.id, c.req.param("returnId"), body) }); } catch (e: any) { return c.json({ error: e.message }, 400); }
-});
-returnEngineRoutes.post("/:clientId/returns/:returnId/reject", async (c) => {
-  const db = createDb(c.env); const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
-  const client = await getClient(db, c.req.param("clientId"), firm.id); if (!client) return c.json({ error: "Client not found" }, 404);
-  const body = z.object({ rejectionCode: z.string().min(1), detail: z.string().optional() }).parse(await c.req.json());
-  try { return c.json({ return: await rejectReturn(db, firm.id, client.id, c.req.param("returnId"), body.rejectionCode, body.detail) }); } catch (e: any) { return c.json({ error: e.message }, 400); }
-});
-returnEngineRoutes.post("/:clientId/returns/:returnId/resolve-rejection", async (c) => {
-  const db = createDb(c.env); const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
-  const client = await getClient(db, c.req.param("clientId"), firm.id); if (!client) return c.json({ error: "Client not found" }, 404);
-  try { return c.json({ return: await resolveRejection(db, firm.id, client.id, c.req.param("returnId")) }); } catch (e: any) { return c.json({ error: e.message }, 400); }
 });
 returnEngineRoutes.post("/:clientId/returns/:returnId/void", async (c) => {
   const db = createDb(c.env); const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));

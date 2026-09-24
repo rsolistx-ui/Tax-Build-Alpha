@@ -8,6 +8,10 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 $BaseUrl = $BaseUrl.TrimEnd("/")
+# Every edge 502/503/504 is counted. The run still retries so it can finish
+# and clean up, but any retry fails the run at the end: a pass must mean no
+# request needed one (free-plan CPU-limit 503s used to hide behind retries).
+$script:TransientRetries = @()
 
 # Fail fast, before any production mutation happens: a run without a cleanup
 # token can create real synthetic firms/clients/documents/receipts with no
@@ -54,6 +58,7 @@ function Invoke-CurlJson([string[]]$CurlArgs, [int]$Attempt = 0) {
   if (($statusCode -eq 502 -or $statusCode -eq 503 -or $statusCode -eq 504) -and $Attempt -lt 3) {
     $delaySeconds = [Math]::Pow(2, $Attempt + 1)
     Write-Host "Transient HTTP $statusCode; retrying in $delaySeconds second(s) ($($Attempt + 1)/3)..." -ForegroundColor Yellow
+    $script:TransientRetries += "HTTP $statusCode on $(@($CurlArgs | Where-Object { $_ -like 'http*' })[0])"
     Start-Sleep -Seconds $delaySeconds
     return Invoke-CurlJson $CurlArgs ($Attempt + 1)
   }
@@ -1189,6 +1194,99 @@ try {
   Remove-TempFile $workbookPath
   Remove-TempFile $workbookHeadersPath
 
+  Write-Host "Verifying the Schedule C handoff reconciles every 2026 P&L dollar to a line or a needs-a-line item..."
+  $handoffPnl = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/pnl?startDate=2026-01-01&endDate=2026-12-31")
+  $handoffRes = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/tax-handoff/2026")
+  $handoff = $handoffRes.handoff
+  $handoffCats = @($handoff.categories)
+  $handoffIncome = (@($handoffCats | Where-Object { $_.side -eq "income" } | ForEach-Object { [double]$_.total }) | Measure-Object -Sum).Sum
+  $handoffExpenses = (@($handoffCats | Where-Object { $_.side -eq "expense" } | ForEach-Object { [double]$_.total }) | Measure-Object -Sum).Sum
+  if ([Math]::Abs([double]$handoffIncome - [double]$handoffPnl.income) -gt 0.01) { throw "Handoff income categories total $handoffIncome, P&L income is $($handoffPnl.income)." }
+  if ([Math]::Abs([double]$handoffExpenses - [double]$handoffPnl.expenses) -gt 0.01) { throw "Handoff expense categories total $handoffExpenses, P&L expenses are $($handoffPnl.expenses)." }
+  $cogsAmount = [double](@($handoff.lines) | Where-Object { $_.code -eq "SchC_4" } | Select-Object -First 1).amount
+  $unplacedExpenses = (@($handoff.needsLine | Where-Object { $_.side -eq "expense" } | ForEach-Object { [double]$_.total }) | Measure-Object -Sum).Sum
+  if ([Math]::Abs(([double]$handoff.totals.totalExpenses + $cogsAmount + [double]$unplacedExpenses) - [double]$handoffPnl.expenses) -gt 0.01) {
+    throw "Handoff lines ($($handoff.totals.totalExpenses)) + COGS ($cogsAmount) + needs-a-line ($unplacedExpenses) do not equal P&L expenses ($($handoffPnl.expenses))."
+  }
+  $lineTarget = $handoffCats | Where-Object { $_.categoryId -and $_.side -eq "expense" } | Select-Object -First 1
+  if (-not $lineTarget) { throw "Handoff returned no categorized expense to exercise a preparer line choice." }
+  $linePayloadPath = New-JsonPayloadFile (@{ categoryId = $lineTarget.categoryId; lineCode = "SchC_27b" } | ConvertTo-Json -Compress)
+  $clearPayloadPath = New-JsonPayloadFile (@{ categoryId = $lineTarget.categoryId; lineCode = $null } | ConvertTo-Json -Compress)
+  try {
+    $null = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-H", "Content-Type: application/json", "-X", "PUT", "--data-binary", "@$linePayloadPath", "$BaseUrl/api/clients/$clientId/tax-handoff/2026/lines")
+    $afterSet = @((Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/tax-handoff/2026")).handoff.categories) | Where-Object { $_.categoryId -eq $lineTarget.categoryId } | Select-Object -First 1
+    if ($afterSet.lineCode -ne "SchC_27b" -or $afterSet.source -ne "preparer") { throw "Preparer line choice did not persist (got $($afterSet.lineCode) / $($afterSet.source))." }
+    $null = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-H", "Content-Type: application/json", "-X", "PUT", "--data-binary", "@$clearPayloadPath", "$BaseUrl/api/clients/$clientId/tax-handoff/2026/lines")
+    $afterClear = @((Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/tax-handoff/2026")).handoff.categories) | Where-Object { $_.categoryId -eq $lineTarget.categoryId } | Select-Object -First 1
+    if ($afterClear.source -eq "preparer") { throw "Clearing the preparer line choice did not revert to the suggestion." }
+  } finally {
+    Remove-TempFile $linePayloadPath
+    Remove-TempFile $clearPayloadPath
+  }
+  $handoffXlsxPath = Join-Path $env:TEMP "folio-smoke-handoff-$([guid]::NewGuid().ToString('N')).xlsx"
+  $previousPreference = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    $handoffXlsxStatus = (& curl.exe --silent --output $handoffXlsxPath --write-out "%{http_code}" -c $cookieJar -b $cookieJar "$BaseUrl/api/clients/$clientId/tax-handoff/2026/xlsx")
+    $removedSubmitStatus = (& curl.exe --silent --output NUL --write-out "%{http_code}" -c $cookieJar -b $cookieJar -X POST "$BaseUrl/api/clients/$clientId/returns/ret_smoke/submit")
+    $removedAckStatus = (& curl.exe --silent --output NUL --write-out "%{http_code}" -c $cookieJar -b $cookieJar -X POST "$BaseUrl/api/clients/$clientId/returns/ret_smoke/ack")
+  } finally {
+    $ErrorActionPreference = $previousPreference
+  }
+  if ($handoffXlsxStatus -ne "200") { throw "Schedule C handoff spreadsheet returned HTTP $handoffXlsxStatus." }
+  if ((Get-Item $handoffXlsxPath).Length -lt 1000) { throw "Schedule C handoff spreadsheet was implausibly small." }
+  Remove-TempFile $handoffXlsxPath
+  if ($removedSubmitStatus -ne "404" -or $removedAckStatus -ne "404") { throw "Removed e-file endpoints still answer (submit $removedSubmitStatus, ack $removedAckStatus); expected 404." }
+  Write-Host "Handoff reconciled: income $handoffIncome, expenses $handoffExpenses, $(@($handoff.needsLine).Count) needing a line; fake e-file endpoints return 404."
+
+  Write-Host "Verifying staff seats and roles: owner invites a bookkeeper, bookkeeper joins the firm, role limits hold, owner removes them..."
+  $emailS = "folio-smoke-staff-$runId@example.com"
+  $passwordS = "Smoke!$([guid]::NewGuid().ToString('N').Substring(0, 18))"
+  $cookieJarS = Join-Path $env:TEMP "folio-smoke-cookies-s-$([guid]::NewGuid().ToString('N')).txt"
+  $staffInvitePath = New-JsonPayloadFile (@{ email = $emailS; role = "bookkeeper" } | ConvertTo-Json -Compress)
+  $staffInvite = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-H", "Content-Type: application/json", "--data-binary", "@$staffInvitePath", "$BaseUrl/api/firm/staff/invitations")
+  Remove-TempFile $staffInvitePath
+  if (-not $staffInvite.invitation.token) { throw "Staff invitation did not return a token." }
+  $staffRedeemPath = New-JsonPayloadFile (@{ token = $staffInvite.invitation.token; email = $emailS; password = $passwordS; name = "Folio Smoke Staff" } | ConvertTo-Json -Compress)
+  $null = Invoke-CurlJson @("-c", $cookieJarS, "-b", $cookieJarS, "-H", "Content-Type: application/json", "-H", "Origin: $BaseUrl", "--data-binary", "@$staffRedeemPath", "$BaseUrl/api/beta/redeem")
+  Remove-TempFile $staffRedeemPath
+  Enable-SmokeTwoStep $emailS
+  try {
+    $meS = Invoke-CurlJson @("-c", $cookieJarS, "-b", $cookieJarS, "$BaseUrl/api/me")
+    if ([string]$meS.firm.id -ne $firmId) { throw "Staff member landed in firm '$($meS.firm.id)', expected the owner's firm $firmId." }
+    $staffUserId = [string]$meS.user.id
+    $statusS = Invoke-CurlJson @("-c", $cookieJarS, "-b", $cookieJarS, "$BaseUrl/api/beta/status")
+    if (-not $statusS.allowed -or $statusS.firmRole -ne "bookkeeper") { throw "Staff access status is allowed=$($statusS.allowed), role=$($statusS.firmRole); expected allowed bookkeeper." }
+    $null = Invoke-CurlJson @("-c", $cookieJarS, "-b", $cookieJarS, "$BaseUrl/api/clients/$clientId/tax-handoff/2026")
+    $null = Invoke-CurlJson @("-c", $cookieJarS, "-b", $cookieJarS, "-X", "POST", "$BaseUrl/api/clients/$clientId/tax-readiness/2026/checklist/generate")
+    $signoffPath = New-JsonPayloadFile (@{ status = "professional_review" } | ConvertTo-Json -Compress)
+    $inviteByStaffPath = New-JsonPayloadFile (@{ email = "folio-smoke-nobody@example.com" } | ConvertTo-Json -Compress)
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+      $bookkeeperSignoffStatus = (& curl.exe --silent --output NUL --write-out "%{http_code}" -c $cookieJarS -b $cookieJarS -H "Content-Type: application/json" -X PUT --data-binary "@$signoffPath" "$BaseUrl/api/clients/$clientId/tax-readiness/2026")
+      $bookkeeperInviteStatus = (& curl.exe --silent --output NUL --write-out "%{http_code}" -c $cookieJarS -b $cookieJarS -H "Content-Type: application/json" -X POST --data-binary "@$inviteByStaffPath" "$BaseUrl/api/firm/staff/invitations")
+      $bookkeeperInvoiceStatus = (& curl.exe --silent --output NUL --write-out "%{http_code}" -c $cookieJarS -b $cookieJarS -H "Content-Type: application/json" -X POST --data-binary "@$inviteByStaffPath" "$BaseUrl/api/time-entries/$clientId/entries/convert-to-invoice")
+      $bookkeeperM3Status = (& curl.exe --silent --output NUL --write-out "%{http_code}" -c $cookieJarS -b $cookieJarS -H "Content-Type: application/json" -X POST --data-binary "@$inviteByStaffPath" "$BaseUrl/api/clients/$clientId/m3")
+    } finally {
+      $ErrorActionPreference = $previousPreference
+      Remove-TempFile $signoffPath
+      Remove-TempFile $inviteByStaffPath
+    }
+    if ($bookkeeperSignoffStatus -ne "403") { throw "A bookkeeper changed tax readiness status (HTTP $bookkeeperSignoffStatus); expected 403." }
+    if ($bookkeeperInviteStatus -ne "403") { throw "A bookkeeper invited staff (HTTP $bookkeeperInviteStatus); expected 403." }
+    if ($bookkeeperInvoiceStatus -ne "403") { throw "A bookkeeper reached time-entry invoicing (HTTP $bookkeeperInvoiceStatus); expected 403." }
+    if ($bookkeeperM3Status -ne "403") { throw "A bookkeeper reached Schedule M-3 entry (HTTP $bookkeeperM3Status); expected 403." }
+    $teamS = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/firm/staff")
+    if (@($teamS.members).Count -ne 2) { throw "Owner's team lists $(@($teamS.members).Count) members, expected 2." }
+    $null = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-X", "DELETE", "$BaseUrl/api/firm/staff/$staffUserId")
+    $removedStaffStatus = Get-HttpStatusOnly "$BaseUrl/api/clients" $cookieJarS
+    if ($removedStaffStatus -ne "401" -and $removedStaffStatus -ne "403") { throw "Removed staff member still reached /api/clients (HTTP $removedStaffStatus)." }
+    Write-Host "Staff seats verified: bookkeeper joined firm $firmId, sign-off, invites, invoicing and M-3 refused (403), removal cut access (HTTP $removedStaffStatus)."
+  } finally {
+    Remove-TempFile $cookieJarS
+  }
+
   Write-Host "Verifying the excluded EUR/personal activity is present in export data but absent from operating P&L income/expenses composition..."
   $exportPreviewExcludedCount = [int]$exportPreview.excludedTransactions
   if ($exportPreviewExcludedCount -lt 1) { throw "Expected at least one excluded/nonbusiness transaction in the export preview, found $exportPreviewExcludedCount." }
@@ -2110,4 +2208,10 @@ try {
       Write-Host "WARNING: SMOKE_CLEANUP_TOKEN is not set in this environment; synthetic tenant $firmId was NOT cleaned up." -ForegroundColor Yellow
     }
   }
+}
+
+if ($script:TransientRetries.Count -gt 0) {
+  Write-Host "SMOKE FAILED: $($script:TransientRetries.Count) request(s) needed a retry after an edge 502/503/504:" -ForegroundColor Red
+  $script:TransientRetries | ForEach-Object { Write-Host "  $_" -ForegroundColor Red }
+  exit 1
 }

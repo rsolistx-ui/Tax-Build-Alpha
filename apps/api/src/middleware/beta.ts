@@ -4,6 +4,8 @@ import type { AuthedVars } from "./session";
 import { createDb } from "../db";
 import { computeAccessDecision, type EntitlementRow } from "../services/beta";
 import { insertBetaAccessEvent } from "../services/beta-db";
+import { loadAccessEntitlement } from "../services/firm";
+import { firmRoleAllows } from "../services/firm-roles";
 import { getCookie } from "hono/cookie";
 import { ADMIN_UNLOCK_COOKIE, isValidAdminUnlock, turnstileConfigured } from "../services/admin-unlock";
 
@@ -42,17 +44,15 @@ export const requireActiveBeta = createMiddleware<{ Bindings: Env; Variables: Au
 
   const db = createDb(c.env);
   const userId = c.get("userId");
-  const [row] = await db.query<{ status: string; expires_at: string }>(
-    `SELECT status, expires_at FROM beta_entitlements WHERE user_id = $1`,
-    [userId],
-  );
+  // Own entitlement, or the firm owner's for a staff member, plus firm role (one query).
+  const { entitlement: row, role } = await loadAccessEntitlement(db, userId);
   const entitlement: EntitlementRow | null = row
     ? { status: row.status as EntitlementRow["status"], expiresAt: row.expires_at }
     : null;
   const decision = computeAccessDecision(entitlement, new Date());
 
   if (!decision.allowed) {
-    if (row && row.status === "active" && decision.reason === "BETA_EXPIRED") {
+    if (row && row.source === "own" && row.status === "active" && decision.reason === "BETA_EXPIRED") {
       await db.query(
         `UPDATE beta_entitlements SET status = 'expired', updated_at = NOW() WHERE user_id = $1 AND status = 'active'`,
         [userId],
@@ -68,6 +68,10 @@ export const requireActiveBeta = createMiddleware<{ Bindings: Env; Variables: Au
       });
     }
     return c.json({ error: "Beta access required", code: decision.reason }, 403);
+  }
+
+  if (!firmRoleAllows(role, c.req.method, c.req.path)) {
+    return c.json({ error: "Your role in this firm does not allow this change.", code: "FIRM_ROLE_FORBIDDEN", role }, 403);
   }
 
   await next();

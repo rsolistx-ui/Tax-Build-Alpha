@@ -1,7 +1,6 @@
 import type { Db } from "../db";
 import { newId } from "../lib/id";
 import { runTaxDiagnostics } from "./tax-diagnostics";
-import { assertReturnSigned } from "./efile-signature";
 
 export type ReturnStatus = "draft" | "transmitted" | "accepted" | "rejected" | "voided";
 
@@ -17,46 +16,6 @@ export async function createReturn(db: Db, firmId: string, clientId: string, tax
   await db.query(`INSERT INTO audit_events (id, firm_id, client_id, event, actor_user_id, metadata, created_at) VALUES ($1,$2,$3,'return_created',$4,$5::jsonb,NOW())`,
     [newId("aud"), firmId, clientId, actorUserId, JSON.stringify({ returnId: id, taxYear, formType })]);
   return row;
-}
-
-export async function submitReturn(db: Db, firmId: string, clientId: string, returnId: string) {
-  const [r] = await db.query<any>(`SELECT * FROM tax_returns WHERE id=$1 AND firm_id=$2 AND client_id=$3`, [returnId, firmId, clientId]);
-  if (!r) throw new Error("Return not found");
-  if (r.status !== "draft") throw new Error("Only draft returns can be submitted");
-  await assertReturnSigned(db, returnId);
-  const submissionId = `FOLIO-${r.tax_year}-${r.form_type}-${returnId.slice(0, 8).toUpperCase()}`;
-  await db.query(`UPDATE tax_returns SET status='transmitted', mef_submission_id=$1, updated_at=NOW() WHERE id=$2`, [submissionId, returnId]);
-  await db.query(`INSERT INTO tax_diagnostics_cache (id, client_id, tax_year, diagnostics, created_at) VALUES ($1,$2,$3,$4::jsonb,NOW()) ON CONFLICT DO NOTHING`,
-    [crypto.randomUUID(), clientId, r.tax_year, JSON.stringify({ submittedAt: new Date().toISOString(), mefSubmissionId: submissionId })]).catch(() => {});
-  return { ...r, status: "transmitted" as const, mef_submission_id: submissionId };
-}
-
-export async function ackReturn(db: Db, firmId: string, clientId: string, returnId: string, raw?: any) {
-  const [r] = await db.query<any>(`SELECT * FROM tax_returns WHERE id=$1 AND firm_id=$2 AND client_id=$3`, [returnId, firmId, clientId]);
-  if (!r) throw new Error("Return not found");
-  if (r.status !== "transmitted") throw new Error("Only transmitted returns can be accepted");
-  await db.query(`UPDATE tax_returns SET status='accepted', updated_at=NOW() WHERE id=$1`, [returnId]);
-  if (raw) await db.query(`INSERT INTO docusign_webhook_events (id, envelope_id, event, envelope_status, payload) VALUES ($1,$2,$3,$4,$5)`,
-    [crypto.randomUUID(), returnId, "mef_ack", "accepted", JSON.stringify(raw)]);
-  return { ...r, status: "accepted" as const };
-}
-
-export async function rejectReturn(db: Db, firmId: string, clientId: string, returnId: string, rejectionCode: string, detail?: string) {
-  const [r] = await db.query<any>(`SELECT * FROM tax_returns WHERE id=$1 AND firm_id=$2 AND client_id=$3`, [returnId, firmId, clientId]);
-  if (!r) throw new Error("Return not found");
-  if (r.status !== "transmitted" && r.status !== "rejected") throw new Error(`Cannot reject from status ${r.status}`);
-  await db.query(`UPDATE tax_returns SET status='rejected', updated_at=NOW() WHERE id=$1`, [returnId]);
-  await db.query(`INSERT INTO docusign_webhook_events (id, envelope_id, event, envelope_status, payload) VALUES ($1,$2,$3,$4,$5)`,
-    [crypto.randomUUID(), returnId, "mef_reject", "rejected", JSON.stringify({ rejectionCode, detail, at: new Date().toISOString() })]);
-  return { ...r, status: "rejected" as const, rejectionCode, detail };
-}
-
-export async function resolveRejection(db: Db, firmId: string, clientId: string, returnId: string) {
-  const [r] = await db.query<any>(`SELECT * FROM tax_returns WHERE id=$1 AND firm_id=$2 AND client_id=$3`, [returnId, firmId, clientId]);
-  if (!r) throw new Error("Return not found");
-  if (r.status !== "rejected") throw new Error("Only rejected returns can be resolved");
-  await db.query(`UPDATE tax_returns SET status='draft', updated_at=NOW() WHERE id=$1`, [returnId]);
-  return { ...r, status: "draft" as const };
 }
 
 export async function voidReturn(db: Db, firmId: string, clientId: string, returnId: string, reason: string) {

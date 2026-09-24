@@ -601,7 +601,7 @@ export function ClientWorkspacePage() {
       ) : null}
 
       {tab === "tax-bridge" ? (
-        <TaxBridgePanel clientId={clientId} />
+        <TaxBridgePanel clientId={clientId} taxYear={pinnedTaxYear ?? profile?.tax_year ?? new Date().getFullYear()} />
       ) : null}
 
       {tab === "billing" ? (

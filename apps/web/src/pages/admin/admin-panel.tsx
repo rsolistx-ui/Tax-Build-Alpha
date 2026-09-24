@@ -30,7 +30,6 @@ import {
   History,
   Lock,
   ShieldAlert,
-  ExternalLink,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -983,31 +982,22 @@ export function AdminPanel() {
                   </div>
                 </div>
 
-                {/* 1099-NEC $600 Contractor Sentinel */}
+                {/* 1099-NEC contractor threshold */}
                 <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-card)] p-4 space-y-2">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <AlertTriangle className="h-4 w-4 text-purple-500" />
-                      <span className="font-semibold text-xs text-[var(--color-foreground)]">IRC § 6041 1099-NEC $600 Contractor Sentinel</span>
+                      <span className="font-semibold text-xs text-[var(--color-foreground)]">IRC § 6041 1099-NEC Contractor Threshold</span>
                     </div>
                     <Badge className="bg-purple-500/10 text-purple-700 dark:text-purple-400 text-[10px]">
                       1099 Compliance
                     </Badge>
                   </div>
                   <p className="text-xs text-[var(--color-muted-foreground)]">
-                    Cumulative payment accumulator monitors independent contractor disbursements crossing the $600 statutory filing threshold. Automatically queues Form W-9 TIN collection requests before December 31.
+                    Flags payees whose yearly total reaches the 1099-NEC threshold: $600 for payments through 2025, $2,000 from 2026. Preparers record W-9 requests from each client's Tax Bridge tab; nothing is sent automatically.
                   </p>
-                  <div className="pt-1 flex items-center justify-between">
+                  <div className="pt-1">
                     <span className="text-[11px] font-mono text-[var(--color-muted-foreground)]">Filing Rule: Form 1099-NEC</span>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => (window.location.href = "/contractors-1099")}
-                      className="text-xs h-7 gap-1 border-purple-500/30 text-purple-700 dark:text-purple-400 hover:bg-purple-500/10"
-                    >
-                      <ExternalLink className="h-3 w-3" />
-                      View Contractor Hub
-                    </Button>
                   </div>
                 </div>
               </div>

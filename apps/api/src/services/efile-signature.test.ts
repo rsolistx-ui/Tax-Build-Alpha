@@ -6,7 +6,6 @@ import {
   signInPerson, signRemotelyAfterKba, validateTaxpayerPin, verifyEfileEvidence, type EfileAuthorizationRow,
 } from "./efile-signature";
 import { resolveKbaProvider, type KbaProvider } from "./kba-providers";
-import { submitReturn } from "./return-engine";
 import { sha256Hex } from "./documents";
 
 // 1x1 transparent PNG.
@@ -201,14 +200,5 @@ describe("transmission gate", () => {
   });
   it("allows a return whose 8879s are all signed", async () => {
     await expect(assertReturnSigned(mockDb(() => [{ taxpayer_role: "primary", status: "signed" }]).db, "ret_1")).resolves.toBeUndefined();
-  });
-  it("submitReturn refuses to transmit an unsigned return", async () => {
-    const { db, statements } = mockDb((sql) => {
-      if (sql.startsWith("SELECT * FROM tax_returns")) return [{ id: "ret_1", status: "draft", tax_year: 2025, form_type: "1040" }];
-      if (sql.includes("FROM efile_authorizations")) return [];
-      return undefined;
-    });
-    await expect(submitReturn(db, "firm_1", "cli_1", "ret_1")).rejects.toThrow(/Form 8879 has not been prepared/);
-    expect(statements.some((s) => s.query.includes("status='transmitted'"))).toBe(false);
   });
 });

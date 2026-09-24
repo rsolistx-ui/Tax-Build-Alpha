@@ -10,6 +10,7 @@ import { listStateMods, createStateMod } from "../services/tax-state-mods";
 import { listM3, createM3, addM3Line } from "../services/tax-m3";
 import { priorYearCompare } from "../services/tax-prior-year";
 import { listExtensions, createExtension } from "../services/tax-extensions";
+import { form1099Threshold } from "../services/form-1099-threshold";
 
 export const taxExtendedRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 
@@ -149,7 +150,7 @@ taxExtendedRoutes.post("/:clientId/extensions", async (c) => {
   return c.json({ extension: await createExtension(db, firm.id, client.id, body) }, 201);
 });
 
-// 1099-NEC / 1099-MISC Contractor Threshold Radar ($600 IRS Rule)
+// 1099-NEC / 1099-MISC Contractor Threshold Radar (threshold set by payment year)
 taxExtendedRoutes.get("/:clientId/1099-radar", async (c) => {
   const db = createDb(c.env);
   const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
@@ -157,6 +158,7 @@ taxExtendedRoutes.get("/:clientId/1099-radar", async (c) => {
   if (!client) return c.json({ error: "Client not found" }, 404);
 
   const taxYear = Number(c.req.query("taxYear") || new Date().getFullYear());
+  const threshold = form1099Threshold(taxYear);
 
   // Aggregate bank transaction outflows by vendor description
   const rows = await db.query<{
@@ -198,7 +200,7 @@ taxExtendedRoutes.get("/:clientId/1099-radar", async (c) => {
 
   const contractors = rows.map((r) => {
     const totalPaid = Number(r.total_paid);
-    const requires1099 = totalPaid >= 600;
+    const requires1099 = totalPaid >= threshold;
     if (requires1099) {
       total1099Spend += totalPaid;
       requiring1099Count++;
@@ -222,14 +224,14 @@ taxExtendedRoutes.get("/:clientId/1099-radar", async (c) => {
       paymentCount: Number(r.payment_count),
       lastPaymentDate: r.last_payment,
       requires1099,
-      status: totalPaid >= 600 ? "exceeded_threshold" : totalPaid >= 450 ? "approaching_threshold" : "below_threshold",
+      status: totalPaid >= threshold ? "exceeded_threshold" : totalPaid >= threshold * 0.75 ? "approaching_threshold" : "below_threshold",
       w9Status,
     };
   });
 
   return c.json({
     taxYear,
-    statutoryThreshold: 600,
+    statutoryThreshold: threshold,
     summary: {
       totalVendorsEvaluated: contractors.length,
       requiring1099: requiring1099Count,
@@ -264,7 +266,7 @@ taxExtendedRoutes.post("/:clientId/1099-radar/request-w9", async (c) => {
       requestId,
       firm.id,
       client.id,
-      `IRS Form W-9 Request — ${body.contractorName}`,
+      `IRS Form W-9 Request: ${body.contractorName}`,
       JSON.stringify([{ name: body.contractorName, email: body.email, role: "contractor" }]),
       JSON.stringify([{ type: "signHere", pageNumber: 1, xPosition: 120, yPosition: 680 }]),
     ],
@@ -273,6 +275,6 @@ taxExtendedRoutes.post("/:clientId/1099-radar/request-w9", async (c) => {
   return c.json({
     ok: true,
     requestId,
-    message: `IRS Form W-9 electronic signature request dispatched to ${body.contractorName} (${body.email}) via Folio E-Sign Vault.`,
+    message: `Form W-9 request recorded for ${body.contractorName} (${body.email}). Nothing was emailed; send the W-9 to the contractor yourself.`,
   }, 201);
 });

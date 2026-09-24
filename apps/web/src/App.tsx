@@ -13,6 +13,7 @@ const BetaRedeemPage = lazy(() => import("@/pages/beta-redeem").then((module) =>
 const DocumentReviewPage = lazy(() => import("@/pages/document-review").then((module) => ({ default: module.DocumentReviewPage })));
 const WorkQueuePage = lazy(() => import("@/pages/work-queue").then((module) => ({ default: module.WorkQueuePage })));
 const TaxWorkbenchPage = lazy(() => import("@/pages/tax-workbench").then((module) => ({ default: module.TaxWorkbenchPage })));
+const TeamPage = lazy(() => import("@/pages/team").then((module) => ({ default: module.TeamPage })));
 const AgentDeskPage = lazy(() => import("@/pages/agent-desk").then((module) => ({ default: module.AgentDeskPage })));
 const PortalPage = lazy(() => import("@/pages/portal").then((module) => ({ default: module.PortalPage })));
 const ConsentPage = lazy(() => import("@/pages/consent").then((module) => ({ default: module.ConsentPage })));
@@ -52,6 +53,7 @@ export default function App() {
           <Route path="/documents/review" element={<DocumentReviewPage />} />
           <Route path="/work-queue" element={<WorkQueuePage />} />
           <Route path="/workbench" element={<TaxWorkbenchPage />} />
+          <Route path="/team" element={<TeamPage />} />
           <Route path="/agent-desk" element={<AgentDeskPage />} />
           <Route path="/analytics" element={<AnalyticsDashboard />} />
           <Route path="/connections" element={<ConnectionsPage />} />

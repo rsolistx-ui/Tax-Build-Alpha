@@ -32,6 +32,22 @@ async function runQuery(query) {
 
 const checks = [
   {
+    label: "staff invitations carry firm and role (migration 0071)",
+    query: `SELECT 1 FROM information_schema.columns WHERE table_name = 'beta_invitations' AND column_name = 'firm_role'`,
+  },
+  {
+    label: "one firm per user (migration 0071)",
+    query: `SELECT 1 FROM pg_indexes WHERE indexname = 'idx_firm_members_one_firm_per_user'`,
+  },
+  {
+    label: "category_tax_lines same-firm foreign key (migration 0071)",
+    query: `SELECT 1 FROM pg_constraint WHERE conname = 'fk_category_tax_lines_client_same_firm'`,
+  },
+  {
+    label: "category_tax_lines table (migration 0070)",
+    query: `SELECT 1 FROM information_schema.columns WHERE table_name = 'category_tax_lines' AND column_name = 'form_line_code'`,
+  },
+  {
     label: "tax_form_mappings unique per client, not per firm (migration 0069)",
     query: `SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'tax_form_mappings_firm_id_tax_form_tax_year_form_line_code_key')
             AND EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_tax_mapping_unique')`,

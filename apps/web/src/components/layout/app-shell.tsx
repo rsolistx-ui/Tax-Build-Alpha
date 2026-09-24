@@ -1,7 +1,7 @@
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 import { PasskeyOffer } from "@/components/passkey-offer";
 import { BrandMark } from "@/components/brand-mark";
-import { Bot, Building2, Calendar, ClipboardList, Clock, FolderKanban, Headphones, LayoutDashboard, Lightbulb, ListChecks, LogOut, Map, Sparkles, Users, Search, Settings } from "lucide-react";
+import { Bot, Building2, Calendar, ClipboardList, Clock, FolderKanban, Headphones, LayoutDashboard, Lightbulb, ListChecks, LogOut, Map, Sparkles, Users, UsersRound, Search, Settings } from "lucide-react";
 import { useEffect, useState } from "react";
 import { authClient } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
@@ -149,6 +149,20 @@ export function AppShell({
                 <span className="inline-flex items-center gap-1.5">
                   <ListChecks className="h-3.5 w-3.5" />
                   Tax Workbench
+                </span>
+              </NavLink>
+              <NavLink
+                to="/team"
+                className={({ isActive }) =>
+                  cn(
+                    "rounded-md px-3 py-1.5 text-sm text-[var(--color-muted-foreground)] hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)]",
+                    isActive && "bg-[var(--color-muted)] text-[var(--color-foreground)]",
+                  )
+                }
+              >
+                <span className="inline-flex items-center gap-1.5">
+                  <UsersRound className="h-3.5 w-3.5" />
+                  Team
                 </span>
               </NavLink>
               <NavLink

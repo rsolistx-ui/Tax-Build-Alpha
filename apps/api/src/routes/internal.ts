@@ -49,6 +49,16 @@ internalRoutes.post("/smoke-cleanup", async (c) => {
     return c.json({ error: "Refusing to clean up a firm that does not match an allowed cleanup naming convention." }, 400);
   }
 
+  // Every account tied to this firm: the owner, current staff, and staff who
+  // redeemed a firm invitation but were later removed. Read before the firm
+  // delete cascades firm_members and the firm's invitations away.
+  const staffRows = await db.query<{ user_id: string }>(
+    `SELECT user_id FROM firm_members WHERE firm_id = $1
+     UNION SELECT redeemed_by_user_id FROM beta_invitations WHERE firm_id = $1 AND redeemed_by_user_id IS NOT NULL`,
+    [firm.id],
+  );
+  const userIds = [...new Set([firm.owner_user_id, ...staffRows.map((r) => r.user_id)])];
+
   const clientRows = await db.query<{ id: string }>(`SELECT id FROM clients WHERE firm_id = $1`, [firm.id]);
   const clientIds = clientRows.map((r) => r.id);
   // The Db wrapper JSON-stringifies any object/array parameter, so a JS
@@ -74,12 +84,14 @@ internalRoutes.post("/smoke-cleanup", async (c) => {
 
   const betaMetadataFailures: string[] = [];
   try {
-    await db.query(
-      `DELETE FROM beta_access_events WHERE affected_user_id = $1 OR actor_user_id = $1`,
-      [firm.owner_user_id],
-    );
-    await db.query(`DELETE FROM beta_entitlements WHERE user_id = $1`, [firm.owner_user_id]);
-    await db.query(`DELETE FROM beta_invitations WHERE redeemed_by_user_id = $1`, [firm.owner_user_id]);
+    for (const userId of userIds) {
+      await db.query(
+        `DELETE FROM beta_access_events WHERE affected_user_id = $1 OR actor_user_id = $1`,
+        [userId],
+      );
+      await db.query(`DELETE FROM beta_entitlements WHERE user_id = $1`, [userId]);
+      await db.query(`DELETE FROM beta_invitations WHERE redeemed_by_user_id = $1`, [userId]);
+    }
   } catch (error) {
     betaMetadataFailures.push(error instanceof Error ? error.message : "unknown Neon error");
   }
@@ -95,9 +107,11 @@ internalRoutes.post("/smoke-cleanup", async (c) => {
 
   const authFailures: string[] = [];
   try {
-    await c.env.AUTH_DB.prepare(`DELETE FROM session WHERE userId = ?`).bind(firm.owner_user_id).run();
-    await c.env.AUTH_DB.prepare(`DELETE FROM account WHERE userId = ?`).bind(firm.owner_user_id).run();
-    await c.env.AUTH_DB.prepare(`DELETE FROM user WHERE id = ?`).bind(firm.owner_user_id).run();
+    for (const userId of userIds) {
+      await c.env.AUTH_DB.prepare(`DELETE FROM session WHERE userId = ?`).bind(userId).run();
+      await c.env.AUTH_DB.prepare(`DELETE FROM account WHERE userId = ?`).bind(userId).run();
+      await c.env.AUTH_DB.prepare(`DELETE FROM user WHERE id = ?`).bind(userId).run();
+    }
   } catch (error) {
     authFailures.push(error instanceof Error ? error.message : "unknown D1 error");
   }

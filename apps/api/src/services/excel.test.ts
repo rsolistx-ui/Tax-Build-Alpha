@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import ExcelJS from "exceljs";
-import { buildWorkbook, type WorkbookInput } from "./excel";
+import { buildTaxHandoffWorkbook, buildWorkbook, type WorkbookInput } from "./excel";
+import { buildTaxHandoff } from "./tax-handoff";
 import type { PnlReport } from "./reporting";
 
 function completePnl(overrides: Partial<PnlReport> = {}): PnlReport {
@@ -246,5 +247,47 @@ describe("buildWorkbook receipt source URL", () => {
     const wb = await readWorkbook(await buildWorkbook(input));
     const receiptSheet = wb.getWorksheet("RECEIPT EVIDENCE")!;
     expect(cellText(receiptSheet, 2, 15)).toBe("/api/clients/client_1/receipts/rec_1/source");
+  });
+});
+
+describe("buildTaxHandoffWorkbook", () => {
+  function handoffReport(isComplete: boolean): PnlReport {
+    return {
+      currency: "USD",
+      accountingBasis: "cash",
+      categorizedIncome: [{ categoryId: "inc1", category: "Sales", count: 1, total: 5000 }],
+      categorizedExpenses: [
+        { categoryId: "c1", category: "Supplies", count: 1, receiptCount: 1, bankCount: 0, total: 250 },
+        { categoryId: "c2", category: "Bank charges", count: 1, receiptCount: 0, bankCount: 1, total: 15 },
+      ],
+      completeness: { unclassifiedCount: 0, unresolvedTriageCount: 0, uncategorizedCount: 0, currencyConflictCount: 0, isComplete },
+    } as unknown as PnlReport;
+  }
+
+  async function sheetRows(isComplete: boolean) {
+    const handoff = buildTaxHandoff({ taxYear: 2025, report: handoffReport(isComplete), assigned: new Map() });
+    const wb = await readWorkbook(await buildTaxHandoffWorkbook({ clientName: "Acme", legalName: null, generatedAt: "2026-01-15T00:00:00.000Z", handoff }));
+    const sheet = wb.getWorksheet("SCHEDULE C")!;
+    const rows: unknown[][] = [];
+    sheet.eachRow((row) => rows.push((row.values as unknown[]).slice(1)));
+    return { rows, map: wb.getWorksheet("CATEGORY MAP")! };
+  }
+
+  it("puts each line's amount in form order with the totals", async () => {
+    const { rows } = await sheetRows(true);
+    expect(rows).toContainEqual(expect.arrayContaining(["1", "Gross receipts or sales", 5000]));
+    expect(rows).toContainEqual(expect.arrayContaining(["22", "Supplies", 250]));
+    expect(rows).toContainEqual(expect.arrayContaining(["Line 7 gross income", 5000]));
+    expect(rows).toContainEqual(expect.arrayContaining(["Line 29 tentative profit (before line 30 business use of home)", 4750]));
+    const lineOrder = rows.map((r) => r[0]).filter((v) => v === "1" || v === "22");
+    expect(lineOrder).toEqual(["1", "22"]);
+  });
+
+  it("marks the workbook DRAFT while a category has no line, and names it on the map", async () => {
+    const { rows, map } = await sheetRows(true);
+    expect(rows.some((r) => r[1] === "DRAFT - ITEMS REQUIRE PROFESSIONAL REVIEW")).toBe(true);
+    const mapRows: unknown[][] = [];
+    map.eachRow((row) => mapRows.push((row.values as unknown[]).slice(1)));
+    expect(mapRows).toContainEqual(expect.arrayContaining(["Bank charges", "expense", 15, "NEEDS A LINE"]));
   });
 });

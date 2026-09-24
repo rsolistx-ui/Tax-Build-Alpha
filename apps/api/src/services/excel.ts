@@ -10,6 +10,7 @@
 import ExcelJS from "exceljs";
 import { sanitizeSpreadsheetCell } from "./excel-safety";
 import type { PnlReport } from "./reporting";
+import type { TaxHandoff } from "./tax-handoff";
 import type {
   BankLedgerRow,
   ReceiptEvidenceRow,
@@ -174,6 +175,74 @@ export async function buildWorkbook(input: WorkbookInput): Promise<Uint8Array> {
         row.matchedReceiptId, row.receiptFilename, row.professionalNote, row.sourceTransactionId,
       ]),
     );
+  }
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  return new Uint8Array(buffer);
+}
+
+/**
+ * Tax software handoff workbook: Schedule C lines in form order for the
+ * preparer to key into their tax software, plus the category-to-line map
+ * behind every amount. Lays out an already-built TaxHandoff; computes nothing.
+ */
+export async function buildTaxHandoffWorkbook(input: {
+  clientName: string;
+  legalName: string | null;
+  generatedAt: string;
+  handoff: TaxHandoff;
+}): Promise<Uint8Array> {
+  const { handoff } = input;
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = "Truepost";
+  workbook.created = new Date(input.generatedAt);
+  const isDraft = !handoff.booksComplete || handoff.needsLine.length > 0;
+
+  const sheet = workbook.addWorksheet("SCHEDULE C");
+  sheet.columns = [{ width: 8 }, { width: 46 }, { width: 16 }, { width: 44 }, { width: 60 }];
+  const info: Array<[string, string | number]> = [
+    ["Client", input.clientName],
+    ["Legal name", input.legalName ?? "(not on file)"],
+    ["Form", `${handoff.form}, tax year ${handoff.taxYear}`],
+    ["Books period", `${handoff.periodStart} to ${handoff.periodEnd}`],
+    ["Accounting basis", handoff.accountingBasis],
+    ["Currency", handoff.currency],
+    ["Generated", input.generatedAt],
+    ["Status", isDraft ? "DRAFT - ITEMS REQUIRE PROFESSIONAL REVIEW" : "BOOKS COMPLETE"],
+  ];
+  for (const [label, value] of info) sheet.addRow(safeRow([label, value]));
+  if (isDraft) {
+    const reasons: string[] = [];
+    if (!handoff.booksComplete) reasons.push("the books have unresolved or uncategorized items");
+    if (handoff.needsLine.length > 0) reasons.push(`${handoff.needsLine.length} categor${handoff.needsLine.length === 1 ? "y has" : "ies have"} no Schedule C line`);
+    const warning = sheet.addRow(safeRow([`DRAFT: ${reasons.join("; ")}. Amounts below leave those items out.`]));
+    warning.font = { bold: true, color: { argb: "FFB00020" } };
+    sheet.mergeCells(warning.number, 1, warning.number, 5);
+  }
+  sheet.addRow([]);
+  addHeaderRow(sheet, ["Line", "Description", "Amount", "From categories", "Note"]);
+  for (const line of handoff.lines) {
+    const row = sheet.addRow(safeRow([line.line, line.label, line.amount, line.categories.join(", "), line.note]));
+    row.getCell(3).numFmt = "#,##0.00";
+  }
+  for (const [label, value] of [
+    ["Line 7 gross income", handoff.totals.grossIncome],
+    ["Line 28 total expenses (before line 13, 27a and 30 worksheets)", handoff.totals.totalExpenses],
+    ["Line 29 tentative profit (before line 30 business use of home)", handoff.totals.tentativeProfit],
+  ] as Array<[string, number]>) {
+    const row = sheet.addRow(safeRow(["", label, value]));
+    row.font = { bold: true };
+    row.getCell(3).numFmt = "#,##0.00";
+  }
+
+  const map = workbook.addWorksheet("CATEGORY MAP");
+  map.columns = [{ width: 36 }, { width: 10 }, { width: 16 }, { width: 10 }, { width: 46 }, { width: 22 }];
+  addHeaderRow(map, ["Category", "Type", "Amount", "Line", "Line description", "Line chosen by"]);
+  for (const cat of handoff.categories) {
+    const line = handoff.lines.find((l) => l.code === cat.lineCode);
+    const chosenBy = cat.source === "preparer" ? "Preparer" : cat.source === "suggested" ? "Suggested from name" : cat.categoryId ? "NEEDS A LINE" : "NEEDS A CATEGORY";
+    const row = map.addRow(safeRow([cat.category, cat.side, cat.total, line?.line ?? "", line?.label ?? "", chosenBy]));
+    row.getCell(3).numFmt = "#,##0.00";
   }
 
   const buffer = await workbook.xlsx.writeBuffer();

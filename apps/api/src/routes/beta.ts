@@ -7,7 +7,8 @@ import { requireSession, type AuthedVars } from "../middleware/session";
 import { requireOwner, isOwnerEmail } from "../middleware/beta";
 import { insertBetaAccessEvent, betaAccessEventStatement } from "../services/beta-db";
 import { newId } from "../lib/id";
-import { ensureFirm } from "../services/firm";
+import { ensureFirm, loadAccessEntitlement } from "../services/firm";
+import { ASSIGNABLE_ROLES, toFirmRole } from "../services/firm-roles";
 import {
   generateInviteToken,
   hashToken,
@@ -57,8 +58,10 @@ async function loadInvitationByTokenHash(db: ReturnType<typeof createDb>, tokenH
     expires_at: string;
     redeemed_at: string | null;
     beta_days: number;
+    firm_id: string | null;
+    firm_role: string | null;
   }>(
-    `SELECT id, email, status, expires_at, redeemed_at, beta_days FROM beta_invitations WHERE token_hash = $1`,
+    `SELECT id, email, status, expires_at, redeemed_at, beta_days, firm_id, firm_role FROM beta_invitations WHERE token_hash = $1`,
     [tokenHash],
   );
   return row;
@@ -169,6 +172,23 @@ betaRoutes.post("/redeem", async (c) => {
 
   const betaDays = invitationRow!.beta_days || DEFAULT_BETA_DAYS;
   const expiresAt = addDays(now, betaDays);
+  // A staff invitation joins the inviting firm and uses its owner's
+  // entitlement; a platform invitation gets an entitlement of its own.
+  const staffFirmId = invitationRow!.firm_id;
+  // An invitation can never make someone an owner.
+  const invitedRole = toFirmRole(invitationRow!.firm_role);
+  const staffRole = ASSIGNABLE_ROLES.includes(invitedRole) ? invitedRole : "read_only";
+  const accessStatement = staffFirmId
+    ? {
+        query: `INSERT INTO firm_members (id, firm_id, user_id, role) VALUES ($1, $2, $3, $4)`,
+        params: [newId("fm"), staffFirmId, newUserId, staffRole],
+      }
+    : {
+        query: `INSERT INTO beta_entitlements (user_id, status, starts_at, expires_at)
+                VALUES ($1, 'active', $2, $3)
+                ON CONFLICT (user_id) DO UPDATE SET status = 'active', starts_at = $2, expires_at = $3, revoked_at = NULL, revoked_by_user_id = NULL, revocation_reason = NULL, updated_at = NOW()`,
+        params: [newUserId, now.toISOString(), expiresAt.toISOString()],
+      };
 
   try {
     await db.transaction([
@@ -176,12 +196,7 @@ betaRoutes.post("/redeem", async (c) => {
         query: `UPDATE beta_invitations SET redeemed_by_user_id = $1, updated_at = NOW() WHERE id = $2`,
         params: [newUserId, invitationRow!.id],
       },
-      {
-        query: `INSERT INTO beta_entitlements (user_id, status, starts_at, expires_at)
-                VALUES ($1, 'active', $2, $3)
-                ON CONFLICT (user_id) DO UPDATE SET status = 'active', starts_at = $2, expires_at = $3, revoked_at = NULL, revoked_by_user_id = NULL, revocation_reason = NULL, updated_at = NOW()`,
-        params: [newUserId, now.toISOString(), expiresAt.toISOString()],
-      },
+      accessStatement,
       betaAccessEventStatement({
         action: "beta_invite_redeemed",
         actorUserId: newUserId,
@@ -195,7 +210,9 @@ betaRoutes.post("/redeem", async (c) => {
         actorUserId: newUserId,
         affectedUserId: newUserId,
         affectedEmail: body.email,
-        afterJson: { status: "active", startsAt: now.toISOString(), expiresAt: expiresAt.toISOString() },
+        afterJson: staffFirmId
+          ? { status: "active", staffOfFirmId: staffFirmId, role: staffRole }
+          : { status: "active", startsAt: now.toISOString(), expiresAt: expiresAt.toISOString() },
       }),
     ]);
   } catch (error) {
@@ -225,10 +242,7 @@ betaRoutes.get("/status", requireSession, async (c) => {
   if (owner) {
     return c.json({ isOwner: true, allowed: true, entitlement: null, mfaRequired });
   }
-  const [row] = await db.query<{ status: string; starts_at: string; expires_at: string }>(
-    `SELECT status, starts_at, expires_at FROM beta_entitlements WHERE user_id = $1`,
-    [c.get("userId")],
-  );
+  const { entitlement: row, role: firmRole } = await loadAccessEntitlement(db, c.get("userId"));
   const entitlement: EntitlementRow | null = row
     ? { status: row.status as EntitlementRow["status"], expiresAt: row.expires_at }
     : null;
@@ -238,6 +252,7 @@ betaRoutes.get("/status", requireSession, async (c) => {
     allowed: decision.allowed,
     reason: decision.allowed ? null : decision.reason,
     entitlement: row ? { status: row.status, startsAt: row.starts_at, expiresAt: row.expires_at } : null,
+    firmRole,
     mfaRequired,
   });
 });

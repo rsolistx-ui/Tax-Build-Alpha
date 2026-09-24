@@ -36,7 +36,7 @@ interface RadarData {
   contractors: ContractorItem[];
 }
 
-export function Contractor1099Panel({ clientId }: { clientId: string }) {
+export function Contractor1099Panel({ clientId, taxYear }: { clientId: string; taxYear: number }) {
   const [data, setData] = useState<RadarData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -46,13 +46,13 @@ export function Contractor1099Panel({ clientId }: { clientId: string }) {
 
   useEffect(() => {
     void loadRadar();
-  }, [clientId]);
+  }, [clientId, taxYear]);
 
   async function loadRadar() {
     setLoading(true);
     setError(null);
     try {
-      const res = await api<RadarData>(`/api/clients/${clientId}/1099-radar`);
+      const res = await api<RadarData>(`/api/clients/${clientId}/1099-radar?taxYear=${taxYear}`);
       setData(res);
     } catch (e: any) {
       setError(e?.message || "Failed to load 1099 contractor radar");
@@ -81,7 +81,7 @@ export function Contractor1099Panel({ clientId }: { clientId: string }) {
       setDispatchEmail("");
       void loadRadar();
     } catch (e: any) {
-      setError(e?.message || "Failed to dispatch W-9 request");
+      setError(e?.message || "Failed to record the W-9 request");
     }
   }
 
@@ -95,6 +95,7 @@ export function Contractor1099Panel({ clientId }: { clientId: string }) {
     );
   }
 
+  const thresholdLabel = data ? `$${data.statutoryThreshold.toLocaleString("en-US")}` : "...";
   const summary = data?.summary || { totalVendorsEvaluated: 0, requiring1099: 0, missingW9: 0, total1099Spend: 0 };
   const contractors = data?.contractors || [];
 
@@ -109,12 +110,12 @@ export function Contractor1099Panel({ clientId }: { clientId: string }) {
             <div>
               <CardTitle className="text-sm font-semibold">1099 Contractor Threshold Radar</CardTitle>
               <CardDescription className="text-xs">
-                Real-time tracking of payee spend against the $600 IRS statutory threshold for Form 1099-NEC.
+                Payee spend against the IRS Form 1099-NEC threshold for the tax year. Gross proceeds paid to attorneys (1099-MISC box 10) stay at $600; confirm those by hand.
               </CardDescription>
             </div>
           </div>
           <Badge className="border border-[var(--color-border)] bg-[var(--color-muted)] text-[var(--color-foreground)] text-xs">
-            Tax Year {data?.taxYear || new Date().getFullYear()} · Threshold: $600.00
+            Tax Year {data?.taxYear || new Date().getFullYear()} · Threshold: {thresholdLabel}
           </Badge>
         </div>
       </CardHeader>
@@ -139,7 +140,7 @@ export function Contractor1099Panel({ clientId }: { clientId: string }) {
           <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3">
             <p className="text-[11px] font-medium text-[var(--color-muted-foreground)]">1099-NEC Mandated</p>
             <p className="mt-1 text-lg font-bold text-rose-600 dark:text-rose-400">{summary.requiring1099}</p>
-            <p className="text-[10px] text-[var(--color-muted-foreground)]">Paid ≥ $600 statutory cap</p>
+            <p className="text-[10px] text-[var(--color-muted-foreground)]">Paid ≥ {thresholdLabel}</p>
           </div>
           <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3">
             <p className="text-[11px] font-medium text-[var(--color-muted-foreground)]">Missing W-9 on File</p>
@@ -165,7 +166,7 @@ export function Contractor1099Panel({ clientId }: { clientId: string }) {
           <div className="rounded-lg border border-indigo-200 bg-indigo-50/50 dark:border-indigo-900 dark:bg-indigo-950/30 p-3 space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold text-indigo-900 dark:text-indigo-200">
-                Dispatch IRS Form W-9 Request to {dispatchingVendor}
+                Record a Form W-9 request for {dispatchingVendor}
               </span>
               <button
                 type="button"
@@ -187,7 +188,7 @@ export function Contractor1099Panel({ clientId }: { clientId: string }) {
                 className="flex-1 rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-3 py-1.5 text-xs text-[var(--color-foreground)]"
               />
               <Button size="sm" onClick={() => void handleSendW9(dispatchingVendor)} className="gap-1 bg-indigo-600 hover:bg-indigo-700 text-white">
-                <Send className="h-3.5 w-3.5" /> Dispatch
+                <Send className="h-3.5 w-3.5" /> Record request
               </Button>
             </div>
           </div>

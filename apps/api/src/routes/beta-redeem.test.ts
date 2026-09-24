@@ -97,6 +97,39 @@ describe("redemption activation and audit events are atomic", () => {
     expect(queryCallOrder.every((order) => order < transactionCallOrder)).toBe(true);
   });
 
+  it("a staff invitation joins the inviting firm instead of creating an entitlement of its own", async () => {
+    queryMock.mockImplementation(async (sql: string) => {
+      if (sql.includes("SELECT id, email, status, expires_at, redeemed_at, beta_days")) {
+        return [{ ...PENDING_INVITATION, firm_id: "firm_owner1", firm_role: "bookkeeper" }];
+      }
+      if (sql.includes("UPDATE beta_invitations SET status = 'redeemed'")) {
+        return [{ id: PENDING_INVITATION.id }];
+      }
+      return [];
+    });
+    transactionMock.mockImplementation(async (statements: Array<{ query: string }>) => statements.map(() => []));
+    signUpEmailMock.mockResolvedValue(
+      new Response(JSON.stringify({ user: { id: "user-staff" } }), { status: 200, headers: { "content-type": "application/json" } }),
+    );
+
+    const { betaRoutes } = await import("./beta");
+    const res = await betaRoutes.request(
+      "/redeem",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ token: "test-token", email: "invitee@example.com", password: "password123", name: "Staff Member" }),
+      },
+      testEnv,
+    );
+
+    expect(res.status).toBe(200);
+    const statements = transactionMock.mock.calls[0][0] as Array<{ query: string; params?: unknown[] }>;
+    const membership = statements.find((s) => s.query.includes("INSERT INTO firm_members"));
+    expect(membership?.params).toEqual([expect.any(String), "firm_owner1", "user-staff", "bookkeeper"]);
+    expect(statements.some((s) => s.query.includes("INSERT INTO beta_entitlements"))).toBe(false);
+  });
+
   it("does not leave an orphan D1 account or a permanently claimed invitation when the post-signup Neon transaction fails", async () => {
     queryMock.mockImplementation(async (sql: string) => {
       if (sql.includes("SELECT id, email, status, expires_at, redeemed_at, beta_days")) {

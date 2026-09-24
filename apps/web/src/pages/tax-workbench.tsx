@@ -356,6 +356,7 @@ function ClientWorkbench({ clientId, taxYear, onStatusChanged }: { clientId: str
             <Row text="Form mappings" value={wb.sources.mappingCount} warn={wb.sources.mappingCount === 0} to={clientTab(clientId, "workpaper", taxYear)} />
             <Row text="Workpaper" value={wb.sources.workpaper ? "Started" : "None"} to={clientTab(clientId, "workpaper", taxYear)} />
             <Row text="M-1 reconciliation" value={wb.sources.m1Status ? label(wb.sources.m1Status) : "None"} to={clientTab(clientId, "workpaper", taxYear)} />
+            <Row text="Schedule C handoff" value="Open" to={clientTab(clientId, "tax-bridge", taxYear)} />
           </div>
           {wb.sources.mappingCount === 0 ? (
             <MappingSetup
