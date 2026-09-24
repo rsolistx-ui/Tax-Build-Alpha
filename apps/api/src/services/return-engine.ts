@@ -6,8 +6,8 @@ import { assertReturnSigned } from "./efile-signature";
 export type ReturnStatus = "draft" | "transmitted" | "accepted" | "rejected" | "voided";
 
 export async function createReturn(db: Db, firmId: string, clientId: string, taxYear: number, formType: string) {
-  const wb = await db.query<any>(`SELECT readiness_state FROM client_profiles WHERE client_id=$1`, [clientId]);
-  if (wb[0]?.readiness_state !== "ready_for_preparation" && wb[0]?.readiness_state !== "preparation_started") throw new Error("Workbench not ready — complete diagnostics and set readiness first (M7 gate)");
+  const wb = await db.query<any>(`SELECT status FROM tax_year_readiness WHERE client_id=$1 AND tax_year=$2`, [clientId, taxYear]);
+  if (wb[0]?.status !== "ready_for_preparation" && wb[0]?.status !== "preparation_started") throw new Error("Workbench not ready — complete diagnostics and set readiness first (M7 gate)");
   const diagnostics = await runTaxDiagnostics(db, clientId, taxYear);
   if (diagnostics.some((d) => d.severity === "error")) throw new Error(`Diagnostics blocking: ${diagnostics.filter((d) => d.severity === "error").map((d) => d.code).join(", ")}`);
   const existing = await db.query<any>(`SELECT id FROM tax_returns WHERE firm_id=$1 AND client_id=$2 AND tax_year=$3 AND form_type=$4 AND status NOT IN ('voided')`, [firmId, clientId, taxYear, formType]);

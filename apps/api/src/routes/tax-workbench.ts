@@ -1,47 +1,97 @@
 import { Hono } from "hono";
-import { z } from "zod";
 import { createDb } from "../db";
 import type { Env } from "../env";
 import type { AuthedVars } from "../middleware/session";
 import { requireSession } from "../middleware/session";
+import { requireActiveBeta } from "../middleware/beta";
 import { ensureFirm } from "../services/firm";
 import { getClient } from "../services/clients";
-import { getWorkbench, updateReadiness } from "../services/tax-workbench";
 import { runTaxDiagnostics } from "../services/tax-diagnostics";
-import { TAX_READINESS_STATES, isProfessionalApprovalState, suggestReadinessState } from "../services/tax-readiness";
+import { checkReadinessTransitionAllowed, computeCanonicalReadiness, taxYearRange } from "./workspace";
 
 export const taxWorkbenchRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 taxWorkbenchRoutes.use("*", requireSession);
 
+/**
+ * One client's tax-year workbench: the single readiness row (tax_year_readiness,
+ * the same one the Tax readiness tab writes), what blocks ready_for_preparation,
+ * and the source counts behind it. Readiness is changed only through
+ * PUT /tax-readiness/:taxYear, so there is one gate, not two.
+ */
 taxWorkbenchRoutes.get("/:clientId/workbench/:taxYear", async (c) => {
   const db = createDb(c.env); const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
   const client = await getClient(db, c.req.param("clientId"), firm.id); if (!client) return c.json({ error: "Client not found" }, 404);
   const taxYear = Number(c.req.param("taxYear"));
-  const wb = await getWorkbench(db, client.id, taxYear);
+  if (!Number.isInteger(taxYear)) return c.json({ error: "taxYear must be an integer" }, 400);
+
+  const [readiness] = await db.query<{ status: string; notes: string | null; updated_at: string }>(
+    `SELECT status, notes, updated_at FROM tax_year_readiness WHERE client_id = $1 AND tax_year = $2`, [client.id, taxYear]);
+  const [profileRow] = await db.query<{ accounting_basis: string | null; default_currency: string }>(
+    `SELECT accounting_basis, default_currency FROM client_profiles WHERE client_id = $1`, [client.id]);
+  const { startDate, endDate } = taxYearRange(taxYear);
+  const { row } = await computeCanonicalReadiness(db, client, (profileRow?.default_currency || "USD").toUpperCase(), taxYear, profileRow?.accounting_basis ?? null, startDate, endDate);
   const diagnostics = await runTaxDiagnostics(db, client.id, taxYear);
-  const blocked = diagnostics.some((d: any) => d.severity === "error");
-  void wb;
-  const suggestion = suggestReadinessState(diagnostics as any);
-  const extraction = await db.query<any>(
-    `SELECT source_type, count(*) as c FROM (
-       SELECT 'receipts' as source_type FROM receipts WHERE firm_id=$1 AND client_id=$2
-       UNION ALL SELECT 'bank' FROM bank_transactions WHERE firm_id=$1 AND client_id=$2
-       UNION ALL SELECT 'workpaper' FROM tax_workpapers WHERE firm_id=$3 AND client_id=$2
-       UNION ALL SELECT 'm1' FROM m1_reconciliations WHERE firm_id=$3 AND client_id=$2
-     ) t GROUP BY source_type`, [firm.id, client.id, firm.id]);
-  const reviewQueue = await db.query<any>(
-    `SELECT code, form_line_label as label, source_type FROM tax_form_mappings WHERE firm_id=$1 AND client_id=$2 AND tax_year=$3 AND source_type='draft' ORDER BY sort_order LIMIT 25`,
+  const [checklist] = await db.query<{ total: string; outstanding: string }>(
+    `SELECT COUNT(*) FILTER (WHERE status <> 'not_applicable')::text AS total,
+            COUNT(*) FILTER (WHERE status IN ('expected', 'requested'))::text AS outstanding
+     FROM document_checklist_items WHERE client_id = $1 AND tax_year = $2`, [client.id, taxYear]);
+  const [sources] = await db.query<{ workpaper: boolean; m1_status: string | null; mappings: string }>(
+    `SELECT EXISTS(SELECT 1 FROM tax_workpapers WHERE firm_id = $1 AND client_id = $2 AND tax_year = $3) AS workpaper,
+            (SELECT status FROM m1_reconciliations WHERE firm_id = $1 AND client_id = $2 AND tax_year = $3) AS m1_status,
+            (SELECT COUNT(*) FROM tax_form_mappings WHERE client_id = $2 AND tax_year = $3)::text AS mappings`,
     [firm.id, client.id, taxYear]);
-  return c.json({ ...wb, diagnostics, blocked, suggestedReadiness: suggestion, extractionSummary: extraction, reviewQueue });
+  const readyCheck = await checkReadinessTransitionAllowed(db, client, taxYear, "ready_for_preparation");
+
+  return c.json({
+    client: { id: client.id, name: client.name },
+    taxYear,
+    status: readiness?.status ?? "not_started",
+    notes: readiness?.notes ?? null,
+    updatedAt: readiness?.updated_at ?? null,
+    readyForPreparationBlockers: readyCheck.ok ? [] : readyCheck.reasons,
+    diagnostics,
+    bookkeeping: {
+      readiness: row.readiness,
+      receiptReviewCount: row.receiptReviewCount,
+      missingEvidenceCount: row.missingEvidenceCount,
+      unresolvedBankExceptionCount: row.unresolvedBankExceptionCount,
+      unclassifiedCount: row.unclassifiedCount,
+      uncategorizedCount: row.uncategorizedCount,
+      currencyConflictCount: row.currencyConflictCount,
+    },
+    checklist: { total: Number(checklist?.total ?? 0), outstanding: Number(checklist?.outstanding ?? 0) },
+    sources: { workpaper: Boolean(sources?.workpaper), m1Status: sources?.m1_status ?? null, mappingCount: Number(sources?.mappings ?? 0) },
+  });
 });
 
-taxWorkbenchRoutes.patch("/:clientId/workbench/:taxYear/readiness", async (c) => {
+/** Firm-wide preparation status for one tax year: every client in one query, no per-client diagnostics. */
+export const workbenchListRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
+workbenchListRoutes.use("*", requireSession);
+workbenchListRoutes.use("*", requireActiveBeta);
+
+workbenchListRoutes.get("/:taxYear", async (c) => {
   const db = createDb(c.env); const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
-  const client = await getClient(db, c.req.param("clientId"), firm.id); if (!client) return c.json({ error: "Client not found" }, 404);
-  const body = z.object({ state: z.enum(TAX_READINESS_STATES as any) }).parse(await c.req.json());
   const taxYear = Number(c.req.param("taxYear"));
-  const diagnostics = await runTaxDiagnostics(db, client.id, taxYear);
-  const hasErrors = diagnostics.some(d => d.severity === "error");
-  if (hasErrors && isProfessionalApprovalState(body.state as any)) return c.json({ error: "Diagnostics errors block readiness", diagnostics }, 400);
-  return c.json(await updateReadiness(db, client.id, body.state, c.get("userId")));
+  if (!Number.isInteger(taxYear)) return c.json({ error: "taxYear must be an integer" }, 400);
+  const rows = await db.query<{
+    id: string; name: string; status: string; updated_at: string | null;
+    tax_prep_required: boolean; checklist_total: string; checklist_outstanding: string;
+  }>(
+    `SELECT c.id, c.name, COALESCE(r.status, 'not_started') AS status, r.updated_at,
+            COALESCE(p.profile->>'taxPrepRequired', 'false') = 'true' AS tax_prep_required,
+            (SELECT COUNT(*) FROM document_checklist_items d WHERE d.client_id = c.id AND d.tax_year = $2 AND d.status <> 'not_applicable')::text AS checklist_total,
+            (SELECT COUNT(*) FROM document_checklist_items d WHERE d.client_id = c.id AND d.tax_year = $2 AND d.status IN ('expected', 'requested'))::text AS checklist_outstanding
+     FROM clients c
+     LEFT JOIN tax_year_readiness r ON r.client_id = c.id AND r.tax_year = $2
+     LEFT JOIN client_profiles p ON p.client_id = c.id
+     WHERE c.firm_id = $1
+     ORDER BY LOWER(c.name)`,
+    [firm.id, taxYear]);
+  return c.json({
+    taxYear,
+    clients: rows.map((r) => ({
+      id: r.id, name: r.name, status: r.status, updatedAt: r.updated_at, taxPrepRequired: r.tax_prep_required,
+      checklistTotal: Number(r.checklist_total), checklistOutstanding: Number(r.checklist_outstanding),
+    })),
+  });
 });

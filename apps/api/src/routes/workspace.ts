@@ -10,6 +10,7 @@ import { newId } from "../lib/id";
 import { buildClientDashboardRow, buildDocumentWorkflowActions, buildUncategorizedReceiptActions, sortActions, type DashboardBankTxn, type DashboardReceipt, type DashboardClientMeta } from "../services/dashboard";
 import type { AnyDisposition } from "../services/pnl";
 import { isValidReadinessState, isProfessionalApprovalState, suggestReadinessState, type TaxReadinessState } from "../services/tax-readiness";
+import { runTaxDiagnostics } from "../services/tax-diagnostics";
 import { generateChecklist, isValidChecklistStatus, suggestDocumentType, sha256Hex, isValidDocumentType, isSupportedUpload, MAX_UPLOAD_BYTES, isValidTaxYear } from "../services/documents";
 import { getUncategorizedReceiptLines, summarizeUncategorizedReceiptLines, assemblePnlReport, isAccrualUnsupported } from "../services/reporting";
 
@@ -47,7 +48,7 @@ export function countResolvedBankTxns(bankTxns: Array<{ triage: string | null }>
  * approximation (e.g. bank-only triage) of the same P&L completeness
  * signals used everywhere else.
  */
-async function computeCanonicalReadiness(
+export async function computeCanonicalReadiness(
   db: Db,
   client: { id: string; name: string; legal_name: string | null; updated_at: string },
   currency: string,
@@ -274,8 +275,9 @@ workspaceRoutes.get("/:clientId/tax-readiness/:taxYear", async (c) => {
  * Professional control remains required, but Folio must never let the
  * status say something that is not deterministically true yet: ready for
  * preparation / preparation started / complete all require bookkeeping to
- * actually be complete, and ready_for_preparation additionally requires no
- * required checklist item still sitting at expected/requested.
+ * actually be complete and no tax diagnostic errors (M7 gate), and
+ * ready_for_preparation additionally requires no required checklist item
+ * still sitting at expected/requested.
  */
 export async function checkReadinessTransitionAllowed(db: Db, client: { id: string; name: string; legal_name: string | null; updated_at: string }, taxYear: number, status: TaxReadinessState): Promise<{ ok: true } | { ok: false; reasons: string[] }> {
   if (!isProfessionalApprovalState(status)) return { ok: true };
@@ -290,6 +292,9 @@ export async function checkReadinessTransitionAllowed(db: Db, client: { id: stri
 
   const reasons: string[] = [];
   if (row.readiness !== "ready") reasons.push("bookkeeping_incomplete");
+
+  const diagnostics = await runTaxDiagnostics(db, client.id, taxYear);
+  if (diagnostics.some((d) => d.severity === "error")) reasons.push("tax_diagnostics_errors");
 
   if (status === "ready_for_preparation") {
     const [outstanding] = await db.query<{ count: string }>(

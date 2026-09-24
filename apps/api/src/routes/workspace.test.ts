@@ -177,6 +177,7 @@ describe("checkReadinessTransitionAllowed", () => {
   it("allows ready_for_preparation when bookkeeping is complete and no checklist items are outstanding", async () => {
     const { db } = fakeDb({
       "AND status IN ('expected', 'requested')": [{ count: "0" }],
+      "FROM tax_form_mappings": [{ c: "3" }],
     });
     const result = await checkReadinessTransitionAllowed(db, baseClient, 2025, "ready_for_preparation");
     expect(result).toEqual({ ok: true });
@@ -185,6 +186,7 @@ describe("checkReadinessTransitionAllowed", () => {
   it("blocks complete when bookkeeping is incomplete, without requiring the checklist check", async () => {
     const { db } = fakeDb({
       "matched_receipt_id, disposition FROM bank_transactions": [{ matched_receipt_id: "rcp_1", disposition: "unclassified" }],
+      "FROM tax_form_mappings": [{ c: "3" }],
       "disposition, triage, category_id, currency FROM bank_transactions": [
         { id: "txn_1", txn_date: "2025-01-01", description: "x", amount: -10, disposition: "unclassified", triage: "unmatched", category_id: null, currency: "USD" },
       ],
@@ -192,6 +194,29 @@ describe("checkReadinessTransitionAllowed", () => {
     const result = await checkReadinessTransitionAllowed(db, baseClient, 2025, "complete");
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reasons).toEqual(["bookkeeping_incomplete"]);
+  });
+});
+
+describe("checkReadinessTransitionAllowed tax diagnostics gate (M7)", () => {
+  it("blocks ready_for_preparation when a tax diagnostic is an error, even with bookkeeping and checklist clear", async () => {
+    const { db } = fakeDb({
+      "AND status IN ('expected', 'requested')": [{ count: "0" }],
+      "FROM tax_form_mappings": [{ c: "3" }],
+      "FROM tax_adjustment_journals": [{ id: "tj_1", status: "draft" }],
+    });
+    const result = await checkReadinessTransitionAllowed(db, baseClient, 2025, "ready_for_preparation");
+    expect(result).toEqual({ ok: false, reasons: ["tax_diagnostics_errors"] });
+  });
+
+  it("blocks preparation_started when the client has no tax form mappings for the year", async () => {
+    const { db } = fakeDb({});
+    const result = await checkReadinessTransitionAllowed(db, baseClient, 2025, "preparation_started");
+    expect(result).toEqual({ ok: false, reasons: ["tax_diagnostics_errors"] });
+  });
+
+  it("does not run the gate for non-approval states", async () => {
+    const { db } = fakeDb({ "FROM tax_adjustment_journals": [{ id: "tj_1", status: "draft" }] });
+    expect(await checkReadinessTransitionAllowed(db, baseClient, 2025, "collecting_documents")).toEqual({ ok: true });
   });
 });
 
@@ -303,6 +328,9 @@ function dateAwareFakeDb(bankRows: Array<{
       }
       if (sql.includes("FROM document_checklist_items WHERE client_id")) {
         return [{ count: "0" }] as unknown as T[];
+      }
+      if (sql.includes("FROM tax_form_mappings")) {
+        return [{ c: "1" }] as unknown as T[];
       }
       return [] as T[];
     },

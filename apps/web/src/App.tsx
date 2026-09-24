@@ -12,6 +12,7 @@ const AdminPanel = lazy(() => import("@/pages/admin/admin-panel").then((module) 
 const BetaRedeemPage = lazy(() => import("@/pages/beta-redeem").then((module) => ({ default: module.BetaRedeemPage })));
 const DocumentReviewPage = lazy(() => import("@/pages/document-review").then((module) => ({ default: module.DocumentReviewPage })));
 const WorkQueuePage = lazy(() => import("@/pages/work-queue").then((module) => ({ default: module.WorkQueuePage })));
+const TaxWorkbenchPage = lazy(() => import("@/pages/tax-workbench").then((module) => ({ default: module.TaxWorkbenchPage })));
 const AgentDeskPage = lazy(() => import("@/pages/agent-desk").then((module) => ({ default: module.AgentDeskPage })));
 const PortalPage = lazy(() => import("@/pages/portal").then((module) => ({ default: module.PortalPage })));
 const ConsentPage = lazy(() => import("@/pages/consent").then((module) => ({ default: module.ConsentPage })));
@@ -50,6 +51,7 @@ export default function App() {
           <Route path="/beta-admin" element={<Navigate to="/control" replace />} />
           <Route path="/documents/review" element={<DocumentReviewPage />} />
           <Route path="/work-queue" element={<WorkQueuePage />} />
+          <Route path="/workbench" element={<TaxWorkbenchPage />} />
           <Route path="/agent-desk" element={<AgentDeskPage />} />
           <Route path="/analytics" element={<AnalyticsDashboard />} />
           <Route path="/connections" element={<ConnectionsPage />} />
