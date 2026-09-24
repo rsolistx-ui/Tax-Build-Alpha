@@ -51,6 +51,12 @@ run_worker_first = ["/api/*"]
 [triggers]
 crons = ["0 13 * * 1-5", "*/30 * * * *"]
 
+# Workers Logs: keeps console output and exceptions so a 500's requestId
+# (logged by app.onError) can be traced after the fact, not only via live tail.
+[observability]
+enabled = true
+head_sampling_rate = 1
+
 # Folio's local dev port deliberately avoids 8787/8789, which are occupied by
 # another project on this machine (polymarket engine dev servers).
 [dev]
