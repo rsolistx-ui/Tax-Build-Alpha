@@ -39,8 +39,9 @@ agentDeskRoutes.get("/", async (c) => {
      FROM agent_tasks at
      JOIN clients c ON c.id = at.client_id AND c.firm_id = at.firm_id
      WHERE at.firm_id = $1 AND at.status = 'awaiting_approval'
+       AND ($2::boolean = false OR at.action_type <> 'engagement_letter_draft')
      ORDER BY at.created_at ASC`,
-    [firm.id],
+    [firm.id, !canReadSignedRecords(c.get("firmRole") ?? "read_only")],
   );
   return c.json({ tasks });
 });

@@ -4,6 +4,10 @@ import type { Env } from "../env";
 
 const queryMock = vi.fn();
 vi.mock("../db", () => ({ createDb: () => ({ query: queryMock, transaction: vi.fn(async () => []) }) }));
+// Session and access gates are exercised elsewhere; here they pass through so
+// the firm role set by each test reaches the handlers.
+vi.mock("../middleware/session", () => ({ requireSession: async (_c: any, next: any) => next() }));
+vi.mock("../middleware/beta", () => ({ requireActiveBeta: async (_c: any, next: any) => next() }));
 
 const engagementTask = {
   id: "task_1", source_type: "engagement_letter", source_id: "eng_1", action_type: "engagement_letter_draft",
@@ -49,6 +53,25 @@ describe("engagement-letter agent tasks by role", () => {
     const list = queryMock.mock.calls.find(([sql]) => String(sql).includes("FROM agent_tasks WHERE client_id"));
     expect(list?.[0]).toContain("engagement_letter_draft");
     expect(list?.[1]).toEqual(["cli_1", "firm_1", true]);
+  });
+
+  it("leaves engagement-letter drafts out of a bookkeeper's firm-wide agent desk", async () => {
+    const { agentDeskRoutes } = await import("./agent-supervisor");
+    for (const [role, hidden] of [["bookkeeper", true], ["preparer", false]] as const) {
+      queryMock.mockClear();
+      const app = new Hono<any>();
+      app.use("*", async (c, next) => {
+        c.set("userId", "user-1");
+        c.set("userName", "User");
+        c.set("firmRole", role);
+        await next();
+      });
+      app.route("/", agentDeskRoutes);
+      await app.request("/", {}, {} as Env);
+      const list = queryMock.mock.calls.find(([sql]) => String(sql).includes("FROM agent_tasks at"));
+      expect(list?.[0]).toContain("engagement_letter_draft");
+      expect(list?.[1]).toEqual(["firm_1", hidden]);
+    }
   });
 
   it("shows them to a preparer", async () => {
