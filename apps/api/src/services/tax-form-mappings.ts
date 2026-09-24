@@ -289,10 +289,12 @@ function getDefaultTaxFormTemplates(taxForm: string, taxYear: number): Array<{
       { formLineCode: "SchC_24b", formLineLabel: "Deductible meals", sortOrder: 27 },
       { formLineCode: "SchC_25", formLineLabel: "Utilities", sortOrder: 28 },
       { formLineCode: "SchC_26", formLineLabel: "Wages", sortOrder: 29 },
-      { formLineCode: "SchC_27b", formLineLabel: "Other expenses", sortOrder: 30 },
-      { formLineCode: "SchC_28", formLineLabel: "Total expenses", sortOrder: 31 },
-      { formLineCode: "SchC_30", formLineLabel: "Business use of home", sortOrder: 32 },
-      { formLineCode: "SchC_31", formLineLabel: "Net profit or (loss)", sortOrder: 33 },
+      // Since tax year 2023: 27a is the Form 7205 deduction and 27b is other expenses (from line 48).
+      { formLineCode: "SchC_27a", formLineLabel: "Energy efficient commercial buildings deduction", sortOrder: 30 },
+      { formLineCode: "SchC_27b", formLineLabel: "Other expenses", sortOrder: 31 },
+      { formLineCode: "SchC_28", formLineLabel: "Total expenses", sortOrder: 32 },
+      { formLineCode: "SchC_30", formLineLabel: "Business use of home", sortOrder: 33 },
+      { formLineCode: "SchC_31", formLineLabel: "Net profit or (loss)", sortOrder: 34 },
     ],
     "state_CA": [
       { formLineCode: "CA_1", formLineLabel: "Federal taxable income", sortOrder: 1 },

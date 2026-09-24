@@ -7,7 +7,7 @@ import { requireActiveBeta } from "../middleware/beta";
 import { ensureFirm } from "../services/firm";
 import { getClient } from "../services/clients";
 import { runTaxDiagnostics } from "../services/tax-diagnostics";
-import { checkReadinessTransitionAllowed, computeCanonicalReadiness, taxYearRange } from "./workspace";
+import { computeCanonicalReadiness, readinessBlockers, taxYearRange } from "./workspace";
 import { assemblePnlReport, isAccrualUnsupported } from "../services/reporting";
 import { priorYearChecklistCarryover } from "../services/documents";
 import { suggestTaxFormForEntity } from "../services/tax-form-mappings";
@@ -42,7 +42,12 @@ taxWorkbenchRoutes.get("/:clientId/workbench/:taxYear", async (c) => {
             (SELECT status FROM m1_reconciliations WHERE firm_id = $1 AND client_id = $2 AND tax_year = $3) AS m1_status,
             (SELECT COUNT(*) FROM tax_form_mappings WHERE client_id = $2 AND tax_year = $3)::text AS mappings`,
     [firm.id, client.id, taxYear]);
-  const readyCheck = await checkReadinessTransitionAllowed(db, client, taxYear, "ready_for_preparation");
+  // Same decision as PUT /tax-readiness (readinessBlockers), from facts already loaded above.
+  const readyBlockers = readinessBlockers("ready_for_preparation", {
+    bookkeepingReady: row.readiness === "ready",
+    hasDiagnosticErrors: diagnostics.some((d) => d.severity === "error"),
+    outstandingChecklistItems: Number(checklist?.outstanding ?? 0),
+  });
 
   // Prior-year comparison: the same canonical P&L used everywhere else, for
   // this year and last year. Null when the client's basis is not reportable.
@@ -63,7 +68,7 @@ taxWorkbenchRoutes.get("/:clientId/workbench/:taxYear", async (c) => {
     status: readiness?.status ?? "not_started",
     notes: readiness?.notes ?? null,
     updatedAt: readiness?.updated_at ?? null,
-    readyForPreparationBlockers: readyCheck.ok ? [] : readyCheck.reasons,
+    readyForPreparationBlockers: readyBlockers,
     diagnostics,
     bookkeeping: {
       readiness: row.readiness,

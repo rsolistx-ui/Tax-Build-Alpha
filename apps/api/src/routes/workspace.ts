@@ -286,21 +286,40 @@ export async function checkReadinessTransitionAllowed(db: Db, client: { id: stri
   const { startDate, endDate } = taxYearRange(taxYear);
   const { row } = await computeCanonicalReadiness(db, client, currency, taxYear, profileRow?.accounting_basis ?? null, startDate, endDate);
 
-  const reasons: string[] = [];
-  if (row.readiness !== "ready") reasons.push("bookkeeping_incomplete");
-
   const diagnostics = await runTaxDiagnostics(db, client.id, taxYear);
-  if (diagnostics.some((d) => d.severity === "error")) reasons.push("tax_diagnostics_errors");
 
+  let outstandingChecklistItems = 0;
   if (status === "ready_for_preparation") {
     const [outstanding] = await db.query<{ count: string }>(
       `SELECT COUNT(*)::text AS count FROM document_checklist_items WHERE client_id = $1 AND tax_year = $2 AND status IN ('expected', 'requested')`,
       [client.id, taxYear],
     );
-    if (parseInt(outstanding?.count ?? "0", 10) > 0) reasons.push("checklist_items_outstanding");
+    outstandingChecklistItems = parseInt(outstanding?.count ?? "0", 10);
   }
 
+  const reasons = readinessBlockers(status, {
+    bookkeepingReady: row.readiness === "ready",
+    hasDiagnosticErrors: diagnostics.some((d) => d.severity === "error"),
+    outstandingChecklistItems,
+  });
   return reasons.length === 0 ? { ok: true } : { ok: false, reasons };
+}
+
+/**
+ * The gate's decision, separated from data loading so the Tax Workbench can
+ * show the exact same blockers from facts it has already loaded (it is close
+ * to the Workers 50-subrequest cap and must not reload them).
+ */
+export function readinessBlockers(
+  status: TaxReadinessState,
+  facts: { bookkeepingReady: boolean; hasDiagnosticErrors: boolean; outstandingChecklistItems: number },
+): string[] {
+  if (!isProfessionalApprovalState(status)) return [];
+  const reasons: string[] = [];
+  if (!facts.bookkeepingReady) reasons.push("bookkeeping_incomplete");
+  if (facts.hasDiagnosticErrors) reasons.push("tax_diagnostics_errors");
+  if (status === "ready_for_preparation" && facts.outstandingChecklistItems > 0) reasons.push("checklist_items_outstanding");
+  return reasons;
 }
 
 workspaceRoutes.put("/:clientId/tax-readiness/:taxYear", async (c) => {

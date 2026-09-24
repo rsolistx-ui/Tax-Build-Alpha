@@ -6,7 +6,7 @@
 
 ## 0. Session of 2026-09-24 (latest; read this first)
 
-All committed, pushed, deployed, and verified with a passing production smoke test (last: Worker version `abe3f3b8`, commit `fb08503`).
+All committed, pushed, deployed, and verified with a passing production smoke test (last: Worker version `71ee7f2c`). Independently audited twice (auditor agent); see "Audit follow-up" below.
 
 **M7 Tax Workbench** (`/workbench`, header nav + command palette):
 - Firm-wide prep status per tax year (`GET /api/workbench/:taxYear`), per-client detail (`GET /api/clients/:id/workbench/:taxYear`): readiness blockers, tax diagnostics, bookkeeping gaps, checklist, workpaper/M-1/mappings, each deep-linked to the fixing tab.
@@ -19,6 +19,14 @@ All committed, pushed, deployed, and verified with a passing production smoke te
 - **Hono sub-app `use("*")` applies to the whole mount prefix.** With 25 sub-apps at `/api/clients`, every client request ran the session check 25x and the beta check 19x. Now gated once in `index.ts` (`app.use("/api/clients/*", requireSession, requireActiveBeta)`); `client-prefix-middleware.test.ts` forbids per-file `use("*")` on those sub-apps. Do not add middleware inside those route files.
 - **Workers free plan: 50 subrequests per request; every `db.query` is one.** Never loop queries per row; use one multi-row INSERT. Also a per-request CPU cap: `exceededCpu` 503s were seen on ordinary routes (smoke test retries 502/503/504, which hides them). Owner intends to buy Workers Paid ($5/mo).
 - **Workers Logs is on** (`[observability]` in `apps/api/wrangler.toml`); search a 500's `requestId` in dashboard > Workers & Pages > folio-api > Logs. The wrangler OAuth token cannot query logs via API. `wrangler tail --status error` shows only uncaught exceptions/CPU limits, not handled 500s.
+
+**Audit follow-up (second audit of 21367e3..985689a):**
+- Fixed: the workbench GET re-ran the whole readiness gate (~13 extra queries, ~47 of 50 subrequests). The decision is now the pure `readinessBlockers()` in `routes/workspace.ts`, used by both `checkReadinessTransitionAllowed` and the workbench with already-loaded facts. Keep this endpoint's query budget in mind before adding fields.
+- Fixed: added Schedule C line 27a (Form 7205 energy efficient buildings deduction). The auditor's claim that 27b is "Reserved" is the pre-2023 form; the IRS 2025 instructions confirm 27b is "Other expenses (from line 48)".
+- Fixed: `client-prefix-middleware.test.ts` now also asserts the `/api/clients/*` gate is registered before any client route.
+- Not changed, verified false: b53cd17 did not add a beta requirement to workpaper/e-file/planning/consent/doc-versioning routes; `clients.ts` (mounted first) already applied its `use("*", requireActiveBeta)` to the whole prefix before the change.
+- Left as is (pre-existing): `directUploadSmsRoutes` is mounted at both `/api/clients` and `/api`; the real Twilio webhook is `/api/sms/inbound`. Its `/:clientId/...` routes carry their own per-route auth because of the `/api` mount, so do not strip those.
+- Pre-existing em dashes remain in some `tax-extended-panels.tsx` panel titles.
 
 **Next (no keys needed):** M8 return engine is the remaining milestone and should not be started casually. Open owner items are unchanged: email-code enrollment, fingerprint test, password change, Azure/Turnstile/admin-email keys, attorney review, Workers Paid.
 

@@ -12,8 +12,11 @@ const mounted = [...new Set([...index.matchAll(/app\.route\("\/api\/clients", (\
 const routeFiles = readdirSync(__dirname).filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"));
 
 describe("/api/clients middleware is applied exactly once", () => {
-  it("index.ts gates the /api/clients prefix with session and beta checks", () => {
-    expect(index).toContain('app.use("/api/clients/*", requireSession, requireActiveBeta);');
+  it("index.ts gates the /api/clients prefix with session and beta checks, before any client route is mounted", () => {
+    const gate = index.indexOf('app.use("/api/clients/*", requireSession, requireActiveBeta);');
+    expect(gate).toBeGreaterThan(-1);
+    // Hono runs middleware in registration order; a gate added after the routes protects nothing.
+    expect(gate).toBeLessThan(index.indexOf('app.route("/api/clients",'));
   });
 
   it("no route file mounted at /api/clients adds its own prefix-wide middleware", () => {
