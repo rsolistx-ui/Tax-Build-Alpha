@@ -1277,12 +1277,18 @@ try {
     if ($bookkeeperInviteStatus -ne "403") { throw "A bookkeeper invited staff (HTTP $bookkeeperInviteStatus); expected 403." }
     if ($bookkeeperInvoiceStatus -ne "403") { throw "A bookkeeper reached time-entry invoicing (HTTP $bookkeeperInvoiceStatus); expected 403." }
     if ($bookkeeperM3Status -ne "403") { throw "A bookkeeper reached Schedule M-3 entry (HTTP $bookkeeperM3Status); expected 403." }
+    $bookkeeperBillingRead = Get-HttpStatusOnly "$BaseUrl/api/billing/$clientId/invoices" $cookieJarS
+    $bookkeeperEfileRead = Get-HttpStatusOnly "$BaseUrl/api/clients/$clientId/efile-authorizations" $cookieJarS
+    $bookkeeperConsentStatusRead = Get-HttpStatusOnly "$BaseUrl/api/clients/$clientId/consents" $cookieJarS
+    if ($bookkeeperBillingRead -ne "403") { throw "A bookkeeper read firm billing (HTTP $bookkeeperBillingRead); expected 403." }
+    if ($bookkeeperEfileRead -ne "403") { throw "A bookkeeper read e-file authorizations (HTTP $bookkeeperEfileRead); expected 403." }
+    if ($bookkeeperConsentStatusRead -ne "200") { throw "A bookkeeper could not read consent status (HTTP $bookkeeperConsentStatusRead); expected 200." }
     $teamS = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/firm/staff")
     if (@($teamS.members).Count -ne 2) { throw "Owner's team lists $(@($teamS.members).Count) members, expected 2." }
     $null = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-X", "DELETE", "$BaseUrl/api/firm/staff/$staffUserId")
     $removedStaffStatus = Get-HttpStatusOnly "$BaseUrl/api/clients" $cookieJarS
     if ($removedStaffStatus -ne "401" -and $removedStaffStatus -ne "403") { throw "Removed staff member still reached /api/clients (HTTP $removedStaffStatus)." }
-    Write-Host "Staff seats verified: bookkeeper joined firm $firmId, sign-off, invites, invoicing and M-3 refused (403), removal cut access (HTTP $removedStaffStatus)."
+    Write-Host "Staff seats verified: bookkeeper joined firm $firmId, sign-off, invites, invoicing, M-3, billing and e-file reads refused (403), consent status readable, removal cut access (HTTP $removedStaffStatus)."
   } finally {
     Remove-TempFile $cookieJarS
   }

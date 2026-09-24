@@ -6,6 +6,7 @@ import { LockedScreen } from "@/components/locked";
 import { MfaEnrollment } from "@/components/mfa-enrollment";
 import { AgreementGate } from "@/components/agreement-gate";
 import { api } from "@/lib/api";
+import { FirmRoleProvider, type FirmRole } from "@/lib/firm-role";
 
 type BetaStatus = {
   isOwner: boolean;
@@ -13,6 +14,7 @@ type BetaStatus = {
   reason: string | null;
   entitlement?: { status: string; startsAt: string; expiresAt: string } | null;
   mfaRequired?: boolean;
+  firmRole?: FirmRole;
 };
 
 export function ProtectedLayout() {
@@ -84,11 +86,13 @@ export function ProtectedLayout() {
       : undefined;
 
   return (
-    <AppShell
-      firmName={firmName}
-      userName={session.user.name}
-      isOwner={betaStatus.isOwner}
-      daysLeft={daysLeft}
-    />
+    <FirmRoleProvider value={betaStatus.firmRole ?? "owner"}>
+      <AppShell
+        firmName={firmName}
+        userName={session.user.name}
+        isOwner={betaStatus.isOwner}
+        daysLeft={daysLeft}
+      />
+    </FirmRoleProvider>
   );
 }

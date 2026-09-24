@@ -4,9 +4,37 @@ import { describe, expect, it } from "vitest";
 import { firmRoleAllows, toFirmRole } from "./firm-roles";
 
 describe("firmRoleAllows", () => {
-  it("lets every role read", () => {
+  it("lets every role read ordinary client work and the team list", () => {
     for (const role of ["owner", "preparer", "bookkeeper", "read_only"] as const) {
-      expect(firmRoleAllows(role, "GET", "/api/billing/cli_1/invoices")).toBe(true);
+      expect(firmRoleAllows(role, "GET", "/api/clients/cli_1/receipts")).toBe(true);
+      expect(firmRoleAllows(role, "GET", "/api/clients/cli_1/consents")).toBe(true);
+      expect(firmRoleAllows(role, "GET", "/api/firm/staff")).toBe(true);
+    }
+  });
+
+  it("shows firm billing, estimates, Stripe and QuickBooks to the owner only", () => {
+    expect(firmRoleAllows("owner", "GET", "/api/billing/cli_1/invoices")).toBe(true);
+    for (const role of ["preparer", "bookkeeper", "read_only"] as const) {
+      expect(firmRoleAllows(role, "GET", "/api/billing/cli_1/invoices")).toBe(false);
+      expect(firmRoleAllows(role, "GET", "/api/billing/billing-rates")).toBe(false);
+      expect(firmRoleAllows(role, "GET", "/api/estimates/cli_1/estimates")).toBe(false);
+      expect(firmRoleAllows(role, "GET", "/api/stripe/connect/status")).toBe(false);
+      expect(firmRoleAllows(role, "GET", "/api/quickbooks/status")).toBe(false);
+    }
+  });
+
+  it("shows signed e-file and consent records to preparers and owners only", () => {
+    for (const path of [
+      "/api/clients/cli_1/efile-authorizations",
+      "/api/clients/cli_1/efile-authorizations/ea_1/sealed",
+      "/api/clients/cli_1/signature-vault",
+      "/api/clients/cli_1/signature-requests",
+      "/api/clients/cli_1/consents/printable",
+      "/api/clients/cli_1/consents/con_1/text",
+    ]) {
+      expect(firmRoleAllows("preparer", "GET", path), path).toBe(true);
+      expect(firmRoleAllows("bookkeeper", "GET", path), path).toBe(false);
+      expect(firmRoleAllows("read_only", "GET", path), path).toBe(false);
     }
   });
 

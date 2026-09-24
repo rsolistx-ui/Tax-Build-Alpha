@@ -4,6 +4,7 @@ import { api, apiUrl } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { canSeeSignedRecords, useFirmRole } from "@/lib/firm-role";
 
 type ClientDocument = {
   id: string;
@@ -21,6 +22,7 @@ function label(value: string): string {
 }
 
 export function DocumentsPanel({ clientId }: { clientId: string }) {
+  const showVaultLink = canSeeSignedRecords(useFirmRole());
   const [documents, setDocuments] = useState<ClientDocument[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -70,12 +72,14 @@ export function DocumentsPanel({ clientId }: { clientId: string }) {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <a
-              href="?tab=esign"
-              className="inline-flex items-center gap-1.5 rounded-md border border-emerald-500/30 bg-emerald-500/5 px-2.5 py-1 text-xs font-medium text-emerald-600 hover:bg-emerald-500/10"
-            >
-              <ShieldCheck className="h-3.5 w-3.5" /> E-Sign & Audit Vault
-            </a>
+            {showVaultLink ? (
+              <a
+                href="?tab=esign"
+                className="inline-flex items-center gap-1.5 rounded-md border border-emerald-500/30 bg-emerald-500/5 px-2.5 py-1 text-xs font-medium text-emerald-600 hover:bg-emerald-500/10"
+              >
+                <ShieldCheck className="h-3.5 w-3.5" /> E-Sign & Audit Vault
+              </a>
+            ) : null}
             <label>
               <input
                 ref={fileInput}

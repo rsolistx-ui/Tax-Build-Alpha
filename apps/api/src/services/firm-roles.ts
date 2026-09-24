@@ -1,7 +1,8 @@
 /**
- * Firm roles and what each may change. Reads (GET/HEAD/OPTIONS) are open to
- * every role; writes are checked here, on the server, for every request that
- * passes requireActiveBeta. There is no cap on how many members a firm has.
+ * Firm roles and what each may see and change, checked on the server for every
+ * request that passes requireActiveBeta. There is no cap on how many members a
+ * firm has. Reads follow least privilege (16 CFR 314.4(c)(1)(ii)): firm billing
+ * is owner-only, and signed e-file and consent records are preparer and up.
  *
  * - owner: everything, including money, staff and deleting clients.
  * - preparer: all client and tax work, including tax sign-off; no money or staff.
@@ -46,11 +47,24 @@ const PREPARER_UP: RegExp[] = [
   new RegExp(`^${CLIENT}/export/signoff$`),
 ];
 
+// Reads a bookkeeper or read-only member may not make: signed e-file
+// authorizations and their ID evidence, the signature vault, signature
+// requests, and full consent text. The consent status list stays readable
+// because receipt reading waits on it.
+const SIGNED_RECORD_READS: RegExp[] = [
+  new RegExp(`^${CLIENT}/(efile-authorizations|signature-requests|signature-vault)(/|$)`),
+  new RegExp(`^${CLIENT}/consents/(printable|[^/]+/text)$`),
+];
+
 const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
 export function firmRoleAllows(role: FirmRole, method: string, path: string): boolean {
-  if (READ_METHODS.has(method.toUpperCase())) return true;
   if (role === "owner") return true;
+  if (READ_METHODS.has(method.toUpperCase())) {
+    if (OWNER_ONLY.some((r) => r.test(path)) && !/^\/api\/firm\/staff/.test(path)) return false;
+    if ((role === "bookkeeper" || role === "read_only") && SIGNED_RECORD_READS.some((r) => r.test(path))) return false;
+    return true;
+  }
   if (role === "read_only") return false;
   // DELETE /api/clients/:id removes a whole client.
   if (method.toUpperCase() === "DELETE" && new RegExp(`^${CLIENT}$`).test(path)) return false;

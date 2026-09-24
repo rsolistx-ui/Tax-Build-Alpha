@@ -50,6 +50,7 @@ import { VoiceRuleDictationModal } from "@/components/voice-rule-dictation-modal
 import { ClientRuleRequestModal } from "@/components/client-rule-request-modal";
 import { DirectScaleUploadModal } from "@/components/direct-scale-upload-modal";
 import { getAdminToken } from "@/lib/api";
+import { canSeeBilling, canSeeSignedRecords, useFirmRole } from "@/lib/firm-role";
 
 // The overview remains immediate; specialised workspaces load only when the
 // practitioner opens them. This keeps a normal Monday-morning client view
@@ -385,6 +386,7 @@ export function ClientWorkspacePage() {
     return { succeeded, failed, pending, processing, total: batch.length };
   }, [batch]);
 
+  const firmRole = useFirmRole();
   const tabs = useMemo(
     () => [
       { id: "overview" as const, label: "Overview", icon: LayoutDashboard },
@@ -411,8 +413,8 @@ export function ClientWorkspacePage() {
       { id: "mileage" as const, label: "Mileage log", icon: Landmark },
       { id: "home-office" as const, label: "Home office", icon: Landmark },
       { id: "export" as const, label: "Close Packet", icon: FileDown },
-    ],
-    [review.length],
+    ].filter((t) => (t.id !== "billing" || canSeeBilling(firmRole)) && (t.id !== "esign" || canSeeSignedRecords(firmRole))),
+    [review.length, firmRole],
   );
 
   const dailyTabs = useMemo(
@@ -604,7 +606,7 @@ export function ClientWorkspacePage() {
         <TaxBridgePanel clientId={clientId} taxYear={pinnedTaxYear ?? profile?.tax_year ?? new Date().getFullYear()} />
       ) : null}
 
-      {tab === "billing" ? (
+      {tab === "billing" && canSeeBilling(firmRole) ? (
         <BillingPanel clientId={clientId} clientName={client?.name} />
       ) : null}
 
@@ -646,7 +648,7 @@ export function ClientWorkspacePage() {
       {tab === "documents" ? <DocumentsPanel clientId={clientId} /> : null}
       {tab === "estimated-tax" ? <EstimatedTaxPanel clientId={clientId} taxYear={pinnedTaxYear ?? profile?.tax_year ?? new Date().getFullYear()} /> : null}
       {tab === "mileage" ? <MileagePanel clientId={clientId} taxYear={pinnedTaxYear ?? profile?.tax_year ?? new Date().getFullYear()} /> : null}
-      {tab === "esign" ? (
+      {tab === "esign" && canSeeSignedRecords(firmRole) ? (
         <div className="space-y-4">
           <ClientConsentCard clientId={clientId} />
           <EfileAuthorizationPanel clientId={clientId} defaultTaxYear={pinnedTaxYear ?? profile?.tax_year ?? new Date().getFullYear() - 1} />

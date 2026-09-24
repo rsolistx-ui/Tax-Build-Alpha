@@ -3,6 +3,7 @@ import { CheckCircle2, CreditCard, Mail, PlugZap, ShieldCheck } from "lucide-rea
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { canSeeBilling, useFirmRole } from "@/lib/firm-role";
 
 type GmailStatus = { connected: boolean; connectedAt?: string | null; scope?: string | null };
 type StripeStatus = {
@@ -28,12 +29,15 @@ export function ConnectionsPage() {
       .finally(() => setLoading(false));
   }, []);
 
+  const showStripe = canSeeBilling(useFirmRole());
+
   useEffect(() => {
+    if (!showStripe) return;
     api<StripeStatus>("/api/stripe/connect/status")
       .then(setStripeStatus)
       .catch(() => setStripeStatus({ configured: false, connected: false }))
       .finally(() => setStripeLoading(false));
-  }, []);
+  }, [showStripe]);
 
   async function connectGmail() {
     setError(null);
@@ -93,6 +97,7 @@ export function ConnectionsPage() {
         </CardContent>
       </Card>
 
+      {showStripe ? (
       <Card className="border-[var(--color-border)] shadow-sm">
         <CardHeader className="flex-row items-start justify-between gap-4 space-y-0">
           <div className="flex gap-3">
@@ -124,6 +129,7 @@ export function ConnectionsPage() {
           )}
         </CardContent>
       </Card>
+      ) : null}
     </section>
   );
 }
