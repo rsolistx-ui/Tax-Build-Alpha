@@ -39,13 +39,11 @@ export function UniversalCommandPalette({
   isOpen,
   onClose,
   onOpenVoiceModal,
-  onOpenMobileModal,
   onOpenSupportModal,
 }: {
   isOpen: boolean;
   onClose: () => void;
   onOpenVoiceModal?: () => void;
-  onOpenMobileModal?: () => void;
   onOpenSupportModal?: () => void;
 }) {
   const navigate = useNavigate();
@@ -93,6 +91,17 @@ export function UniversalCommandPalette({
     // Contextual actions if currently inside a client workspace
     if (currentClientId) {
       list.push(
+        {
+          id: "magic_phone_link",
+          title: "Launch Magic Phone Upload QR Link",
+          category: "Quick Actions",
+          icon: Smartphone,
+          run: () => {
+            onClose();
+            // The QR modal lives on the client page; it listens for this event.
+            window.dispatchEvent(new CustomEvent("truepost:open-phone-link"));
+          },
+        },
         {
           id: "goto_dif_audit",
           title: "Run pre-filing risk review",
@@ -203,16 +212,6 @@ export function UniversalCommandPalette({
         },
       },
       {
-        id: "magic_phone_link",
-        title: "Launch Magic Phone Upload QR Link",
-        category: "Quick Actions",
-        icon: Smartphone,
-        run: () => {
-          onClose();
-          onOpenMobileModal?.();
-        },
-      },
-      {
         id: "support_concierge",
         title: "Connect with Phyllis VIP Concierge Support",
         category: "System",
@@ -225,7 +224,7 @@ export function UniversalCommandPalette({
     );
 
     return list;
-  }, [clients, currentClientId, navigate, onClose, onOpenVoiceModal, onOpenMobileModal, onOpenSupportModal]);
+  }, [clients, currentClientId, navigate, onClose, onOpenVoiceModal, onOpenSupportModal]);
 
   // Filter actions based on search query
   const filteredActions = useMemo(() => {

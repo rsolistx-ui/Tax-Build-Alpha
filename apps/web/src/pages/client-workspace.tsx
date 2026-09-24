@@ -198,6 +198,12 @@ export function ClientWorkspacePage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    const openPhoneLink = () => setMobileLinkOpen(true);
+    window.addEventListener("truepost:open-phone-link", openPhoneLink);
+    return () => window.removeEventListener("truepost:open-phone-link", openPhoneLink);
+  }, []);
+
+  useEffect(() => {
     if (searchParams.get("tab") || searchParams.get("focus")) {
       setSearchParams({}, { replace: true });
     }
