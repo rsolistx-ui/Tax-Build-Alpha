@@ -11,6 +11,7 @@ import { checkReadinessTransitionAllowed, computeCanonicalReadiness, taxYearRang
 
 export const taxWorkbenchRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 taxWorkbenchRoutes.use("*", requireSession);
+taxWorkbenchRoutes.use("*", requireActiveBeta);
 
 /**
  * One client's tax-year workbench: the single readiness row (tax_year_readiness,

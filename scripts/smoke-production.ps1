@@ -1401,6 +1401,37 @@ try {
     throw "Client A tax readiness status did not persist the professional's explicit choice."
   }
 
+  Write-Host "Verifying the Tax Workbench firm list and per-client view read the same readiness row (M7)..."
+  $workbenchList = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/workbench/2026")
+  $workbenchListRow = @($workbenchList.clients) | Where-Object { $_.id -eq $clientAId } | Select-Object -First 1
+  if (-not $workbenchListRow) { throw "Tax Workbench firm list did not include Client A." }
+  if ($workbenchListRow.status -ne "professional_review") {
+    throw "Tax Workbench firm list shows '$($workbenchListRow.status)' for Client A, expected professional_review."
+  }
+  $clientAWorkbench = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientAId/workbench/2026")
+  if ($clientAWorkbench.status -ne "professional_review") {
+    throw "Tax Workbench client view shows '$($clientAWorkbench.status)' for Client A, expected professional_review."
+  }
+  if (-not (@($clientAWorkbench.diagnostics) | Where-Object { $_.code -eq "NO_MAPPINGS" -and $_.severity -eq "error" })) {
+    throw "Tax Workbench did not report the NO_MAPPINGS diagnostic for a client with no form mappings."
+  }
+  if (@($clientAWorkbench.readyForPreparationBlockers) -notcontains "tax_diagnostics_errors") {
+    throw "Tax Workbench did not list tax_diagnostics_errors as a ready_for_preparation blocker."
+  }
+
+  Write-Host "Verifying tax diagnostic errors block ready_for_preparation on the server (409, status unchanged)..."
+  $clientABlockedBody = @{ status = "ready_for_preparation" } | ConvertTo-Json -Compress
+  $clientABlockedPayloadPath = New-JsonPayloadFile $clientABlockedBody
+  $clientABlockedStatus = (& curl.exe --silent --output NUL --write-out "%{http_code}" -c $cookieJar -b $cookieJar -H "Content-Type: application/json" -X PUT --data-binary "@$clientABlockedPayloadPath" "$BaseUrl/api/clients/$clientAId/tax-readiness/2026")
+  Remove-TempFile $clientABlockedPayloadPath
+  if ($clientABlockedStatus -ne "409") {
+    throw "Setting ready_for_preparation with diagnostic errors should return 409, got $clientABlockedStatus."
+  }
+  $clientAReadinessAfterBlock = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientAId/tax-readiness/2026")
+  if ($clientAReadinessAfterBlock.status -ne "professional_review") {
+    throw "A blocked readiness change still altered Client A's status to '$($clientAReadinessAfterBlock.status)'."
+  }
+
   Write-Host "Setting up Client B missing-document and document-review scenario..."
   $clientBProfileBody = @{ entity_type = "llc"; tax_year = 2026; profile = @{ taxPrepRequired = $true } } | ConvertTo-Json -Compress
   $clientBProfilePayloadPath = New-JsonPayloadFile $clientBProfileBody

@@ -6,6 +6,7 @@ import {
   Sparkles,
   Network,
   Users,
+  ListChecks,
   Building2,
   Landmark,
   LineChart,
@@ -175,6 +176,16 @@ export function UniversalCommandPalette({
         icon: Users,
         run: () => {
           navigate("/clients");
+          onClose();
+        },
+      },
+      {
+        id: "tax_workbench",
+        title: "Tax Workbench",
+        category: "Quick Actions",
+        icon: ListChecks,
+        run: () => {
+          navigate("/workbench");
           onClose();
         },
       },
