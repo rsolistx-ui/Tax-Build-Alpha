@@ -376,6 +376,6 @@ docVersioningRoutes.get("/:clientId/documents/:docId/signed-url", async (c) => {
   const [version] = await db.query<any>(`SELECT r2_key FROM document_versions WHERE document_id=$1 ORDER BY version DESC LIMIT 1`, [docId]);
   if (!(version?.r2_key ?? doc.r2_key)) return c.json({ error: "No document content available" }, 404);
   const expiresAt = Date.now() + 3600_000;
-  const token = await signDocumentToken(c.env.BETTER_AUTH_SECRET, docId, expiresAt);
+  const token = await signDocumentToken(c.env.BETTER_AUTH_SECRET, docId, expiresAt, hideSigned ? "unsigned" : "all");
   return c.json({ signedUrl: `/api/signed-documents/${docId}/${token}`, expiresAt: new Date(expiresAt).toISOString() });
 });

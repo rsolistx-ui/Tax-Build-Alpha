@@ -67,8 +67,11 @@ export function canReadSignedRecords(role: FirmRole): boolean {
  * signed PDF replaces the document's file when native e-sign completes).
  * Document routes add NOT (...) for roles that cannot read signed records.
  */
-export const SIGNED_RECORD_DOCUMENT_SQL = `(client_documents.document_type = 'engagement_letter' OR EXISTS (
-  SELECT 1 FROM signature_requests sr WHERE sr.document_id = client_documents.id AND sr.client_id = client_documents.client_id))`;
+export function signedRecordDocumentSql(alias = "client_documents"): string {
+  return `(${alias}.document_type = 'engagement_letter' OR EXISTS (
+  SELECT 1 FROM signature_requests sr WHERE sr.document_id = ${alias}.id AND sr.client_id = ${alias}.client_id))`;
+}
+export const SIGNED_RECORD_DOCUMENT_SQL = signedRecordDocumentSql();
 
 const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 

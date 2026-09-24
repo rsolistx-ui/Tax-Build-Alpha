@@ -3,7 +3,7 @@ import type { Env } from "../env";
 
 const queryMock = vi.fn();
 vi.mock("../db", () => ({ createDb: () => ({ query: queryMock }) }));
-vi.mock("../lib/signed-url", () => ({ verifyDocumentToken: vi.fn(async () => true) }));
+vi.mock("../lib/signed-url", () => ({ verifyDocumentToken: vi.fn(async () => "all") }));
 
 const env: Env = {
   AUTH_DB: {} as Env["AUTH_DB"], DATABASE_URL: "postgresql://test", RECEIPTS: { get: vi.fn() } as unknown as R2Bucket,

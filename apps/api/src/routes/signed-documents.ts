@@ -3,6 +3,7 @@ import { createDb } from "../db";
 import type { Env } from "../env";
 import { verifyDocumentToken } from "../lib/signed-url";
 import { computeAccessDecision, type EntitlementRow } from "../services/beta";
+import { SIGNED_RECORD_DOCUMENT_SQL } from "../services/firm-roles";
 
 /**
  * Deliberately outside requireSession: the signed token in the path is the
@@ -14,10 +15,15 @@ export const signedDocumentRoutes = new Hono<{ Bindings: Env }>();
 signedDocumentRoutes.get("/:docId/:token", async (c) => {
   const docId = c.req.param("docId");
   const token = c.req.param("token");
-  const valid = await verifyDocumentToken(c.env.BETTER_AUTH_SECRET, docId, token);
-  if (!valid) return c.json({ error: "Link expired or invalid" }, 403);
+  const scope = await verifyDocumentToken(c.env.BETTER_AUTH_SECRET, docId, token);
+  if (!scope) return c.json({ error: "Link expired or invalid" }, 403);
 
   const db = createDb(c.env);
+  if (scope === "unsigned") {
+    // Minted for a role that may not read signed records: refuse if the document became one.
+    const [signed] = await db.query(`SELECT 1 FROM client_documents WHERE id = $1 AND ${SIGNED_RECORD_DOCUMENT_SQL}`, [docId]);
+    if (signed) return c.json({ error: "Not found" }, 404);
+  }
   const [doc] = await db.query<{ r2_key: string; filename: string; content_type: string | null; entitlement_status: string | null; entitlement_expires_at: string | null }>(
     `SELECT d.r2_key, d.filename, d.content_type,
             be.status AS entitlement_status, be.expires_at AS entitlement_expires_at

@@ -6,6 +6,7 @@ import { requireSession } from "../middleware/session";
 import { requireActiveBeta } from "../middleware/beta";
 import { ensureFirm } from "../services/firm";
 import { applyDocumentReviewAction, loadReviewDocument, type DocumentReviewAction } from "./workspace";
+import { canReadSignedRecords, signedRecordDocumentSql } from "../services/firm-roles";
 
 /**
  * Cross-client evidence-processing queue: Phyllis processes uncertain
@@ -34,9 +35,10 @@ documentReviewRoutes.get("/review", async (c) => {
      JOIN clients c ON c.id = cd.client_id
      LEFT JOIN document_checklist_items dci ON dci.id = cd.checklist_item_id
      WHERE c.firm_id = $1 AND cd.status = 'needs_review'
+       AND ($2::boolean = false OR NOT ${signedRecordDocumentSql("cd")})
      ORDER BY cd.uploaded_at ASC
      LIMIT 200`,
-    [firm.id],
+    [firm.id, !canReadSignedRecords(c.get("firmRole") ?? "read_only")],
   );
 
   return c.json({
