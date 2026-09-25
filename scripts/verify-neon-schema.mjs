@@ -32,6 +32,18 @@ async function runQuery(query) {
 
 const checks = [
   {
+    label: "client money accounts, same-firm (migration 0073)",
+    query: `SELECT 1 FROM pg_constraint WHERE conname = 'fk_client_accounts_client_same_firm'`,
+  },
+  {
+    label: "bank transaction account belongs to the same client (migration 0073)",
+    query: `SELECT 1 FROM pg_constraint WHERE conname = 'fk_bank_transactions_account_same_client'`,
+  },
+  {
+    label: "books start date on the client profile (migration 0073)",
+    query: `SELECT 1 FROM information_schema.columns WHERE table_name = 'client_profiles' AND column_name = 'books_start_date'`,
+  },
+  {
     label: "per-member sees-all-clients switch (migration 0072)",
     query: `SELECT 1 FROM information_schema.columns WHERE table_name = 'firm_members' AND column_name = 'sees_all_clients'`,
   },

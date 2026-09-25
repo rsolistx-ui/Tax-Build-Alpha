@@ -34,7 +34,20 @@ Deployed as Worker `9551ca69`. Tests: 645 api, 84 web, 42 script. Full smoke tes
   - Login honors a same-site `?next=` path. The morning brief skips firms with no members.
   - Smoke test: removes the bookkeeper, re-invites them as an existing account, signs in (two-step switched off briefly for that synthetic account only), previews, accepts, checks the used link is refused, then removes them again.
   - Auditor: GREEN. Two AMBERs fixed (the race on the emptiness check; morning briefs for empty firms). Left as is: an old firm's `firms.owner_user_id` still names the person who left. It is only reachable through client data, and the old firm has none.
-- **Next:** milestone 3 (per-client balance sheet and cash flow). If keys arrive first, wire them first: Azure (11), then Turnstile and Telegram (12).
+- **Milestone 3 shipped** (Worker `3db09d56`, Neon migration 0073 applied and verified, smoke passed; 663 api tests): per-client balance sheet and cash flow statement, cash basis. It is the "Balance sheet & cash flow" workspace tab (Books group).
+  - Data: `client_accounts` (checking, savings, credit_card, loan) with `opening_balance` as of `client_profiles.books_start_date`. `bank_transactions.account_id` has a composite FK to the same client (`ON DELETE SET NULL (account_id)`). Imports are assigned per batch (`POST accounts/assign-import`) or at import (`accountId` form field). Loan accounts take no bank activity; loan payments come through cash accounts classified `loan`, and with exactly one loan account they fold into it.
+  - Math (`services/financial-statements.ts`): net income always comes from `assemblePnlReport`, so it matches the P&L. Money the P&L counted that did not move through the accounts gets its own lines:
+    - receipts no bank transaction points at: "paid outside the business accounts"
+    - receipt-versus-bank timing or amount differences (review)
+    - spending awaiting evidence, meaning not matched to a filed receipt and not marked no-receipt (review)
+    - unclassified activity (review)
+    - transfers that do not net to zero (review)
+
+    It balances by construction (property test, 50 random books). The cash flow uses the direct method over cash accounts and ties.
+  - API: `/api/clients/:id/accounts` (GET, POST, PATCH, DELETE, `books-start`, `assign-import`), `balance-sheet?asOf`, `cash-flow?start&end`, `statement-lines` (drill-down). "accounts" writes are bookkeeping (bookkeepers allowed).
+  - Auditor: GREEN math, access and roles; 7 AMBERs, all fixed (the owner-funded catch-all split into real lines; evidence judged by receipt status; loan per-account; the opening-balance field shows the saved value after a failed save; Books group; labels; a spacing nit).
+  - Not verified in a signed-in browser (two-step sign-in); verified by API smoke and tests.
+- **Next:** milestone 4 (tax handoff inputs: mileage, home office, assets, 1099s received, estimated payments). If keys arrive first, wire them first: Azure (11), then Turnstile and Telegram (12).
 
 ## 0-new. Session of 2026-09-25: client assignment (read section 00 first)
 
@@ -58,7 +71,7 @@ Committed and pushed to `main`, deployed (Worker `fe85aba5`). Neon migration 007
 |---|---|---|---|---|
 | 1 | Small cleanup batch: signature requests check the document and engagement belong to that client; Social Security wage base 2026 ($184,500); duplicate `/1099-radar` route removed; Team link in the mobile nav; em dashes out of `tax-extended-panels.tsx` | Defects | Nothing (built 2026-09-25, Worker 9551ca69) | about 1 hour |
 | 2 | Add a person who already has a Truepost account to a firm | Staff seats | Nothing (built 2026-09-25, Worker 16b02183) | about 2 hours |
-| 3 | Per-client balance sheet and cash flow statement from the client's own books (receipts, bank activity, journals) | Reports vs Wave/QBO | Nothing | about 4 to 6 hours |
+| 3 | Per-client balance sheet and cash flow statement from the client's own books (receipts, bank activity, journals) | Reports vs Wave/QBO | Nothing (built 2026-09-25, Worker 3db09d56) | about 4 to 6 hours |
 | 4 | Tax handoff, the rest of what the preparer digs up by hand: vehicle mileage and business-use % (Schedule C Part IV), home office square footage and expenses (Form 8829), assets placed in service with dates and cost (depreciation), 1099s received tied to booked income, estimated tax payments made. Inputs only; Truepost computes no tax | Return handoff (Phase 3 option A) | Nothing | about 3 to 4 hours |
 | 5 | Beta metrics dashboard: receipt fields correct without edits %, upload-to-categorized median, request-to-completed days, 5xx rate counting retries, support first-response time, preparer hours saved | "Nothing is proven" | Nothing | about 3 to 4 hours |
 | 6 | Public status page from real health checks, plus a published support response target | Tax-season crashes, no support | Nothing | about 2 to 3 hours |

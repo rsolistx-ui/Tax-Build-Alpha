@@ -69,7 +69,7 @@ describe("firmRoleAllows", () => {
 // DELETE /api/clients/:id is owner-only and covered in the tests above.
 const BOOKKEEPER_MAY_WRITE = new Set([
   "agent-tasks", "bank-transactions", "categories", "portal-links", "requests", "documents", "sms-drop",
-  "receipts", "mileage", "1099-radar", "checklist",
+  "receipts", "mileage", "1099-radar", "checklist", "accounts",
   // clients.ts: PATCH /:id (name and contact details) and /:id/pipeline-status.
   "", "pipeline-status",
 ]);

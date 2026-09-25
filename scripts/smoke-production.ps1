@@ -1444,6 +1444,53 @@ try {
     throw "Requesting a bank transactions CSV across multiple USD import batches without selecting one must return HTTP 400, got $mixedBatchStatus."
   }
 
+  Write-Host "Verifying the balance sheet and cash flow statement: accounts, opening balances, an assigned import, P&L tie-out..."
+  $newAccountIds = @{}
+  foreach ($acct in @(@{ name = "Smoke Checking"; kind = "checking"; openingBalance = 1000 }, @{ name = "Smoke Card"; kind = "credit_card"; openingBalance = 250 }, @{ name = "Smoke Loan"; kind = "loan"; openingBalance = 5000 })) {
+    $acctPath = New-JsonPayloadFile ($acct | ConvertTo-Json -Compress)
+    $newAccountIds[$acct.kind] = [string](Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-H", "Content-Type: application/json", "--data-binary", "@$acctPath", "$BaseUrl/api/clients/$clientId/accounts")).id
+    Remove-TempFile $acctPath
+  }
+  $booksStartPath = New-JsonPayloadFile (@{ date = "2025-12-31" } | ConvertTo-Json -Compress)
+  $null = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-H", "Content-Type: application/json", "-X", "PUT", "--data-binary", "@$booksStartPath", "$BaseUrl/api/clients/$clientId/accounts/books-start")
+  Remove-TempFile $booksStartPath
+  $statementSetup = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/accounts")
+  $firstBatch = @($statementSetup.importBatches) | Where-Object { $_.importBatchId -and $_.currency -eq "USD" } | Select-Object -First 1
+  if (-not $firstBatch) { throw "No bank import batch found to assign to an account." }
+  $assignPath = New-JsonPayloadFile (@{ importBatchId = [string]$firstBatch.importBatchId; accountId = $newAccountIds["checking"] } | ConvertTo-Json -Compress)
+  $assigned = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-H", "Content-Type: application/json", "--data-binary", "@$assignPath", "$BaseUrl/api/clients/$clientId/accounts/assign-import")
+  Remove-TempFile $assignPath
+  if ([int]$assigned.transactions -ne [int]$firstBatch.transactionCount) { throw "Assigning the import moved $($assigned.transactions) transaction(s), expected $($firstBatch.transactionCount)." }
+  $loanAssignPath = New-JsonPayloadFile (@{ importBatchId = [string]$firstBatch.importBatchId; accountId = $newAccountIds["loan"] } | ConvertTo-Json -Compress)
+  $prevEap = $ErrorActionPreference; $ErrorActionPreference = "Continue"
+  $loanAssignStatus = & curl.exe --silent --output NUL --write-out "%{http_code}" -c $cookieJar -b $cookieJar -H "Content-Type: application/json" --data-binary "@$loanAssignPath" "$BaseUrl/api/clients/$clientId/accounts/assign-import"
+  $ErrorActionPreference = $prevEap
+  Remove-TempFile $loanAssignPath
+  if ($loanAssignStatus -ne "400") { throw "Bank activity was assignable to a loan account (HTTP $loanAssignStatus); expected 400." }
+
+  $bsResp = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/balance-sheet?asOf=2026-12-31")
+  if ([decimal]$bsResp.balanceSheet.totals.difference -ne 0) { throw "The balance sheet is out of balance by $($bsResp.balanceSheet.totals.difference)." }
+  $bsLine = { param($section, $key) (@($section) | Where-Object { $_.key -eq $key } | Select-Object -First 1).amount }
+  $pnl2026 = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/pnl?startDate=2026-01-01&endDate=2026-12-31")
+  $bsNetIncome = & $bsLine $bsResp.balanceSheet.equity "net_income"
+  if ([math]::Abs([decimal]$bsNetIncome - [decimal]$pnl2026.net) -gt 0.005) { throw "Balance sheet net income $bsNetIncome does not match the 2026 P&L net $($pnl2026.net)." }
+  if ([decimal](& $bsLine $bsResp.balanceSheet.liabilities "account:$($newAccountIds['credit_card'])") -ne 250) { throw "The credit card's opening amount owed is not on the balance sheet." }
+  if ([decimal](& $bsLine $bsResp.balanceSheet.liabilities "account:$($newAccountIds['loan'])") -ne 5000) { throw "The loan's opening amount owed is not on the balance sheet." }
+  if ([decimal](& $bsLine $bsResp.balanceSheet.equity "opening") -ne (1000 - 250 - 5000)) { throw "Opening balance equity is not checking less card less loan." }
+
+  $cfResp = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/cash-flow?start=2026-01-01&end=2026-12-31")
+  if ([decimal]$cfResp.cashFlow.difference -ne 0) { throw "The cash flow statement does not tie (off by $($cfResp.cashFlow.difference))." }
+  if ([decimal]$cfResp.cashFlow.beginningCash -ne 1000) { throw "Cash at the start of 2026 is $($cfResp.cashFlow.beginningCash), expected the 1000 opening balance." }
+  $bsUnassigned = & $bsLine $bsResp.balanceSheet.assets "account:unassigned"
+  if ($null -eq $bsUnassigned) { $bsUnassigned = 0 }
+  $bsCash = [decimal](& $bsLine $bsResp.balanceSheet.assets "account:$($newAccountIds['checking'])") + [decimal]$bsUnassigned
+  if ([decimal]$cfResp.cashFlow.endingCash -ne $bsCash) { throw "Ending cash $($cfResp.cashFlow.endingCash) does not equal the balance sheet's cash $bsCash." }
+  $checkingLine = @($bsResp.balanceSheet.assets) | Where-Object { $_.key -eq "account:$($newAccountIds['checking'])" } | Select-Object -First 1
+  if ([int]$checkingLine.count -lt 1) { throw "The checking account shows no counted transactions after assigning a USD import." }
+  $checkingLines = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/statement-lines?line=account:$($newAccountIds['checking'])&end=2026-12-31")
+  if ([int]$checkingLines.total -ne [int]$checkingLine.count) { throw "Drill-down returned $($checkingLines.total) transaction(s); the balance sheet line counts $($checkingLine.count)." }
+  Write-Host "Statements verified: balance sheet balances (assets $($bsResp.balanceSheet.totals.assets)), net income matches the P&L ($bsNetIncome), cash flow ties ($($cfResp.cashFlow.beginningCash) to $($cfResp.cashFlow.endingCash)), card and loan opening balances shown, loan accounts refuse bank activity (400), drill-down returns $($checkingLines.total) transaction(s)."
+
   Write-Host "Creating a fully resolved dashboard client (Client A) with no open work..."
   $clientABody = @{ name = "Smoke Dashboard Ready $stamp"; legal_name = "Smoke Dashboard Ready LLC" } | ConvertTo-Json -Compress
   $clientAPayloadPath = New-JsonPayloadFile $clientABody

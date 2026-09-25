@@ -12,6 +12,7 @@ import {
    Inbox,
    Landmark,
    LineChart,
+  Scale,
    Settings,
    Upload,
    FileDown,
@@ -58,6 +59,7 @@ import { canSeeBilling, canSeeSignedRecords, useFirmRole } from "@/lib/firm-role
 const ReceiptReview = lazy(() => import("@/components/receipt-review").then((module) => ({ default: module.ReceiptReview })));
 const BankReconciliation = lazy(() => import("@/components/bank-reconciliation").then((module) => ({ default: module.BankReconciliation })));
 const PnlPanel = lazy(() => import("@/components/pnl-panel").then((module) => ({ default: module.PnlPanel })));
+const FinancialStatementsPanel = lazy(() => import("@/components/financial-statements-panel").then((module) => ({ default: module.FinancialStatementsPanel })));
 const DrilldownPanel = lazy(() => import("@/components/drilldown-panel").then((module) => ({ default: module.DrilldownPanel })));
 const ExportCenter = lazy(() => import("@/components/export-center").then((module) => ({ default: module.ExportCenter })));
 const TaxReadinessPanel = lazy(() => import("@/components/tax-readiness-panel").then((module) => ({ default: module.TaxReadinessPanel })));
@@ -144,17 +146,17 @@ type BatchFile = {
   error?: string;
 };
 
-type Tab = "overview" | "folders" | "upload" | "review" | "bank" | "pnl" | "tax-bridge" | "tax-readiness" | "dif-audit" | "advisory" | "intercompany" | "workpaper" | "documents" | "esign" | "engagements" | "requests" | "export" | "agent" | "analytics" | "billing" | "deadlines" | "estimated-tax" | "mileage" | "home-office";
+type Tab = "overview" | "folders" | "upload" | "review" | "bank" | "pnl" | "statements" | "tax-bridge" | "tax-readiness" | "dif-audit" | "advisory" | "intercompany" | "workpaper" | "documents" | "esign" | "engagements" | "requests" | "export" | "agent" | "analytics" | "billing" | "deadlines" | "estimated-tax" | "mileage" | "home-office";
 
 // Sections for the "More tools" menu so specialist tools are found by purpose, not by scanning a flat list.
 const TOOL_GROUPS: Array<{ label: string; ids: Tab[] }> = [
   { label: "Tax", ids: ["tax-readiness", "workpaper", "estimated-tax", "home-office", "tax-bridge", "dif-audit", "advisory", "deadlines"] },
   { label: "Client", ids: ["requests", "documents", "esign", "engagements"] },
   { label: "Billing", ids: ["billing"] },
-  { label: "Books", ids: ["folders", "mileage", "intercompany", "analytics", "agent"] },
+  { label: "Books", ids: ["statements", "folders", "mileage", "intercompany", "analytics", "agent"] },
 ];
 
-const VALID_TABS: Tab[] = ["overview", "folders", "upload", "review", "bank", "pnl", "tax-bridge", "tax-readiness", "dif-audit", "advisory", "intercompany", "workpaper", "documents", "esign", "engagements", "requests", "export", "agent", "analytics", "billing", "deadlines", "estimated-tax", "mileage", "home-office"];
+const VALID_TABS: Tab[] = ["overview", "folders", "upload", "review", "bank", "pnl", "statements", "tax-bridge", "tax-readiness", "dif-audit", "advisory", "intercompany", "workpaper", "documents", "esign", "engagements", "requests", "export", "agent", "analytics", "billing", "deadlines", "estimated-tax", "mileage", "home-office"];
 
 function formatCurrency(amount: number | undefined, currency = "USD"): string {
   if (typeof amount !== "number" || !Number.isFinite(amount)) return "—";
@@ -398,6 +400,7 @@ export function ClientWorkspacePage() {
       { id: "review" as const, label: "Review", icon: Inbox, count: review.length },
       { id: "bank" as const, label: "Bank", icon: Landmark },
       { id: "pnl" as const, label: "P&L", icon: LineChart },
+      { id: "statements" as const, label: "Balance sheet & cash flow", icon: Scale },
       { id: "tax-readiness" as const, label: "Tax readiness", icon: ClipboardList },
       { id: "dif-audit" as const, label: "Pre-filing risk", icon: ShieldAlert },
       { id: "advisory" as const, label: "Tax Advisory", icon: TrendingUp },
@@ -651,6 +654,7 @@ export function ClientWorkspacePage() {
 
       {tab === "documents" ? <DocumentsPanel clientId={clientId} /> : null}
       {tab === "estimated-tax" ? <EstimatedTaxPanel clientId={clientId} taxYear={pinnedTaxYear ?? profile?.tax_year ?? new Date().getFullYear()} /> : null}
+      {tab === "statements" ? <FinancialStatementsPanel clientId={clientId} /> : null}
       {tab === "mileage" ? <MileagePanel clientId={clientId} taxYear={pinnedTaxYear ?? profile?.tax_year ?? new Date().getFullYear()} /> : null}
       {tab === "esign" && canSeeSignedRecords(firmRole) ? (
         <div className="space-y-4">

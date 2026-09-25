@@ -215,6 +215,17 @@ bankRoutes.post("/:clientId/bank-transactions/import", async (c) => {
   }
   const mapping = mappingSchema.parse(mappingJson) as BankColumnMapping;
 
+  // Optional: the client account (checking, savings or credit card) this statement belongs to.
+  const accountValue = form.get("accountId");
+  const accountId = typeof accountValue === "string" && accountValue ? accountValue : null;
+  if (accountId) {
+    const [account] = await db.query<{ id: string }>(
+      `SELECT id FROM client_accounts WHERE id = $1 AND client_id = $2 AND kind IN ('checking', 'savings', 'credit_card')`,
+      [accountId, client.id],
+    );
+    if (!account) return c.json({ error: "Choose a checking, savings, or credit card account for this client." }, 400);
+  }
+
   const text = await file.text();
   const preview = previewBankCsv(text);
   if (preview.rowCount > MAX_IMPORT_ROWS) {
@@ -276,8 +287,8 @@ bankRoutes.post("/:clientId/bank-transactions/import", async (c) => {
     query: `INSERT INTO bank_transactions
       (id, client_id, txn_date, description, amount, currency, triage, raw_json,
        import_fingerprint, suggested_receipt_id, suggested_score, suggested_reason,
-       suggested_disposition)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12, $13)
+       suggested_disposition, account_id)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12, $13, $14)
       ON CONFLICT DO NOTHING
       RETURNING id`,
     params: [
@@ -299,6 +310,7 @@ bankRoutes.post("/:clientId/bank-transactions/import", async (c) => {
       item.suggestion?.score ?? null,
       item.suggestion?.reason ?? null,
       suggestDisposition(item.row.amount),
+      accountId,
     ],
   }));
 
