@@ -54,6 +54,8 @@ function fakeDb() {
       }
 
       if (s.startsWith("UPDATE time_entries SET invoice_id")) {
+        // The real Db wrapper sends arrays as JSON text, which ::text[] cannot parse.
+        if (!s.includes("jsonb_array_elements_text($2::jsonb)")) throw new Error("array parameter must be unpacked as jsonb");
         const [invoiceId, entryIds] = params as any[];
         for (const id of entryIds as string[]) {
           const row = timeEntries.get(id);

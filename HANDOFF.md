@@ -6,7 +6,7 @@
 
 ## 0-new. Session of 2026-09-25: client assignment (latest; read this first, then section 0)
 
-Committed and pushed to `main`, deployed (Worker `0c9e1b3d`). Neon migration 0072 applied; `verify-neon-schema.mjs` passes. Tests: 640 api, 84 web, 42 script. Full `smoke-production.ps1` passed live on `0c9e1b3d`, including the new assignment checks.
+Committed and pushed to `main`, deployed (Worker `fe85aba5`). Neon migration 0072 applied; `verify-neon-schema.mjs` passes. Tests: 643 api, 84 web, 42 script. Full `smoke-production.ps1` passed live on `fe85aba5`, including the new assignment checks.
 
 - **What it does.** Staff see only the clients the owner assigns them, unless the owner ticks "All clients" for that person (Team page, Clients button per member). Owners always see all. New staff start with no clients. A client staff create is assigned to them.
 - **Enforcement** (`services/client-assignment.ts`, called from `requireActiveBeta`):
@@ -20,10 +20,10 @@ Committed and pushed to `main`, deployed (Worker `0c9e1b3d`). Neon migration 007
 - **Smoke command fix:** it needs `DATABASE_URL` (now in the command block below); the script stops early with a clear message if it is missing.
 - **Auditor:** one pass, GREEN with one AMBER (web defaulted to "sees all" if the flag was missing); fixed.
 
-**Found, not fixed (owner decision):**
-- `POST /api/push/notify` lets any signed-in beta user send a push message to every subscriber in every firm when no clientId/userId is given (`routes/push.ts`). Should be scoped to the caller's firm or removed.
-- `services/time-tracking.ts:230` passes a JS array to `ANY($2::text[])`; the Db wrapper sends arrays as JSON text, so time-entry invoicing likely fails. Use `jsonb_array_elements_text`.
-- Affiliate lists (`intercompany/affiliates`) show the name of a linked client even if it is not assigned.
+**Follow-up fixes the same day (audited GREEN, smoke passed):**
+- `POST /api/push/notify` used to send to every subscriber in every firm; now only the caller's firm (optionally one member), and a clientId must be in that firm.
+- Time-entry invoicing passed a JS array to `::text[]` (the Db wrapper sends arrays as JSON text); now `jsonb_array_elements_text`. The test mock now rejects the old form. No other array casts remain in the API.
+- Affiliate lists show assigned-only staff only links whose both clients are assigned.
 
 ## 0. Session of 2026-09-24, afternoon (latest; read this first)
 

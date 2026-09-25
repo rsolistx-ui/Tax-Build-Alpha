@@ -1,4 +1,5 @@
 import type { Db } from "../db";
+import { visibleClientSql } from "./client-assignment";
 import { newId } from "../lib/id";
 
 export interface IntercompanyMatchCandidate {
@@ -360,7 +361,8 @@ export class IntercompanyMirrorService {
   /**
    * List all affiliate relationships defined for a firm or client.
    */
-  async listAffiliates(firmId: string, clientId?: string): Promise<AffiliateRelationship[]> {
+  /** scopeUserId: staff limited to assigned clients see only links whose both clients are assigned to them. */
+  async listAffiliates(firmId: string, clientId?: string, scopeUserId: string | null = null): Promise<AffiliateRelationship[]> {
     await this.ensureTables();
 
     const query = clientId
@@ -370,6 +372,7 @@ export class IntercompanyMirrorService {
          JOIN clients ca ON ca.id = ia.client_id_a
          JOIN clients cb ON cb.id = ia.client_id_b
          WHERE ia.firm_id = $1 AND (ia.client_id_a = $2 OR ia.client_id_b = $2)
+           AND ${visibleClientSql("ia.client_id_a", "$3")} AND ${visibleClientSql("ia.client_id_b", "$3")}
          ORDER BY ia.created_at DESC`
       : `SELECT ia.id, ia.firm_id, ia.client_id_a, ca.name AS client_name_a,
                 ia.client_id_b, cb.name AS client_name_b, ia.relationship_label, ia.created_at
@@ -377,9 +380,10 @@ export class IntercompanyMirrorService {
          JOIN clients ca ON ca.id = ia.client_id_a
          JOIN clients cb ON cb.id = ia.client_id_b
          WHERE ia.firm_id = $1
+           AND ${visibleClientSql("ia.client_id_a", "$2")} AND ${visibleClientSql("ia.client_id_b", "$2")}
          ORDER BY ia.created_at DESC`;
 
-    const params = clientId ? [firmId, clientId] : [firmId];
+    const params = clientId ? [firmId, clientId, scopeUserId] : [firmId, scopeUserId];
     const rows = await this.db.query<{
       id: string;
       firm_id: string;

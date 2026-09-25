@@ -227,7 +227,7 @@ export class TimeTrackingService {
     });
 
     await this.db.query(
-      `UPDATE time_entries SET invoice_id = $1, updated_at = NOW() WHERE id = ANY($2::text[])`,
+      `UPDATE time_entries SET invoice_id = $1, updated_at = NOW() WHERE id IN (SELECT jsonb_array_elements_text($2::jsonb))`,
       [invoice.id, entryIds],
     );
 

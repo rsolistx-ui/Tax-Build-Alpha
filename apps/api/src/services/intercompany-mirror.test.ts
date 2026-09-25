@@ -162,4 +162,13 @@ describe("IntercompanyMirrorService", () => {
     // Statement 4: insert into audit_events
     expect(transactionCalls[3].query).toContain("INSERT INTO audit_events");
   });
+
+  it("limits a scoped staff member's affiliate list to links whose both clients are assigned", async () => {
+    const db = mockDb();
+    await new IntercompanyMirrorService(db).listAffiliates("firm_1", "cli_opco", "user_staff");
+    const [sql, params] = (db.query as any).mock.calls.find(([s]: [string]) => s.includes("FROM intercompany_affiliates"));
+    expect(sql).toContain("ia.client_id_a IN (SELECT ca.client_id FROM client_assignments");
+    expect(sql).toContain("ia.client_id_b IN (SELECT ca.client_id FROM client_assignments");
+    expect(params).toEqual(["firm_1", "cli_opco", "user_staff"]);
+  });
 });

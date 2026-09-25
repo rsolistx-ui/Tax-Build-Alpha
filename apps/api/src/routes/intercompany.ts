@@ -95,7 +95,7 @@ intercompanyRoutes.get("/:clientId/intercompany/affiliates", async (c) => {
   if (!client) return c.json({ error: "Client not found" }, 404);
 
   const service = new IntercompanyMirrorService(db);
-  const affiliates = await service.listAffiliates(firm.id, clientId);
+  const affiliates = await service.listAffiliates(firm.id, clientId, c.get("clientScopeUserId") ?? null);
 
   return c.json({ affiliates });
 });

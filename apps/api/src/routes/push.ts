@@ -7,6 +7,7 @@ import { requireSession } from "../middleware/session";
 import { requireActiveBeta } from "../middleware/beta";
 import { ensureFirm } from "../services/firm";
 import { listSubs, addSub, removeSub } from "../services/push";
+import { getClient } from "../services/clients";
 
 export const pushRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 pushRoutes.use("*", requireSession);
@@ -41,13 +42,13 @@ pushRoutes.post("/notify", async (c) => {
     message: z.string(),
     eventType: z.enum(["tax_readiness", "missing_receipt", "extension_due", "review_complete", "agent_recommendation"]).optional(),
   }).parse(await c.req.json());
-  const where = body.clientId
-    ? `WHERE user_id IN (SELECT user_id FROM clients WHERE id=$1)`
-    : body.userId
-    ? `WHERE user_id=$1`
-    : "";
-  const params = body.clientId ? [body.clientId] : body.userId ? [body.userId] : [];
-  const subs = await db.query<any>(`SELECT endpoint, p256dh, auth FROM push_subscriptions ${where}`, params);
+  // Only ever the caller's own firm: its members' devices, or one member's.
+  const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
+  if (body.clientId && !(await getClient(db, body.clientId, firm.id))) return c.json({ error: "Client not found" }, 404);
+  const subs = await db.query<any>(
+    `SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE firm_id = $1 AND ($2::text IS NULL OR user_id = $2::text)`,
+    [firm.id, body.userId ?? null],
+  );
   for (const sub of subs) {
     try {
       await fetch(sub.endpoint, {
