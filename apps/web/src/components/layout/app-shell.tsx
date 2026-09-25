@@ -256,12 +256,13 @@ export function AppShell({
         <PasskeyOffer />
         <Outlet />
       </main>
-      <nav className={cn("fixed inset-x-3 bottom-3 z-30 grid rounded-2xl border border-[var(--color-border)] bg-[var(--color-card)]/95 p-1 shadow-lg backdrop-blur sm:hidden", seesAllClients ? "grid-cols-5" : "grid-cols-4")} aria-label="Primary navigation">
+      <nav className={cn("fixed inset-x-3 bottom-3 z-30 grid rounded-2xl border border-[var(--color-border)] bg-[var(--color-card)]/95 p-1 shadow-lg backdrop-blur sm:hidden", seesAllClients ? "grid-cols-6" : "grid-cols-5")} aria-label="Primary navigation">
         {[
           { to: "/", label: "Operations", icon: LayoutDashboard, end: true },
           { to: "/clients", label: "Clients", icon: Users },
           { to: "/projects", label: "Projects", icon: FolderKanban },
           { to: "/work-queue", label: "Work queue", icon: ClipboardList },
+          { to: "/team", label: "Team", icon: UsersRound },
           { to: "/agent-desk", label: "Agent desk", icon: Bot },
         ].filter(({ to }) => seesAllClients || to !== "/projects").map(({ to, label, icon: Icon, end }) => <NavLink key={to} to={to} end={end} className={({ isActive }) => cn("flex flex-col items-center gap-1 rounded-xl px-2 py-2 text-[10px] font-medium text-[var(--color-muted-foreground)]", isActive && "bg-[#14201c] text-white")}><Icon className="h-4 w-4" />{label}</NavLink>)}
       </nav>

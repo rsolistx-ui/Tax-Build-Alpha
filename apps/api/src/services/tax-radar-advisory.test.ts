@@ -22,53 +22,6 @@ function fakeDb(routes: Route[]) {
 }
 
 describe("TaxRadarAdvisoryService", () => {
-  it("scans bank and receipt payees and flags contractors exceeding $600 without W-9", async () => {
-    const { db } = fakeDb([
-      // Bank transactions
-      {
-        match: /FROM bank_transactions/i,
-        rows: [
-          { payee: "Apex Electrical Services", total: "1250.00" },
-          { payee: "Bob's Painting Co", total: "450.00" },
-          { payee: "Shell Oil", total: "220.00" }, // Should be excluded as corporate fuel
-        ],
-      },
-      // Receipts
-      {
-        match: /FROM receipts/i,
-        rows: [
-          { payee: "Bob's Painting Co", total: "350.00" }, // 450 + 350 = 800 (exceeds 600!)
-        ],
-      },
-      // W-9 records: Apex has W-9, Bob does not
-      {
-        match: /FROM contractor_w9_records/i,
-        rows: [
-          { contractor_name: "Apex Electrical Services", has_w9: true, ein_ssn_last4: "8812" },
-        ],
-      },
-    ]);
-
-    const service = new TaxRadarAdvisoryService(db);
-    const radar = await service.scan1099Radar("firm_1", "cli_1");
-
-    expect(radar).toHaveLength(2); // Apex and Bob (Shell excluded)
-
-    const apex = radar.find((r) => r.contractorName === "Apex Electrical Services");
-    expect(apex).toBeDefined();
-    expect(apex?.totalPaid).toBe(1250);
-    expect(apex?.needs1099).toBe(true);
-    expect(apex?.hasW9).toBe(true);
-    expect(apex?.status).toBe("ready_to_file");
-
-    const bob = radar.find((r) => r.contractorName === "Bob's Painting Co");
-    expect(bob).toBeDefined();
-    expect(bob?.totalPaid).toBe(800);
-    expect(bob?.needs1099).toBe(true);
-    expect(bob?.hasW9).toBe(false);
-    expect(bob?.status).toBe("missing_w9");
-  });
-
   it("calculates S-Corp tax savings accurately for a profitable business", () => {
     const { db } = fakeDb([]);
     const service = new TaxRadarAdvisoryService(db);

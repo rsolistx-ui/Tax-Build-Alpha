@@ -118,7 +118,7 @@ export interface AdvisoryInputs {
 /**
  * 2024–2026 Statutory Constants
  */
-const SS_WAGE_BASE_CAP = 168600; // 2024 Social Security wage base ($176,100 for 2025)
+const SS_WAGE_BASE_CAP = 184500; // 2026 Social Security wage base (ssa.gov)
 const OASDI_RATE = 0.124; // 12.4% OASDI
 const MEDICARE_RATE = 0.029; // 2.9% Medicare
 const ADDITIONAL_MEDICARE_RATE = 0.009; // 0.9% on earnings > $200k

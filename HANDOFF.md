@@ -4,7 +4,31 @@
 
 ## Status: core loop verified live. M6 (native e-sign) and M7 (Tax Workbench) done. Staff seats, roles and the Schedule C handoff to the preparer's tax software shipped 2026-09-24. Truepost does not compute or e-file returns (decision 2026-09-24: hand off to MyTAXPrepOffice instead; no 1040/MeF build for the 2027 season).
 
-## 0-new. Session of 2026-09-25: client assignment (latest; read this first, then section 0)
+## 00. Session of 2026-09-25, afternoon: milestone 1 and the full gap-analysis milestone list (newest; read first)
+
+Deployed as Worker `9551ca69`. Tests: 645 api, 84 web, 42 script. Full smoke test passed on `9551ca69`, with a new check that signature requests refuse another client's document (same firm and cross-firm, 404). Auditor: GREEN, no RED.
+
+- **Milestone 1 shipped:**
+  - `POST /:clientId/signature-requests` checks `documentId` and `engagementId` belong to that client.
+  - Social Security wage base is $184,500 (2026, ssa.gov) in `tax-radar-advisory.ts`, `tax-advisory-roadmap.ts`, and web `tax-functions.ts`.
+  - The shadowed `GET /1099-radar` and its orphaned `scan1099Radar` were removed.
+  - Team is in the mobile bottom nav.
+  - No em dashes remain in `tax-extended-panels.tsx`.
+- **Owner decisions today:**
+  - No return computation: without filing it only duplicates MyTAXPrepOffice. The handoff grows instead (milestone 4).
+  - Payroll is tracking only.
+  - Textract is skipped for now (paid after 3 months).
+  - Resend Pro waits (one client).
+  - The owner is applying for the IRS IRIS filer code (TCC) for 1099 e-file and is buying Workers Paid.
+  - `ADMIN_NOTIFICATION_EMAIL` is set to richard@solisequityholdings.com.
+- **Milestone list** is now the one table in section 0-new below. It maps every gap-analysis gap to a milestone and is also in the gap analysis doc (https://claude.ai/artifact/1vnuSfcSnxUBciTvw2ZrLR, "Milestones" section).
+- **Open notes:**
+  - `POST /1099-radar/w9` in `routes/tax-radar-advisory.ts` has no callers. It was already dead; left in place.
+  - At 320px width the mobile nav's "Operations" label is 2px wider than its column. It fits at 360px and up. Check this in the PWA audit (milestone 18).
+  - The service worker serves the previous build's page once after a deploy; the next load is fresh. Also for milestone 18.
+- **Next:** milestone 2 (existing accounts join a firm). If keys arrive first, wire them first: Azure (11), then Turnstile and Telegram (12).
+
+## 0-new. Session of 2026-09-25: client assignment (read section 00 first)
 
 Committed and pushed to `main`, deployed (Worker `fe85aba5`). Neon migration 0072 applied; `verify-neon-schema.mjs` passes. Tests: 643 api, 84 web, 42 script. Full `smoke-production.ps1` passed live on `fe85aba5`, including the new assignment checks.
 
@@ -22,18 +46,27 @@ Committed and pushed to `main`, deployed (Worker `fe85aba5`). Neon migration 007
 
 **Remaining milestones** (same list as the desktop setup file, Part 5):
 
-| # | Milestone | Waiting on | Estimate |
-|---|---|---|---|
-| 1 | Small cleanup batch: signature requests must check the document belongs to that client; S-Corp calculator Social Security wage base to the current year (check ssa.gov); remove the duplicate `/1099-radar` route; Team link in the mobile nav; em dashes in `tax-extended-panels.tsx` titles | Nothing | about 1 hour |
-| 2 | Add a person who already has a Truepost account to a firm (today the invite refuses with "That email already has a Truepost account") | Nothing | about 2 hours |
-| 3 | US-only receipt reading: Azure Document Intelligence first, Amazon Textract backup | Your Azure and AWS keys, AWS opt-out done | about 1 to 2 hours after keys |
-| 4 | Admin panel security check (Turnstile), admin notification email, Telegram alerts | Your keys and the email address | about 30 minutes after keys |
-| 5 | Onboard Phyllis (invite, first sign-in, her staff and client assignment) | Your email-code enrollment; attorney review before real client data | about 1 hour with you |
-| 6 | Clients pay invoices by card (Stripe) | Stripe keys, after Phyllis pays | about 3 to 4 hours |
-| 7 | Live bank feeds (Teller or Plaid) | Provider approval | about 4 to 6 hours |
-| 8 | Clients text receipt photos (Twilio) | Twilio number and carrier registration | about 3 hours |
-| 9 | Finish the PWA audit (Lighthouse score, iOS install, offline, icons) | Nothing | about 2 hours |
-| Deferred | QuickBooks sync; tax return computation and IRS e-file (decision 2026-09-24: hand off to MyTAXPrepOffice for the 2027 season) | Your call | not planned |
+| # | Milestone | Gap it closes | Waiting on | Estimate |
+|---|---|---|---|---|
+| 1 | Small cleanup batch: signature requests check the document and engagement belong to that client; Social Security wage base 2026 ($184,500); duplicate `/1099-radar` route removed; Team link in the mobile nav; em dashes out of `tax-extended-panels.tsx` | Defects | Nothing (built 2026-09-25, Worker 9551ca69) | about 1 hour |
+| 2 | Add a person who already has a Truepost account to a firm (today the invite refuses with "That email already has a Truepost account") | Staff seats | Nothing | about 2 hours |
+| 3 | Per-client balance sheet and cash flow statement from the client's own books (receipts, bank activity, journals) | Reports vs Wave/QBO | Nothing | about 4 to 6 hours |
+| 4 | Tax handoff, the rest of what the preparer digs up by hand: vehicle mileage and business-use % (Schedule C Part IV), home office square footage and expenses (Form 8829), assets placed in service with dates and cost (depreciation), 1099s received tied to booked income, estimated tax payments made. Inputs only; Truepost computes no tax | Return handoff (Phase 3 option A) | Nothing | about 3 to 4 hours |
+| 5 | Beta metrics dashboard: receipt fields correct without edits %, upload-to-categorized median, request-to-completed days, 5xx rate counting retries, support first-response time, preparer hours saved | "Nothing is proven" | Nothing | about 3 to 4 hours |
+| 6 | Public status page from real health checks, plus a published support response target | Tax-season crashes, no support | Nothing | about 2 to 3 hours |
+| 7 | Imports: QuickBooks Online export files (no Intuit key) and prior-year data from tax software exports | Poor data import | Nothing | about 4 to 6 hours |
+| 8 | 1099 preparation: recipient copies (PDF) and a filing summary; IRS IRIS e-file once the owner's filer code (TCC) is approved | 1099 alert only | Owner applying for IRIS TCC (about 45 days) | about 4 to 5 hours |
+| 9 | Payroll tracking only: import payroll provider reports, post journal entries, reconcile W-2 and 941 totals. Truepost does not run payroll | Wave payroll add-on | Nothing | about 4 to 6 hours |
+| 10 | Pricing page: one flat price with a written price lock | Price hikes, add-ons | Owner's price | about 2 hours |
+| 11 | US-only receipt reading: Azure Document Intelligence (Textract backup skipped for now: paid after 3 months) | Receipt cap | Owner's Azure key | about 1 to 2 hours after key |
+| 12 | Admin panel security check (Turnstile) and Telegram alerts. Admin notification email set 2026-09-25 (richard@solisequityholdings.com) | Admin security | Owner's Turnstile keys, Telegram token | about 30 minutes after keys |
+| 13 | Load test | Tax-season crashes | Workers Paid (owner buying 2026-09-25) | about 1 to 2 hours |
+| 14 | Onboard Phyllis (invite, first sign-in, her staff and client assignment) | | Owner's email-code enrollment; attorney review before real client data | about 1 hour with you |
+| 15 | Clients pay invoices by card (Stripe) | | Stripe keys | about 3 to 4 hours |
+| 16 | Live bank feeds (Teller or Plaid), plus an alert to the client when a feed disconnects | Feed disconnects | Provider approval | about 4 to 6 hours |
+| 17 | Clients text receipt photos (Twilio) | | Twilio number and carrier registration | about 3 hours |
+| 18 | Finish the PWA audit (Lighthouse score, iOS install, offline, icons) | | Nothing | about 2 hours |
+| Deferred | QuickBooks live sync; Resend Pro (not needed with one client); tax return computation and IRS e-file of returns (decision 2026-09-25: no computation without filing; the handoff in #4 replaces it) | | Owner's call | not planned |
 
 **Follow-up fixes the same day (audited GREEN, smoke passed):**
 - `POST /api/push/notify` used to send to every subscriber in every firm; now only the caller's firm (optionally one member), and a clientId must be in that firm.

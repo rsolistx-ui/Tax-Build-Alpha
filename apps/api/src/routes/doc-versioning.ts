@@ -118,6 +118,14 @@ docVersioningRoutes.post("/:clientId/signature-requests", async (c) => {
     })).optional(),
     requireKba: z.boolean().default(false),
   }).parse(await c.req.json());
+  if (body.documentId) {
+    const [doc] = await db.query<{ id: string }>(`SELECT id FROM client_documents WHERE id=$1 AND client_id=$2`, [body.documentId, client.id]);
+    if (!doc) return c.json({ error: "Document not found for this client" }, 404);
+  }
+  if (body.engagementId) {
+    const [eng] = await db.query<{ id: string }>(`SELECT id FROM engagements WHERE id=$1 AND client_id=$2 AND firm_id=$3`, [body.engagementId, client.id, firm.id]);
+    if (!eng) return c.json({ error: "Engagement not found for this client" }, 404);
+  }
   if (body.requireKba) {
     const kbaRecipient = body.recipients.find((r: any) => r.requireKba !== false);
     if (kbaRecipient) kbaRecipient.authenticationMethod = "KBA";

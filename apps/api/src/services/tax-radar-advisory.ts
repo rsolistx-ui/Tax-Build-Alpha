@@ -1,16 +1,6 @@
 import type { Db } from "../db";
 import { newId } from "../lib/id";
 
-export interface Contractor1099Item {
-  contractorName: string;
-  totalPaid: number;
-  hasW9: boolean;
-  einSsnLast4: string | null;
-  needs1099: boolean;
-  status: "ready_to_file" | "missing_w9" | "under_threshold";
-  suggestedAction: string;
-}
-
 export interface SCorpSavingsAnalysis {
   netProfit: number;
   solePropSeTax: number;
@@ -26,106 +16,6 @@ export interface SCorpSavingsAnalysis {
 
 export class TaxRadarAdvisoryService {
   constructor(private db: Db) {}
-
-  /**
-   * 1099 Radar: Scans all payments to vendors for a client to identify contractors
-   * crossing the IRS $600 threshold, cross-referencing W-9 collection status.
-   */
-  async scan1099Radar(firmId: string, clientId: string): Promise<Contractor1099Item[]> {
-    // 1. Fetch vendor totals from bank transactions classified as business expense
-    const bankVendors = await this.db.query<{ payee: string; total: number }>(
-      `SELECT description AS payee, SUM(ABS(amount))::numeric AS total
-       FROM bank_transactions
-       WHERE client_id = $1 AND disposition = 'business_expense'
-       GROUP BY description`,
-      [clientId]
-    );
-
-    // 2. Fetch vendor totals from receipts
-    const receiptVendors = await this.db.query<{ payee: string; total: number }>(
-      `SELECT COALESCE(extracted_merchant, filename) AS payee, SUM(COALESCE(extracted_total, 0))::numeric AS total
-       FROM receipts
-       WHERE client_id = $1 AND status = 'filed'
-       GROUP BY COALESCE(extracted_merchant, filename)`,
-      [clientId]
-    );
-
-    // 3. Fetch W-9 records on file
-    const w9Records = await this.db.query<{
-      contractor_name: string;
-      has_w9: boolean;
-      ein_ssn_last4: string | null;
-    }>(
-      `SELECT contractor_name, has_w9, ein_ssn_last4
-       FROM contractor_w9_records
-       WHERE client_id = $1`,
-      [clientId]
-    );
-
-    const w9Map = new Map(w9Records.map((r) => [r.contractor_name.toLowerCase().trim(), r]));
-
-    // Aggregate totals by normalized contractor name
-    const totals = new Map<string, number>();
-    for (const row of [...bankVendors, ...receiptVendors]) {
-      const name = (row.payee || "").trim();
-      if (!name) continue;
-      // Skip known utility/corporate non-1099 vendors
-      const lower = name.toLowerCase();
-      if (
-        lower.includes("shell") ||
-        lower.includes("exxon") ||
-        lower.includes("chevron") ||
-        lower.includes("homedepot") ||
-        lower.includes("home depot") ||
-        lower.includes("lowe's") ||
-        lower.includes("amazon") ||
-        lower.includes("apple") ||
-        lower.includes("staples") ||
-        lower.includes("walmart") ||
-        lower.includes("target")
-      ) {
-        continue;
-      }
-
-      totals.set(name, (totals.get(name) || 0) + Number(row.total || 0));
-    }
-
-    const items: Contractor1099Item[] = [];
-    for (const [name, total] of totals.entries()) {
-      if (total < 100) continue; // Only surface vendors with meaningful activity
-
-      const w9 = w9Map.get(name.toLowerCase());
-      const hasW9 = Boolean(w9?.has_w9);
-      const einSsnLast4 = w9?.ein_ssn_last4 || null;
-      const needs1099 = total >= 600;
-
-      let status: Contractor1099Item["status"] = "under_threshold";
-      let suggestedAction = "Monitor payments towards $600 limit";
-
-      if (needs1099) {
-        if (hasW9) {
-          status = "ready_to_file";
-          suggestedAction = "W-9 on file. Ready for Form 1099-NEC preparation.";
-        } else {
-          status = "missing_w9";
-          suggestedAction = "Exceeded $600 threshold. Request Form W-9 before year-end.";
-        }
-      }
-
-      items.push({
-        contractorName: name,
-        totalPaid: Math.round(total * 100) / 100,
-        hasW9,
-        einSsnLast4,
-        needs1099,
-        status,
-        suggestedAction,
-      });
-    }
-
-    // Sort by largest payment first
-    return items.sort((a, b) => b.totalPaid - a.totalPaid);
-  }
 
   /**
    * Save or update W-9 collection status for a contractor.
@@ -168,9 +58,9 @@ export class TaxRadarAdvisoryService {
       };
     }
 
-    // Sole Prop SE tax: 15.3% on 92.35% of net profit (up to Social Security wage base ~$168,600)
+    // Sole Prop SE tax: 15.3% on 92.35% of net profit (up to the 2026 Social Security wage base, $184,500 per ssa.gov)
     const seTaxableBase = netProfit * 0.9235;
-    const ssCap = 168600;
+    const ssCap = 184500;
     const seSsTax = Math.min(seTaxableBase, ssCap) * 0.124;
     const seMedTax = seTaxableBase * 0.029;
     const solePropSeTax = Math.round(seSsTax + seMedTax);

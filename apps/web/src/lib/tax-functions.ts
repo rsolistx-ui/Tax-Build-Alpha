@@ -299,7 +299,7 @@ export const TAX_FUNCTIONS: TaxFunctionRegistry[] = [
     category: 'federal',
     implementation: (net_earnings: number) => {
       if (net_earnings <= 0) return 0;
-      const wage_base = 168600; // 2024 Social Security wage base
+      const wage_base = 184500; // 2026 Social Security wage base (ssa.gov)
       const taxable = Math.min(net_earnings * 0.9235, wage_base);
       return taxable * 0.124 + net_earnings * 0.9235 * 0.029;
     },

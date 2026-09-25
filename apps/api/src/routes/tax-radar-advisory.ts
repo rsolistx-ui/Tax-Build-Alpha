@@ -10,19 +10,6 @@ import { assemblePnlReport } from "../services/reporting";
 
 export const taxRadarAdvisoryRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 
-// 1099 Radar Scan
-taxRadarAdvisoryRoutes.get("/:clientId/1099-radar", async (c) => {
-  const db = createDb(c.env);
-  const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
-  const clientId = c.req.param("clientId");
-  const client = await getClient(db, clientId, firm.id);
-  if (!client) return c.json({ error: "Client not found" }, 404);
-
-  const service = new TaxRadarAdvisoryService(db);
-  const items = await service.scan1099Radar(firm.id, clientId);
-  return c.json({ contractors: items });
-});
-
 // Update W-9 status
 taxRadarAdvisoryRoutes.post("/:clientId/1099-radar/w9", async (c) => {
   const db = createDb(c.env);

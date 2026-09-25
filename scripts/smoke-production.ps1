@@ -1959,6 +1959,16 @@ try {
   $sameFirmCrossClientStatus = Get-HttpStatusForPatch "$BaseUrl/api/documents/review/$clientADocId" $cookieJar $sameFirmCrossClientBody
   if ($sameFirmCrossClientStatus -ne "404") { throw "Client A's document must not be matchable to Client B's checklist item within the same firm, got HTTP $sameFirmCrossClientStatus." }
 
+  foreach ($foreignDoc in @(@{ id = $clientADocId; label = "same-firm Client A" }, @{ id = $clientCDocId; label = "Firm C" })) {
+    $sigProbePath = New-JsonPayloadFile (@{ documentId = [string]$foreignDoc.id; formType = "document"; recipients = @() } | ConvertTo-Json -Compress)
+    $prevEap = $ErrorActionPreference; $ErrorActionPreference = "Continue"
+    try {
+      $sigProbeStatus = & curl.exe --silent --output NUL --write-out "%{http_code}" -c $cookieJar -b $cookieJar -H "Content-Type: application/json" --data-binary "@$sigProbePath" "$BaseUrl/api/clients/$clientBId/signature-requests"
+    } finally { $ErrorActionPreference = $prevEap; Remove-TempFile $sigProbePath }
+    if ($sigProbeStatus -ne "404") { throw "A signature request on Client B must not point at a $($foreignDoc.label) document, got HTTP $sigProbeStatus." }
+  }
+  Write-Host "Signature requests refuse documents from another client (same firm and cross-firm): 404."
+
   Write-Host "Verifying a reassigned document does not carry a stale checklist relationship..."
   $reassignBody = @{ action = "assign_client"; targetClientId = $clientBId } | ConvertTo-Json -Compress
   $reassignPayloadPath = New-JsonPayloadFile $reassignBody

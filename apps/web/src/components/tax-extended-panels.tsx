@@ -60,7 +60,7 @@ export function CarryforwardPanel({ clientId }: { clientId: string }) {
           <CardTitle className="text-sm">Carryforwards</CardTitle>
           <Button size="sm" variant="outline" onClick={() => setShowForm((v) => !v)}>{showForm ? "Cancel" : "New"}</Button>
         </div>
-        {cfs.some((c) => c.tax_year_expires && c.status === "active") && <CardDescription className="text-xs text-amber-600">Some carryforwards have expiry — review before posting.</CardDescription>}
+        {cfs.some((c) => c.tax_year_expires && c.status === "active") && <CardDescription className="text-xs text-amber-600">Some carryforwards expire. Review before posting.</CardDescription>}
       </CardHeader>
       <CardContent className="space-y-3">
         {showForm && (
@@ -220,7 +220,7 @@ export function StateModsPanel({ clientId, taxYear }: { clientId: string; taxYea
       <CardHeader className="pb-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <CardTitle className="text-sm font-semibold">State Conformity & Modifications — {taxYear}</CardTitle>
+            <CardTitle className="text-sm font-semibold">State Conformity & Modifications: {taxYear}</CardTitle>
             <CardDescription className="text-xs">
               Automated California (CA 540) & New York (IT-201 / IT-225) statutory adjustments
             </CardDescription>
@@ -602,7 +602,7 @@ export function M3Panel({ clientId, taxYear }: { clientId: string; taxYear: numb
     <Card>
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
-          <CardTitle className="text-sm">M-3 — {taxYear}</CardTitle>
+          <CardTitle className="text-sm">M-3: {taxYear}</CardTitle>
           <Button size="sm" variant="outline" onClick={() => setShowForm((v) => !v)}>{showForm ? "Cancel" : "Add line"}</Button>
         </div>
         {data?.reconciliation && <CardDescription className="text-xs">Status: {data.reconciliation.status} · per_return is auto-generated (per_books + all diffs)</CardDescription>}
@@ -642,7 +642,7 @@ export function PriorYearPanel({ clientId, taxYear }: { clientId: string; taxYea
   if (!data) return <Card><CardHeader><CardTitle className="text-sm">Prior Year Compare</CardTitle></CardHeader><CardContent><p className="text-sm text-[var(--color-muted-foreground)]">Loading...</p></CardContent></Card>;
   return (
     <Card>
-      <CardHeader className="pb-2"><CardTitle className="text-sm">Prior Year Compare — {data.priorYear} vs {data.taxYear}</CardTitle><CardDescription className="text-xs">{data.priorCount} lines in {data.priorYear} · {data.currentCount} lines in {data.taxYear}</CardDescription></CardHeader>
+      <CardHeader className="pb-2"><CardTitle className="text-sm">Prior Year Compare: {data.priorYear} vs {data.taxYear}</CardTitle><CardDescription className="text-xs">{data.priorCount} lines in {data.priorYear} · {data.currentCount} lines in {data.taxYear}</CardDescription></CardHeader>
       <CardContent className="grid gap-2 sm:grid-cols-2">
         <div><div className="text-xs font-medium text-emerald-700">Added ({data.added.length})</div>{data.added.length === 0 ? <p className="text-xs text-[var(--color-muted-foreground)]">None</p> : data.added.map((a: any) => <div key={a.form_line_code} className="text-xs border-b py-1">{a.form_line_code} {a.form_line_label}</div>)}</div>
         <div><div className="text-xs font-medium text-red-700">Removed ({data.removed.length})</div>{data.removed.length === 0 ? <p className="text-xs text-[var(--color-muted-foreground)]">None</p> : data.removed.map((a: any) => <div key={a.form_line_code} className="text-xs border-b py-1">{a.form_line_code} {a.form_line_label}</div>)}</div>
@@ -721,7 +721,7 @@ export function OrganizerPanel({ clientId, taxForm, taxYear }: { clientId: strin
     <Card>
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
-          <CardTitle className="text-sm">Organizer — {taxForm}</CardTitle>
+          <CardTitle className="text-sm">Organizer: {taxForm}</CardTitle>
           <Button size="sm" variant="outline" onClick={() => void prefillFromPriorYear()}>Copy {taxYear - 1} checklist</Button>
         </div>
       </CardHeader>
@@ -746,7 +746,7 @@ export function DiagnosticsPanel({ clientId, taxYear }: { clientId: string; taxY
     <Card className={hasError ? "border-red-300" : undefined}>
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
-          <CardTitle className="text-sm">Diagnostics — {taxYear}</CardTitle>
+          <CardTitle className="text-sm">Diagnostics: {taxYear}</CardTitle>
           {hasError ? <Badge className="bg-red-100 text-red-800">{diags.filter((d: any) => d.severity === "error").length} error(s) blocking finalize</Badge> : <Badge className="bg-emerald-100 text-emerald-800">All clear</Badge>}
         </div>
         {hasError && <CardDescription className="text-xs text-red-600">Resolve errors before Tax Workbench can enter ready_for_preparation.</CardDescription>}
