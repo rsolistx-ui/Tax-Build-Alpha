@@ -115,11 +115,11 @@ function Remove-TempFile([string]$Path) {
 # The emailed sign-in code cannot reach the reserved example.com test inboxes, so the synthetic
 # account is marked as two-step enrolled directly in the auth database (infrastructure access, like
 # seed-invite). Refuses anything but a folio-smoke-*@example.com address.
-function Enable-SmokeTwoStep([string]$SmokeEmail) {
+function Enable-SmokeTwoStep([string]$SmokeEmail, [int]$Enabled = 1) {
   if ($SmokeEmail -notmatch '^folio-smoke-[a-z0-9-]+@example\.com$') { throw "Refusing to change two-step sign-in for $SmokeEmail." }
   Push-Location (Join-Path $PSScriptRoot "..\apps\api")
   try {
-    $null = & npx wrangler d1 execute folio-db --remote --command "UPDATE user SET twoFactorEnabled = 1 WHERE email = '$SmokeEmail'" 2>&1
+    $null = & npx wrangler d1 execute folio-db --remote --command "UPDATE user SET twoFactorEnabled = $([int][bool]$Enabled) WHERE email = '$SmokeEmail'" 2>&1
     if ($LASTEXITCODE -ne 0) { throw "Could not enroll the smoke account in two-step sign-in." }
   } finally {
     Pop-Location
@@ -1355,6 +1355,40 @@ try {
     $removedStaffStatus = Get-HttpStatusOnly "$BaseUrl/api/clients" $cookieJarS
     if ($removedStaffStatus -ne "401" -and $removedStaffStatus -ne "403") { throw "Removed staff member still reached /api/clients (HTTP $removedStaffStatus)." }
     Write-Host "Staff seats verified: bookkeeper joined firm $firmId, sign-off, invites, invoicing, M-3, billing and e-file reads refused (403), signed documents hidden from list, download, link and inventory, consent status readable, removal cut access (HTTP $removedStaffStatus)."
+
+    Write-Host "Verifying an existing account rejoins through /join: owner re-invites the removed bookkeeper, who signs in and accepts..."
+    $rejoinInvitePath = New-JsonPayloadFile (@{ email = $emailS; role = "read_only" } | ConvertTo-Json -Compress)
+    $rejoinInvite = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-H", "Content-Type: application/json", "--data-binary", "@$rejoinInvitePath", "$BaseUrl/api/firm/staff/invitations")
+    Remove-TempFile $rejoinInvitePath
+    if ($rejoinInvite.invitation.existingAccount -ne $true) { throw "Re-inviting an existing account did not report existingAccount." }
+    # A fresh session without the emailed code: two-step is switched off only for this synthetic account while it signs in.
+    $signInPath = New-JsonPayloadFile (@{ email = $emailS; password = $passwordS } | ConvertTo-Json -Compress)
+    Enable-SmokeTwoStep $emailS 0
+    try {
+      $null = Invoke-CurlJson @("-c", $cookieJarS, "-b", $cookieJarS, "-H", "Content-Type: application/json", "-H", "Origin: $BaseUrl", "--data-binary", "@$signInPath", "$BaseUrl/api/auth/sign-in/email")
+    } finally {
+      Enable-SmokeTwoStep $emailS
+      Remove-TempFile $signInPath
+    }
+    $joinPath = New-JsonPayloadFile (@{ token = $rejoinInvite.invitation.token } | ConvertTo-Json -Compress)
+    try {
+      $joinPreview = Invoke-CurlJson @("-c", $cookieJarS, "-b", $cookieJarS, "-H", "Content-Type: application/json", "--data-binary", "@$joinPath", "$BaseUrl/api/firm-join/preview")
+      if ([string]$joinPreview.role -ne "read_only") { throw "Join preview showed role '$($joinPreview.role)', expected read_only." }
+      $joined = Invoke-CurlJson @("-c", $cookieJarS, "-b", $cookieJarS, "-H", "Content-Type: application/json", "--data-binary", "@$joinPath", "$BaseUrl/api/firm-join/accept")
+      if ($joined.ok -ne $true) { throw "Accepting the join invitation did not succeed." }
+      $prevEap = $ErrorActionPreference; $ErrorActionPreference = "Continue"
+      $reuseStatus = & curl.exe --silent --output NUL --write-out "%{http_code}" -c $cookieJarS -b $cookieJarS -H "Content-Type: application/json" --data-binary "@$joinPath" "$BaseUrl/api/firm-join/accept"
+      $ErrorActionPreference = $prevEap
+      if ($reuseStatus -ne "404") { throw "A used join invitation was accepted again (HTTP $reuseStatus); expected 404." }
+    } finally {
+      Remove-TempFile $joinPath
+    }
+    $meRejoined = Invoke-CurlJson @("-c", $cookieJarS, "-b", $cookieJarS, "$BaseUrl/api/me")
+    if ([string]$meRejoined.firm.id -ne $firmId) { throw "The rejoined account landed in firm '$($meRejoined.firm.id)', expected $firmId." }
+    $rejoinedMember = @((Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/firm/staff")).members) | Where-Object { $_.userId -eq $staffUserId }
+    if ([string]$rejoinedMember.role -ne "read_only") { throw "The rejoined member has role '$($rejoinedMember.role)', expected read_only." }
+    $null = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-X", "DELETE", "$BaseUrl/api/firm/staff/$staffUserId")
+    Write-Host "Existing account rejoined: invite reported existingAccount, preview and accept worked, the used link was refused (404), /api/me shows the owner's firm, role read_only; removed again."
   } finally {
     Remove-TempFile $cookieJarS
   }

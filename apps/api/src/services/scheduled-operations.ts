@@ -31,7 +31,8 @@ export async function runScheduledOperations(env: Env): Promise<ScheduledOperati
   const [reminders, diagnostics, firms, pending] = await Promise.all([
     handleReminderCron(env),
     new ReliabilityEngineerService(db, env).runDiagnostics(),
-    db.query<{ id: string }>(`SELECT id FROM firms`),
+    // A firm with no members was left by an owner who joined another firm; nothing to brief.
+    db.query<{ id: string }>(`SELECT id FROM firms f WHERE EXISTS (SELECT 1 FROM firm_members m WHERE m.firm_id = f.id)`),
     db.query<{ count: string }>(
       `SELECT COUNT(*)::text AS count FROM agent_tasks WHERE status = 'awaiting_approval'`,
     ),

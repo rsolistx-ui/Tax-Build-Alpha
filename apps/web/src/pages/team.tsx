@@ -40,7 +40,7 @@ export function TeamPage() {
   const [busy, setBusy] = useState(false);
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<Role>("preparer");
-  const [newLink, setNewLink] = useState<{ email: string; link: string } | null>(null);
+  const [newLink, setNewLink] = useState<{ email: string; link: string; existingAccount: boolean } | null>(null);
   const [copied, setCopied] = useState(false);
   const [clients, setClients] = useState<ClientOption[]>([]);
   const [draft, setDraft] = useState<AccessDraft | null>(null);
@@ -87,12 +87,15 @@ export function TeamPage() {
   function invite(e: React.FormEvent) {
     e.preventDefault();
     void run(async () => {
-      const res = await api<{ invitation: { email: string; token: string } }>("/api/firm/staff/invitations", {
+      const res = await api<{ invitation: { email: string; token: string; existingAccount: boolean } }>("/api/firm/staff/invitations", {
         method: "POST",
         body: JSON.stringify({ email: email.trim(), role }),
       });
-      const link = `${window.location.origin}/beta-redeem?token=${res.invitation.token}&email=${encodeURIComponent(res.invitation.email)}`;
-      setNewLink({ email: res.invitation.email, link });
+      // Someone with an account signs in and accepts; anyone else creates an account.
+      const link = res.invitation.existingAccount
+        ? `${window.location.origin}/join?token=${res.invitation.token}`
+        : `${window.location.origin}/beta-redeem?token=${res.invitation.token}&email=${encodeURIComponent(res.invitation.email)}`;
+      setNewLink({ email: res.invitation.email, link, existingAccount: res.invitation.existingAccount });
       setCopied(false);
       setEmail("");
     });
@@ -237,7 +240,10 @@ export function TeamPage() {
             </form>
             {newLink ? (
               <div className="flex flex-wrap items-center gap-2 rounded-md border border-[var(--color-border)] p-2 text-sm">
-                <span className="min-w-0 flex-1 break-all">Link for {newLink.email}: {newLink.link}</span>
+                <span className="min-w-0 flex-1 break-all">
+                  Link for {newLink.email}: {newLink.link}
+                  {newLink.existingAccount ? <span className="block text-xs text-[var(--color-muted-foreground)]">They already have a Truepost account: they sign in with it and accept.</span> : null}
+                </span>
                 <Button size="sm" variant="outline" className="gap-1.5" onClick={() => void copyLink()}>
                   {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
                   {copied ? "Copied" : "Copy link"}

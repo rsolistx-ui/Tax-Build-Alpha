@@ -11,6 +11,7 @@ const DashboardPage = lazy(() => import("@/pages/dashboard").then((module) => ({
 const ClientWorkspacePage = lazy(() => import("@/pages/client-workspace").then((module) => ({ default: module.ClientWorkspacePage })));
 const AdminPanel = lazy(() => import("@/pages/admin/admin-panel").then((module) => ({ default: module.AdminPanel })));
 const BetaRedeemPage = lazy(() => import("@/pages/beta-redeem").then((module) => ({ default: module.BetaRedeemPage })));
+const JoinFirmPage = lazy(() => import("@/pages/join").then((module) => ({ default: module.JoinFirmPage })));
 const DocumentReviewPage = lazy(() => import("@/pages/document-review").then((module) => ({ default: module.DocumentReviewPage })));
 const WorkQueuePage = lazy(() => import("@/pages/work-queue").then((module) => ({ default: module.WorkQueuePage })));
 const TaxWorkbenchPage = lazy(() => import("@/pages/tax-workbench").then((module) => ({ default: module.TaxWorkbenchPage })));
@@ -36,6 +37,7 @@ export default function App() {
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/beta-redeem" element={<BetaRedeemPage />} />
+        <Route path="/join" element={<JoinFirmPage />} />
         <Route path="/redeem" element={<Navigate to="/beta-redeem" replace />} />
         <Route path="/portal" element={<PortalPage />} />
         <Route path="/sign" element={<SignPage />} />

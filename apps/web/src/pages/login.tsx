@@ -1,7 +1,7 @@
 import type { FormEvent } from "react";
 import { BrandMark } from "@/components/brand-mark";
 import { useEffect, useState } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import { authClient } from "@/lib/auth-client";
 import { setAdminToken, getAdminToken } from "@/lib/api";
 import { deviceSupportsFingerprint } from "@/lib/passkey-support";
@@ -23,6 +23,9 @@ import {
 
 export function LoginPage() {
   const navigate = useNavigate();
+  // Where to land after sign-in, e.g. back to /join; same-site paths only.
+  const nextParam = useSearchParams()[0].get("next") ?? "";
+  const afterSignIn = nextParam.startsWith("/") && !nextParam.startsWith("//") ? nextParam : "/";
   const [loginMode, setLoginMode] = useState<"password" | "fast_pass">("password");
 
   // Password Login State
@@ -54,7 +57,7 @@ export function LoginPage() {
     }
     const trimmedToken = masterToken.trim();
     if (/^[0-9a-fA-F]{64}$/.test(trimmedToken)) setAdminToken(trimmedToken);
-    navigate("/");
+    navigate(afterSignIn);
   }
 
   // Fast-Pass State
@@ -100,7 +103,7 @@ export function LoginPage() {
     // create a browser session or recover a forgotten password by itself.
     if (trimmedToken) setAdminToken(trimmedToken);
 
-    navigate("/");
+    navigate(afterSignIn);
   }
 
   async function sendEmailCode() {
@@ -128,7 +131,7 @@ export function LoginPage() {
       setError(err.message || "That code did not work. Try the newest code.");
       return;
     }
-    navigate("/");
+    navigate(afterSignIn);
   }
 
   async function onFastPassSubmit(e: FormEvent) {

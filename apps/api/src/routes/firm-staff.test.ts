@@ -12,7 +12,10 @@ vi.mock("../middleware/session", () => ({
     await next();
   },
 }));
-vi.mock("../middleware/beta", () => ({ requireActiveBeta: async (_c: any, next: any) => next() }));
+let betaBlocks = false;
+vi.mock("../middleware/beta", () => ({
+  requireActiveBeta: async (c: any, next: any) => (betaBlocks ? c.json({ code: "BETA_REQUIRED" }, 403) : next()),
+}));
 
 let myRole = "owner";
 let existingAccount: { id: string } | null = null;
@@ -92,11 +95,24 @@ describe("firm staff seats", () => {
     expect(update?.[1]).toEqual(["firm_1", "user-staff", "read_only"]);
   });
 
-  it("refuses to invite an email that already has an account", async () => {
+  it("invites an email that already has an account and says so", async () => {
     myRole = "owner";
     existingAccount = { id: "user-other" };
     const res = await call("/staff/invitations", { method: "POST", body: JSON.stringify({ email: "taken@example.com" }) });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { invitation: { existingAccount: boolean } };
+    expect(body.invitation.existingAccount).toBe(true);
+  });
+
+  it("refuses to invite someone already on the team", async () => {
+    myRole = "owner";
+    existingAccount = { id: "user-staff" };
+    const base = queryMock.getMockImplementation()!;
+    queryMock.mockImplementation(async (sql: string, params: unknown[]) =>
+      sql.includes("SELECT id FROM firm_members WHERE firm_id = $1 AND user_id = $2") ? [{ id: "fm_2" }] : base(sql, params));
+    const res = await call("/staff/invitations", { method: "POST", body: JSON.stringify({ email: "staff@example.com" }) });
     expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toMatchObject({ code: "ALREADY_MEMBER" });
   });
 
   it("removes staff (never the owner) and ends their sessions", async () => {
@@ -151,5 +167,102 @@ describe("client assignment", () => {
     // Arrays reach Neon as JSON text, so the insert unpacks them as jsonb.
     expect(statements[2].query).toContain("jsonb_array_elements_text($1::jsonb)");
     expect(statements[2].params).toEqual([["cli_a", "cli_b"], "firm_1", "user-staff", "user-me"]);
+  });
+});
+
+describe("an existing account joins a firm", () => {
+  const TOKEN = "t".repeat(40);
+  let invitation: Record<string, unknown> | null;
+  let membership: { firm_id: string; role: string } | null;
+  let usage: { clients: string; staff: string };
+
+  beforeEach(() => {
+    transactionMock.mockReset();
+    transactionMock.mockResolvedValue([]);
+    betaBlocks = false;
+    invitation = { id: "biv_1", email: "Me@Example.com", firm_id: "firm_owner", firm_role: "bookkeeper", firm_name: "Phyllis Tax" };
+    membership = null;
+    usage = { clients: "0", staff: "0" };
+    queryMock.mockImplementation(async (sql: string) => {
+      if (sql.includes("FROM beta_invitations i JOIN firms f")) return invitation ? [invitation] : [];
+      if (sql.includes("SELECT firm_id, role FROM firm_members")) return membership ? [membership] : [];
+      if (sql.includes("SELECT (SELECT COUNT(*) FROM clients")) return [usage];
+      if (sql.includes("SET status = 'redeemed'")) return [{ id: "biv_1" }];
+      return [];
+    });
+  });
+
+  async function join(path: string) {
+    const { firmJoinRoutes } = await import("./firm-staff");
+    return firmJoinRoutes.request(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ token: TOKEN }) }, env());
+  }
+  const claimed = () => queryMock.mock.calls.some(([sql]) => String(sql).includes("SET status = 'redeemed'"));
+  const statements = () => (transactionMock.mock.calls[0]?.[0] ?? []) as { query: string; params: unknown[] }[];
+
+  it("adds an account with no firm, even when its own access has lapsed", async () => {
+    betaBlocks = true; // a removed staff member: signed in, but no active access of their own
+    const res = await join("/accept");
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ ok: true, firmName: "Phyllis Tax", role: "bookkeeper" });
+    const insert = statements().find((s) => s.query.includes("INSERT INTO firm_members"));
+    expect(insert?.params.slice(1)).toEqual(["firm_owner", "user-me", "bookkeeper"]);
+    expect(statements().some((s) => s.query.includes("DELETE FROM firm_members"))).toBe(false);
+  });
+
+  it("refuses an invitation sent to a different email and does not reveal the firm", async () => {
+    invitation!.email = "someone-else@example.com";
+    for (const path of ["/preview", "/accept"]) {
+      const res = await join(path);
+      expect(res.status).toBe(403);
+      expect(await res.text()).not.toContain("Phyllis Tax");
+    }
+    expect(claimed()).toBe(false);
+  });
+
+  it("refuses an invalid or used token", async () => {
+    invitation = null;
+    const res = await join("/accept");
+    expect(res.status).toBe(404);
+    expect(transactionMock).not.toHaveBeenCalled();
+  });
+
+  it("moves the owner of an empty firm, keeping the old firm and revoking its pending invitations", async () => {
+    membership = { firm_id: "firm_mine", role: "owner" };
+    const res = await join("/accept");
+    expect(res.status).toBe(200);
+    const s = statements();
+    const leave = s.find((x) => x.query.includes("DELETE FROM firm_members"));
+    expect(leave?.params).toEqual(["firm_mine", "user-me"]);
+    // The emptiness check is repeated inside the transaction, not only before it.
+    expect(leave?.query).toContain("NOT EXISTS (SELECT 1 FROM clients WHERE firm_id = $1)");
+    expect(leave?.query).toContain("o.user_id <> $2");
+    expect(s.find((x) => x.query.includes("SET status = 'revoked'"))?.params).toEqual(["firm_mine"]);
+    expect(s.some((x) => x.query.includes("DELETE FROM firms"))).toBe(false);
+  });
+
+  it("refuses when the account's own firm has clients or staff", async () => {
+    membership = { firm_id: "firm_mine", role: "owner" };
+    usage = { clients: "2", staff: "0" };
+    const res = await join("/accept");
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toMatchObject({ code: "OWN_FIRM_IN_USE" });
+    expect(claimed()).toBe(false);
+  });
+
+  it("refuses staff of another firm and someone already on this team", async () => {
+    membership = { firm_id: "firm_other", role: "preparer" };
+    let res = await join("/accept");
+    await expect(res.json()).resolves.toMatchObject({ code: "IN_ANOTHER_FIRM" });
+    membership = { firm_id: "firm_owner", role: "bookkeeper" };
+    res = await join("/accept");
+    await expect(res.json()).resolves.toMatchObject({ code: "ALREADY_MEMBER" });
+    expect(claimed()).toBe(false);
+  });
+
+  it("releases the invitation when joining fails", async () => {
+    transactionMock.mockRejectedValue(new Error("unique violation"));
+    const res = await join("/accept");
+    expect(res.status).toBe(500);
+    expect(queryMock.mock.calls.some(([sql]) => String(sql).includes("SET status = 'pending'"))).toBe(true);
   });
 });

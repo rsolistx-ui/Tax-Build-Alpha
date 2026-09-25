@@ -26,7 +26,15 @@ Deployed as Worker `9551ca69`. Tests: 645 api, 84 web, 42 script. Full smoke tes
   - `POST /1099-radar/w9` in `routes/tax-radar-advisory.ts` has no callers. It was already dead; left in place.
   - At 320px width the mobile nav's "Operations" label is 2px wider than its column. It fits at 360px and up. Check this in the PWA audit (milestone 18).
   - The service worker serves the previous build's page once after a deploy; the next load is fresh. Also for milestone 18.
-- **Next:** milestone 2 (existing accounts join a firm). If keys arrive first, wire them first: Azure (11), then Turnstile and Telegram (12).
+- **Milestone 2 shipped** (Worker `16b02183`, smoke passed; 656 api tests): a firm owner can add someone who already has a Truepost account.
+  - The invite no longer refuses existing emails (only people already on this team: 409 `ALREADY_MEMBER`). The Team page gives a `/join?token=` link for existing accounts and `/beta-redeem` for new ones.
+  - `/api/firm-join/preview` and `/accept` (`firmJoinRoutes` in `routes/firm-staff.ts`) use `requireSession` only, so a removed staff member with no access can rejoin. The signed-in email must match the invite; the firm name is never shown otherwise.
+  - Accept rules: already in this firm 409; staff of another firm 409 `IN_ANOTHER_FIRM`; owner of a firm with clients or staff 409 `OWN_FIRM_IN_USE`. An owner of an empty firm leaves it: the old firm is kept (its RESTRICT legal records stay), its pending invites are revoked, and the emptiness check is repeated inside the transaction.
+  - `loadAccessEntitlement`: staff follow the firm's plan even if they hold an older one of their own; a revoked one of their own still blocks.
+  - Login honors a same-site `?next=` path. The morning brief skips firms with no members.
+  - Smoke test: removes the bookkeeper, re-invites them as an existing account, signs in (two-step switched off briefly for that synthetic account only), previews, accepts, checks the used link is refused, then removes them again.
+  - Auditor: GREEN. Two AMBERs fixed (the race on the emptiness check; morning briefs for empty firms). Left as is: an old firm's `firms.owner_user_id` still names the person who left. It is only reachable through client data, and the old firm has none.
+- **Next:** milestone 3 (per-client balance sheet and cash flow). If keys arrive first, wire them first: Azure (11), then Turnstile and Telegram (12).
 
 ## 0-new. Session of 2026-09-25: client assignment (read section 00 first)
 
@@ -49,7 +57,7 @@ Committed and pushed to `main`, deployed (Worker `fe85aba5`). Neon migration 007
 | # | Milestone | Gap it closes | Waiting on | Estimate |
 |---|---|---|---|---|
 | 1 | Small cleanup batch: signature requests check the document and engagement belong to that client; Social Security wage base 2026 ($184,500); duplicate `/1099-radar` route removed; Team link in the mobile nav; em dashes out of `tax-extended-panels.tsx` | Defects | Nothing (built 2026-09-25, Worker 9551ca69) | about 1 hour |
-| 2 | Add a person who already has a Truepost account to a firm (today the invite refuses with "That email already has a Truepost account") | Staff seats | Nothing | about 2 hours |
+| 2 | Add a person who already has a Truepost account to a firm | Staff seats | Nothing (built 2026-09-25, Worker 16b02183) | about 2 hours |
 | 3 | Per-client balance sheet and cash flow statement from the client's own books (receipts, bank activity, journals) | Reports vs Wave/QBO | Nothing | about 4 to 6 hours |
 | 4 | Tax handoff, the rest of what the preparer digs up by hand: vehicle mileage and business-use % (Schedule C Part IV), home office square footage and expenses (Form 8829), assets placed in service with dates and cost (depreciation), 1099s received tied to booked income, estimated tax payments made. Inputs only; Truepost computes no tax | Return handoff (Phase 3 option A) | Nothing | about 3 to 4 hours |
 | 5 | Beta metrics dashboard: receipt fields correct without edits %, upload-to-categorized median, request-to-completed days, 5xx rate counting retries, support first-response time, preparer hours saved | "Nothing is proven" | Nothing | about 3 to 4 hours |

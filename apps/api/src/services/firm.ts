@@ -71,8 +71,8 @@ export type AccessEntitlement = {
 
 /**
  * The entitlement that governs a user's access and their firm role, in one
- * query: their own entitlement when they have one, otherwise (staff only)
- * their firm owner's, so a staff seat lives and ends with the firm's plan.
+ * query: staff use their firm owner's, so a staff seat lives and ends with the
+ * firm's plan (unless their own was revoked); owners use their own.
  * A user with no firm yet is treated as an owner (ensureFirm makes them one).
  */
 export async function loadAccessEntitlement(
@@ -97,11 +97,13 @@ export async function loadAccessEntitlement(
   );
   const role = row?.role ? toFirmRole(row.role) : "owner";
   const seesAllClients = role === "owner" || row?.sees_all_clients === true;
+  // Staff follow the firm's plan even when they hold an older entitlement of their
+  // own (an existing account that joined a firm); a revoked one of their own still blocks.
+  if (row?.firm_status && row.own_status !== "revoked") {
+    return { role, seesAllClients, entitlement: { status: row.firm_status, starts_at: row.firm_starts!, expires_at: row.firm_expires!, source: "firm" } };
+  }
   if (row?.own_status) {
     return { role, seesAllClients, entitlement: { status: row.own_status, starts_at: row.own_starts!, expires_at: row.own_expires!, source: "own" } };
-  }
-  if (row?.firm_status) {
-    return { role, seesAllClients, entitlement: { status: row.firm_status, starts_at: row.firm_starts!, expires_at: row.firm_expires!, source: "firm" } };
   }
   return { role, seesAllClients, entitlement: null };
 }
