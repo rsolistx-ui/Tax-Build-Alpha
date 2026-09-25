@@ -7,6 +7,7 @@ import { newId } from "../lib/id";
 import { ensureFirm } from "../services/firm";
 import { getClient } from "../services/clients";
 import {
+  cardSignCheck,
   normalizeBankCsv,
   previewBankCsv,
   type BankColumnMapping,
@@ -195,6 +196,54 @@ bankRoutes.post("/:clientId/bank-transactions/preview", async (c) => {
   return c.json({ ...preview, filename: file.name });
 });
 
+async function importAccount(db: ReturnType<typeof createDb>, clientId: string, accountId: string) {
+  const [account] = await db.query<{ id: string; kind: string; charges_positive: boolean }>(
+    `SELECT id, kind, charges_positive FROM client_accounts WHERE id = $1 AND client_id = $2 AND kind IN ('checking', 'savings', 'credit_card')`,
+    [accountId, clientId],
+  );
+  return account ?? null;
+}
+
+/**
+ * Before importing into a credit card account: applies the account's sign setting to the
+ * mapped rows and says whether the result still looks backwards. Saves nothing.
+ */
+bankRoutes.post("/:clientId/bank-transactions/sign-check", async (c) => {
+  const { db, client } = await authorizedClient(c);
+  if (!client) return c.json({ error: "Not found" }, 404);
+  const form = await c.req.formData();
+  const entry = form.get("file");
+  const accountId = form.get("accountId");
+  const mappingValue = form.get("mapping");
+  if (!entry || typeof entry === "string" || typeof accountId !== "string" || typeof mappingValue !== "string") {
+    return c.json({ error: "file, mapping and accountId are required" }, 400);
+  }
+  const file = entry as File;
+  validateCsvFile(file);
+  const account = await importAccount(db, client.id, accountId);
+  if (!account) return c.json({ error: "Account not found" }, 404);
+  if (account.kind !== "credit_card") return c.json({ applies: false });
+  let mapping: BankColumnMapping;
+  try {
+    mapping = mappingSchema.parse(JSON.parse(mappingValue)) as BankColumnMapping;
+  } catch {
+    return c.json({ error: "mapping must be valid JSON" }, 400);
+  }
+  const normalized = normalizeBankCsv(await file.text(), mapping);
+  const sign = account.charges_positive ? -1 : 1;
+  const check = cardSignCheck(normalized.rows.map((r) => ({ description: r.description, amount: sign * r.amount })));
+  return c.json({
+    applies: true,
+    chargesPositive: account.charges_positive,
+    ...check,
+    message: check.looksInverted
+      ? account.charges_positive
+        ? "This file looks backwards with signs flipped: charges would be saved as money in. Turn off \"Charges show as positive numbers\" for this account, then check again."
+        : "This file looks backwards: charges would be saved as money in. If the card issuer exports charges as positive numbers (Amex does), turn on \"Charges show as positive numbers\" for this account, then check again."
+      : null,
+  });
+});
+
 bankRoutes.post("/:clientId/bank-transactions/import", async (c) => {
   const { db, client } = await authorizedClient(c);
   if (!client) return c.json({ error: "Not found" }, 404);
@@ -218,13 +267,8 @@ bankRoutes.post("/:clientId/bank-transactions/import", async (c) => {
   // Optional: the client account (checking, savings or credit card) this statement belongs to.
   const accountValue = form.get("accountId");
   const accountId = typeof accountValue === "string" && accountValue ? accountValue : null;
-  if (accountId) {
-    const [account] = await db.query<{ id: string }>(
-      `SELECT id FROM client_accounts WHERE id = $1 AND client_id = $2 AND kind IN ('checking', 'savings', 'credit_card')`,
-      [accountId, client.id],
-    );
-    if (!account) return c.json({ error: "Choose a checking, savings, or credit card account for this client." }, 400);
-  }
+  const account = accountId ? await importAccount(db, client.id, accountId) : null;
+  if (accountId && !account) return c.json({ error: "Choose a checking, savings, or credit card account for this client." }, 400);
 
   const text = await file.text();
   const preview = previewBankCsv(text);
@@ -240,6 +284,8 @@ bankRoutes.post("/:clientId/bank-transactions/import", async (c) => {
   if (normalized.rows.length === 0) {
     return c.json({ error: "CSV did not contain any valid transaction rows", rowErrors: normalized.errors }, 400);
   }
+  // The account says its issuer exports charges as positive: store them as money out. raw_json keeps the original.
+  if (account?.charges_positive) for (const row of normalized.rows) row.amount = -row.amount;
 
   const receipts = await db.query<ReceiptMatchCandidate>(
     `SELECT id, extracted_date, extracted_merchant, extracted_total, filename

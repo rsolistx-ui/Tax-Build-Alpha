@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 
 type Kind = "checking" | "savings" | "credit_card" | "loan";
-type Account = { id: string; name: string; kind: Kind; openingBalance: number; transactionCount: number };
+type Account = { id: string; name: string; kind: Kind; openingBalance: number; chargesPositive: boolean; transactionCount: number };
 type ImportBatch = { importBatchId: string | null; filename: string | null; currency: string | null; transactionCount: number; earliestDate: string | null; latestDate: string | null; accountIds: string[] };
 type Line = { key: string; label: string; amount: number; count?: number; review?: boolean };
 type BalanceSheetResponse = {
@@ -31,7 +31,7 @@ export function FinancialStatementsPanel({ clientId }: { clientId: string }) {
   const base = `/api/clients/${clientId}`;
   const [setup, setSetup] = useState<{ booksStartDate: string | null; accounts: Account[]; importBatches: ImportBatch[] } | null>(null);
   const [booksStart, setBooksStart] = useState("");
-  const [newAccount, setNewAccount] = useState({ name: "", kind: "checking" as Kind, openingBalance: "" });
+  const [newAccount, setNewAccount] = useState({ name: "", kind: "checking" as Kind, openingBalance: "", chargesPositive: false });
   // Opening balances being edited; cleared after each save attempt so the field shows what is actually saved.
   const [openingDrafts, setOpeningDrafts] = useState<Record<string, string>>({});
   const [asOf, setAsOf] = useState(today());
@@ -125,6 +125,15 @@ export function FinancialStatementsPanel({ clientId }: { clientId: string }) {
                       void run(() => api(`${base}/accounts/${a.id}`, { method: "PATCH", body: JSON.stringify({ openingBalance: v }) })).finally(clear);
                     }}
                   />
+                  {a.kind === "credit_card" ? (
+                    <label className="flex items-center gap-1.5 text-xs">
+                      <input
+                        type="checkbox" checked={a.chargesPositive} disabled={busy}
+                        onChange={(e) => void run(() => api(`${base}/accounts/${a.id}`, { method: "PATCH", body: JSON.stringify({ chargesPositive: e.target.checked }) }))}
+                      />
+                      Charges show as positive numbers
+                    </label>
+                  ) : null}
                   <Button size="sm" variant="outline" disabled={busy} onClick={() => void run(() => api(`${base}/accounts/${a.id}`, { method: "DELETE" }))}>Remove</Button>
                 </li>
               ))}
@@ -136,8 +145,8 @@ export function FinancialStatementsPanel({ clientId }: { clientId: string }) {
             onSubmit={(e) => {
               e.preventDefault();
               void run(async () => {
-                await api(`${base}/accounts`, { method: "POST", body: JSON.stringify({ name: newAccount.name, kind: newAccount.kind, openingBalance: Number(newAccount.openingBalance || 0) }) });
-                setNewAccount({ name: "", kind: "checking", openingBalance: "" });
+                await api(`${base}/accounts`, { method: "POST", body: JSON.stringify({ name: newAccount.name, kind: newAccount.kind, openingBalance: Number(newAccount.openingBalance || 0), chargesPositive: newAccount.kind === "credit_card" && newAccount.chargesPositive }) });
+                setNewAccount({ name: "", kind: "checking", openingBalance: "", chargesPositive: false });
               });
             }}
           >
@@ -146,6 +155,12 @@ export function FinancialStatementsPanel({ clientId }: { clientId: string }) {
               {(Object.keys(KIND_LABELS) as Kind[]).map((k) => <option key={k} value={k}>{KIND_LABELS[k]}</option>)}
             </select>
             <Input type="number" step="0.01" aria-label="New account opening balance" placeholder={newAccount.kind === "checking" || newAccount.kind === "savings" ? "Balance held" : "Amount owed"} value={newAccount.openingBalance} onChange={(e) => setNewAccount({ ...newAccount, openingBalance: e.target.value })} className="w-36" />
+            {newAccount.kind === "credit_card" ? (
+              <label className="flex items-center gap-1.5 text-xs">
+                <input type="checkbox" checked={newAccount.chargesPositive} onChange={(e) => setNewAccount({ ...newAccount, chargesPositive: e.target.checked })} />
+                Charges show as positive numbers (Amex and some others)
+              </label>
+            ) : null}
             <Button type="submit" disabled={busy || !newAccount.name.trim()}>Add account</Button>
           </form>
 

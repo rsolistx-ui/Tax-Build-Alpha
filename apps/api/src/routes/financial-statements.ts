@@ -49,8 +49,8 @@ financialStatementRoutes.get("/:clientId/accounts", async (c) => {
     `SELECT books_start_date::text AS books_start_date FROM client_profiles WHERE client_id = $1`,
     [client.id],
   );
-  const accounts = await db.query<{ id: string; name: string; kind: AccountKind; opening_balance: string; transaction_count: string }>(
-    `SELECT a.id, a.name, a.kind, a.opening_balance,
+  const accounts = await db.query<{ id: string; name: string; kind: AccountKind; opening_balance: string; charges_positive: boolean; transaction_count: string }>(
+    `SELECT a.id, a.name, a.kind, a.opening_balance, a.charges_positive,
             (SELECT COUNT(*) FROM bank_transactions bt WHERE bt.account_id = a.id)::text AS transaction_count
        FROM client_accounts a WHERE a.client_id = $1 ORDER BY a.kind, lower(a.name)`,
     [client.id],
@@ -66,7 +66,7 @@ financialStatementRoutes.get("/:clientId/accounts", async (c) => {
   );
   return c.json({
     booksStartDate: profile?.books_start_date ?? null,
-    accounts: accounts.map((a) => ({ id: a.id, name: a.name, kind: a.kind, openingBalance: Number(a.opening_balance), transactionCount: Number(a.transaction_count) })),
+    accounts: accounts.map((a) => ({ id: a.id, name: a.name, kind: a.kind, openingBalance: Number(a.opening_balance), chargesPositive: a.charges_positive === true, transactionCount: Number(a.transaction_count) })),
     importBatches: batches.map((b) => ({
       importBatchId: b.import_batch_id, filename: b.filename, currency: b.currency, transactionCount: Number(b.count),
       earliestDate: b.earliest, latestDate: b.latest, accountIds: b.account_ids ?? [],
@@ -78,6 +78,8 @@ const accountBody = z.object({
   name: z.string().trim().min(1).max(120),
   kind: z.enum(ACCOUNT_KINDS as [AccountKind, ...AccountKind[]]),
   openingBalance: z.number().finite().default(0),
+  /** The issuer exports charges as positive numbers; imports into this account flip the signs. */
+  chargesPositive: z.boolean().default(false),
 });
 
 financialStatementRoutes.post("/:clientId/accounts", async (c) => {
@@ -87,9 +89,9 @@ financialStatementRoutes.post("/:clientId/accounts", async (c) => {
   if (!body.success) return c.json({ error: "Give the account a name, a type, and an opening balance." }, 400);
   const id = newId("cacct");
   const [created] = await db.query<{ id: string }>(
-    `INSERT INTO client_accounts (id, firm_id, client_id, name, kind, opening_balance) VALUES ($1, $2, $3, $4, $5, $6)
+    `INSERT INTO client_accounts (id, firm_id, client_id, name, kind, opening_balance, charges_positive) VALUES ($1, $2, $3, $4, $5, $6, $7)
      ON CONFLICT DO NOTHING RETURNING id`,
-    [id, firm.id, client.id, body.data.name, body.data.kind, body.data.openingBalance],
+    [id, firm.id, client.id, body.data.name, body.data.kind, body.data.openingBalance, body.data.chargesPositive],
   );
   if (!created) return c.json({ error: "This client already has an account with that name." }, 409);
   await insertWorkAuditEvent(db, { firmId: firm.id, entityType: "client_account", entityId: id, action: "client_account_created", actorUserId: c.get("userId"), afterJson: { clientId: client.id, ...body.data } });
@@ -127,11 +129,11 @@ financialStatementRoutes.patch("/:clientId/accounts/:accountId", async (c) => {
   }
   const [updated] = await db.query<{ id: string }>(
     `UPDATE client_accounts SET name = COALESCE($3, name), kind = COALESCE($4, kind),
-            opening_balance = COALESCE($5, opening_balance), updated_at = NOW()
+            opening_balance = COALESCE($5, opening_balance), charges_positive = COALESCE($6, charges_positive), updated_at = NOW()
       WHERE id = $1 AND client_id = $2
         AND NOT EXISTS (SELECT 1 FROM client_accounts o WHERE o.client_id = $2 AND o.id <> $1 AND lower(o.name) = lower(COALESCE($3, '')))
       RETURNING id`,
-    [accountId, client.id, body.data.name ?? null, body.data.kind ?? null, body.data.openingBalance ?? null],
+    [accountId, client.id, body.data.name ?? null, body.data.kind ?? null, body.data.openingBalance ?? null, body.data.chargesPositive ?? null],
   );
   if (!updated) return c.json({ error: "This client already has an account with that name." }, 409);
   await insertWorkAuditEvent(db, { firmId: firm.id, entityType: "client_account", entityId: accountId, action: "client_account_updated", actorUserId: c.get("userId"), afterJson: body.data });

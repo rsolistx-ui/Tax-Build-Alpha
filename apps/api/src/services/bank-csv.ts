@@ -38,6 +38,29 @@ const HEADER_ALIASES = {
   currency: ["currency", "curr", "currencycode"],
 } as const;
 
+const CARD_PAYMENT = /\b(payment|autopay|thank you|pymt)\b/i;
+
+/**
+ * For a credit card import (after any sign flip): charges should be negative (money out)
+ * and payments to the card positive. Says the file looks inverted when most charges are
+ * positive, or when every payment reads as spending. A warning, never a block.
+ */
+export function cardSignCheck(rows: Array<{ description: string; amount: number }>) {
+  const payments = rows.filter((r) => CARD_PAYMENT.test(r.description));
+  const charges = rows.filter((r) => !CARD_PAYMENT.test(r.description) && r.amount !== 0);
+  const positiveCharges = charges.filter((r) => r.amount > 0).length;
+  const negativePayments = payments.filter((r) => r.amount < 0).length;
+  const chargesInverted = charges.length >= 3 && positiveCharges / charges.length > 0.6;
+  const paymentsInverted = payments.length > 0 && negativePayments === payments.length;
+  return {
+    charges: charges.length,
+    positiveCharges,
+    payments: payments.length,
+    negativePayments,
+    looksInverted: chargesInverted || paymentsInverted,
+  };
+}
+
 export function previewBankCsv(text: string): BankCsvPreview {
   const parsed = parseCsv(text);
   if (parsed.length < 2) throw new Error("CSV must include a header row and at least one transaction row");

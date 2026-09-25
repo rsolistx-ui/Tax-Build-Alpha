@@ -32,6 +32,10 @@ async function runQuery(query) {
 
 const checks = [
   {
+    label: "card accounts can flip positive charges (migration 0075)",
+    query: `SELECT 1 FROM information_schema.columns WHERE table_name = 'client_accounts' AND column_name = 'charges_positive'`,
+  },
+  {
     label: "client tax inputs, same-firm (migration 0074)",
     query: `SELECT 1 FROM pg_constraint WHERE conname = 'fk_client_tax_inputs_client_same_firm'`,
   },

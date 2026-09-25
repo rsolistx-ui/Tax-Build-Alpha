@@ -1536,6 +1536,42 @@ try {
   if ([int]$checkingLines.total -ne [int]$checkingLine.count) { throw "Drill-down returned $($checkingLines.total) transaction(s); the balance sheet line counts $($checkingLine.count)." }
   Write-Host "Statements verified: balance sheet balances (assets $($bsResp.balanceSheet.totals.assets)), net income matches the P&L ($bsNetIncome), cash flow ties ($($cfResp.cashFlow.beginningCash) to $($cfResp.cashFlow.endingCash)), card and loan opening balances shown, loan accounts refuse bank activity (400), drill-down returns $($checkingLines.total) transaction(s)."
 
+  Write-Host "Verifying card imports: an Amex-style file (charges positive) into a card account set to flip signs..."
+  $cardClientPath = New-JsonPayloadFile (@{ name = "Smoke Card Client $stamp" } | ConvertTo-Json -Compress)
+  $cardClientId = [string](Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-H", "Content-Type: application/json", "--data-binary", "@$cardClientPath", "$BaseUrl/api/clients")).client.id
+  Remove-TempFile $cardClientPath
+  $cardAcctPath = New-JsonPayloadFile (@{ name = "Smoke Amex"; kind = "credit_card"; openingBalance = 0; chargesPositive = $true } | ConvertTo-Json -Compress)
+  $cardAcctId = [string](Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-H", "Content-Type: application/json", "--data-binary", "@$cardAcctPath", "$BaseUrl/api/clients/$cardClientId/accounts")).id
+  Remove-TempFile $cardAcctPath
+  $cardCsvPath = Join-Path $env:TEMP "folio-smoke-amex-$([guid]::NewGuid().ToString('N')).csv"
+  [System.IO.File]::WriteAllText($cardCsvPath, "Date,Description,Amount`r`n2026-04-02,OFFICE DEPOT,40.00`r`n2026-04-03,SHELL OIL,60.00`r`n2026-04-04,ADOBE SYSTEMS,20.00`r`n2026-04-20,AUTOPAY PAYMENT - THANK YOU,-120.00`r`n")
+  $cardMappingPath = New-JsonPayloadFile (@{ date = "Date"; description = "Description"; amount = "Amount" } | ConvertTo-Json -Compress)
+  try {
+    $checkOn = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-F", "file=@$cardCsvPath", "-F", "mapping=<$cardMappingPath", "-F", "accountId=$cardAcctId", "$BaseUrl/api/clients/$cardClientId/bank-transactions/sign-check")
+    if ($checkOn.looksInverted -ne $false) { throw "With charges-positive on, the Amex-style file was still flagged as backwards." }
+    $offPath = New-JsonPayloadFile (@{ chargesPositive = $false } | ConvertTo-Json -Compress)
+    $null = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-H", "Content-Type: application/json", "-X", "PATCH", "--data-binary", "@$offPath", "$BaseUrl/api/clients/$cardClientId/accounts/$cardAcctId")
+    Remove-TempFile $offPath
+    $checkOff = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-F", "file=@$cardCsvPath", "-F", "mapping=<$cardMappingPath", "-F", "accountId=$cardAcctId", "$BaseUrl/api/clients/$cardClientId/bank-transactions/sign-check")
+    if ($checkOff.looksInverted -ne $true -or -not $checkOff.message) { throw "With charges-positive off, the Amex-style file was not flagged as backwards." }
+    $onPath = New-JsonPayloadFile (@{ chargesPositive = $true } | ConvertTo-Json -Compress)
+    $null = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-H", "Content-Type: application/json", "-X", "PATCH", "--data-binary", "@$onPath", "$BaseUrl/api/clients/$cardClientId/accounts/$cardAcctId")
+    Remove-TempFile $onPath
+    $cardImport = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-F", "file=@$cardCsvPath", "-F", "mapping=<$cardMappingPath", "-F", "accountId=$cardAcctId", "$BaseUrl/api/clients/$cardClientId/bank-transactions/import")
+    if ([int]$cardImport.insertedCount -ne 4) { throw "The card import inserted $($cardImport.insertedCount) rows, expected 4." }
+  } finally {
+    Remove-TempFile $cardCsvPath
+    Remove-TempFile $cardMappingPath
+  }
+  $cardLines = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$cardClientId/statement-lines?line=account:$cardAcctId&end=2026-12-31")
+  $charges = @($cardLines.transactions) | Where-Object { $_.description -notmatch "PAYMENT" }
+  $payment = @($cardLines.transactions) | Where-Object { $_.description -match "PAYMENT" } | Select-Object -First 1
+  if (@($charges | Where-Object { [decimal]$_.amount -ge 0 }).Count -gt 0 -or [decimal]$payment.amount -ne 120) { throw "Card signs were not flipped on import (charges must be negative, the payment +120)." }
+  $cardBs = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$cardClientId/balance-sheet?asOf=2026-12-31")
+  $cardOwed = (@($cardBs.balanceSheet.liabilities) | Where-Object { $_.key -eq "account:$cardAcctId" }).amount
+  if ([decimal]$cardOwed -ne 0) { throw "The card should owe 0 after 120 of charges and a 120 payment; it shows $cardOwed." }
+  Write-Host "Card imports verified: sign check passes with the setting on and warns with it off, charges saved as money out, payment as money in, card balance 0 after paying 120 of charges."
+
   Write-Host "Creating a fully resolved dashboard client (Client A) with no open work..."
   $clientABody = @{ name = "Smoke Dashboard Ready $stamp"; legal_name = "Smoke Dashboard Ready LLC" } | ConvertTo-Json -Compress
   $clientAPayloadPath = New-JsonPayloadFile $clientABody

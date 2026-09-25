@@ -101,6 +101,7 @@ type AuditEvent = {
 };
 
 type Filter = "action" | "all" | "matched" | "needs_review" | "missing_receipt" | "receipt_pending" | "no_receipt_required";
+type ImportAccount = { id: string; name: string; kind: "checking" | "savings" | "credit_card" | "loan"; chargesPositive: boolean };
 
 const emptySummary: BankSummary = {
   total: 0,
@@ -127,6 +128,10 @@ export function BankReconciliation({
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [mapping, setMapping] = useState<Mapping>({ date: "", description: "" });
+  // The client account this statement belongs to, and the sign check for card files.
+  const [accounts, setAccounts] = useState<ImportAccount[]>([]);
+  const [accountId, setAccountId] = useState("");
+  const [signCheck, setSignCheck] = useState<{ looksInverted: boolean; message: string | null } | null>(null);
   const [transactions, setTransactions] = useState<BankTransaction[]>([]);
   const [summary, setSummary] = useState<BankSummary>(emptySummary);
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
@@ -236,8 +241,46 @@ export function BankReconciliation({
       });
       setPreview(data);
       setMapping(data.mapping);
+      await loadAccounts();
     } catch (e) {
       setError(e instanceof Error ? e.message : "CSV preview failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function loadAccounts() {
+    const res = await api<{ accounts: ImportAccount[] }>(`/api/clients/${clientId}/accounts`);
+    setAccounts(res.accounts.filter((a) => a.kind !== "loan"));
+  }
+
+  const selectedAccount = accounts.find((a) => a.id === accountId) ?? null;
+  const mappingKey = JSON.stringify(mapping);
+  useEffect(() => {
+    setSignCheck(null);
+    const ready = Boolean(mapping.date && mapping.description && (mapping.amount || mapping.debit || mapping.credit));
+    if (!file || !selectedAccount || selectedAccount.kind !== "credit_card" || !ready) return;
+    let cancelled = false;
+    const form = new FormData();
+    form.append("file", file);
+    form.append("mapping", mappingKey);
+    form.append("accountId", selectedAccount.id);
+    void api<{ looksInverted?: boolean; message?: string | null }>(`/api/clients/${clientId}/bank-transactions/sign-check`, { method: "POST", body: form })
+      .then((r) => { if (!cancelled) setSignCheck({ looksInverted: r.looksInverted === true, message: r.message ?? null }); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [file, selectedAccount?.id, selectedAccount?.chargesPositive, mappingKey, clientId]);
+
+  async function setChargesPositive(value: boolean) {
+    if (!selectedAccount) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api(`/api/clients/${clientId}/accounts/${selectedAccount.id}`, { method: "PATCH", body: JSON.stringify({ chargesPositive: value }) });
+      await loadAccounts();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save the account setting");
     } finally {
       setBusy(false);
     }
@@ -252,6 +295,7 @@ export function BankReconciliation({
       const form = new FormData();
       form.append("file", file);
       form.append("mapping", JSON.stringify(mapping));
+      if (accountId) form.append("accountId", accountId);
       const result = await api<ImportResult>(`/api/clients/${clientId}/bank-transactions/import`, {
         method: "POST",
         body: form,
@@ -483,6 +527,29 @@ export function BankReconciliation({
               <p className="text-xs text-[var(--color-muted-foreground)]">
                 Use Signed amount when the bank provides one amount column. If it provides separate debit and credit columns, leave Signed amount blank and map those instead.
               </p>
+
+              <div className="flex flex-wrap items-center gap-3 text-sm">
+                <label className="flex items-center gap-2">
+                  <span className="text-xs text-[var(--color-muted-foreground)]">Account</span>
+                  <select
+                    className="h-9 rounded-md border border-[var(--color-border)] bg-[var(--color-card)] px-2"
+                    value={accountId}
+                    onChange={(e) => setAccountId(e.target.value)}
+                    disabled={busy}
+                  >
+                    <option value="">Not assigned (set up accounts under Balance sheet &amp; cash flow)</option>
+                    {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                  </select>
+                </label>
+                {selectedAccount?.kind === "credit_card" ? (
+                  <label className="flex items-center gap-1.5 text-xs">
+                    <input type="checkbox" checked={selectedAccount.chargesPositive} disabled={busy} onChange={(e) => void setChargesPositive(e.target.checked)} />
+                    Charges show as positive numbers (Amex and some others)
+                  </label>
+                ) : null}
+              </div>
+              {signCheck?.looksInverted ? <p className="rounded-md bg-amber-500/15 px-3 py-2 text-sm">{signCheck.message}</p> : null}
+              {signCheck && !signCheck.looksInverted ? <p className="text-xs text-[var(--color-muted-foreground)]">Card file checked: charges will be saved as money out.</p> : null}
 
               <Button onClick={() => void importCsv()} disabled={busy || !mappingReady}>
                 {busy ? "Importing…" : "Import and prepare reconciliation"}
