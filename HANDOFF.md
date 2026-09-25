@@ -20,6 +20,21 @@ Committed and pushed to `main`, deployed (Worker `fe85aba5`). Neon migration 007
 - **Smoke command fix:** it needs `DATABASE_URL` (now in the command block below); the script stops early with a clear message if it is missing.
 - **Auditor:** one pass, GREEN with one AMBER (web defaulted to "sees all" if the flag was missing); fixed.
 
+**Remaining milestones** (same list as the desktop setup file, Part 5):
+
+| # | Milestone | Waiting on | Estimate |
+|---|---|---|---|
+| 1 | Small cleanup batch: signature requests must check the document belongs to that client; S-Corp calculator Social Security wage base to the current year (check ssa.gov); remove the duplicate `/1099-radar` route; Team link in the mobile nav; em dashes in `tax-extended-panels.tsx` titles | Nothing | about 1 hour |
+| 2 | Add a person who already has a Truepost account to a firm (today the invite refuses with "That email already has a Truepost account") | Nothing | about 2 hours |
+| 3 | US-only receipt reading: Azure Document Intelligence first, Amazon Textract backup | Your Azure and AWS keys, AWS opt-out done | about 1 to 2 hours after keys |
+| 4 | Admin panel security check (Turnstile), admin notification email, Telegram alerts | Your keys and the email address | about 30 minutes after keys |
+| 5 | Onboard Phyllis (invite, first sign-in, her staff and client assignment) | Your email-code enrollment; attorney review before real client data | about 1 hour with you |
+| 6 | Clients pay invoices by card (Stripe) | Stripe keys, after Phyllis pays | about 3 to 4 hours |
+| 7 | Live bank feeds (Teller or Plaid) | Provider approval | about 4 to 6 hours |
+| 8 | Clients text receipt photos (Twilio) | Twilio number and carrier registration | about 3 hours |
+| 9 | Finish the PWA audit (Lighthouse score, iOS install, offline, icons) | Nothing | about 2 hours |
+| Deferred | QuickBooks sync; tax return computation and IRS e-file (decision 2026-09-24: hand off to MyTAXPrepOffice for the 2027 season) | Your call | not planned |
+
 **Follow-up fixes the same day (audited GREEN, smoke passed):**
 - `POST /api/push/notify` used to send to every subscriber in every firm; now only the caller's firm (optionally one member), and a clientId must be in that firm.
 - Time-entry invoicing passed a JS array to `::text[]` (the Db wrapper sends arrays as JSON text); now `jsonb_array_elements_text`. The test mock now rejects the old form. No other array casts remain in the API.
