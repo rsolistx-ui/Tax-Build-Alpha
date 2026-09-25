@@ -230,7 +230,8 @@ bankRoutes.post("/:clientId/bank-transactions/sign-check", async (c) => {
     return c.json({ error: "mapping must be valid JSON" }, 400);
   }
   const normalized = normalizeBankCsv(await file.text(), mapping);
-  const sign = account.charges_positive ? -1 : 1;
+  // Debit and credit columns are already signed; the setting applies only to a single amount column, as on import.
+  const sign = account.charges_positive && mapping.amount ? -1 : 1;
   const check = cardSignCheck(normalized.rows.map((r) => ({ description: r.description, amount: sign * r.amount })));
   return c.json({
     applies: true,
@@ -285,7 +286,9 @@ bankRoutes.post("/:clientId/bank-transactions/import", async (c) => {
     return c.json({ error: "CSV did not contain any valid transaction rows", rowErrors: normalized.errors }, 400);
   }
   // The account says its issuer exports charges as positive: store them as money out. raw_json keeps the original.
-  if (account?.charges_positive) for (const row of normalized.rows) row.amount = -row.amount;
+  // Only a single signed amount column is flipped; debit and credit columns are already signed (signFlipped stays null).
+  const signFlipped: boolean | null = mapping.amount ? Boolean(account?.charges_positive) : null;
+  if (signFlipped) for (const row of normalized.rows) row.amount = -row.amount;
 
   const receipts = await db.query<ReceiptMatchCandidate>(
     `SELECT id, extracted_date, extracted_merchant, extracted_total, filename
@@ -314,7 +317,8 @@ bankRoutes.post("/:clientId/bank-transactions/import", async (c) => {
   }>;
 
   for (const row of normalized.rows) {
-    const base = fingerprintBase(row);
+    // Fingerprint the file's own amount, so re-importing after changing the sign setting is still a duplicate.
+    const base = fingerprintBase(signFlipped ? { ...row, amount: -row.amount } : row);
     const occurrence = (occurrences.get(base) ?? 0) + 1;
     occurrences.set(base, occurrence);
     const fingerprint = await sha256Hex(`${client.id}|${base}|${occurrence}`);
@@ -333,8 +337,8 @@ bankRoutes.post("/:clientId/bank-transactions/import", async (c) => {
     query: `INSERT INTO bank_transactions
       (id, client_id, txn_date, description, amount, currency, triage, raw_json,
        import_fingerprint, suggested_receipt_id, suggested_score, suggested_reason,
-       suggested_disposition, account_id)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12, $13, $14)
+       suggested_disposition, account_id, sign_flipped)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12, $13, $14, $15)
       ON CONFLICT DO NOTHING
       RETURNING id`,
     params: [
@@ -357,6 +361,7 @@ bankRoutes.post("/:clientId/bank-transactions/import", async (c) => {
       item.suggestion?.reason ?? null,
       suggestDisposition(item.row.amount),
       accountId,
+      signFlipped,
     ],
   }));
 

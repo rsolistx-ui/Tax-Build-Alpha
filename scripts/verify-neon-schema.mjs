@@ -32,6 +32,18 @@ async function runQuery(query) {
 
 const checks = [
   {
+    label: "bank transactions record a sign flip (migration 0077)",
+    query: `SELECT 1 FROM information_schema.columns WHERE table_name = 'bank_transactions' AND column_name = 'sign_flipped'`,
+  },
+  {
+    label: "api_daily_stats request and error counters (migration 0076)",
+    query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'api_daily_stats'`,
+  },
+  {
+    label: "support ticket first human response time (migration 0076)",
+    query: `SELECT 1 FROM information_schema.columns WHERE table_name = 'support_tickets' AND column_name = 'first_response_at'`,
+  },
+  {
     label: "card accounts can flip positive charges (migration 0075)",
     query: `SELECT 1 FROM information_schema.columns WHERE table_name = 'client_accounts' AND column_name = 'charges_positive'`,
   },

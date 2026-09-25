@@ -277,8 +277,12 @@ export function BankReconciliation({
     setBusy(true);
     setError(null);
     try {
-      await api(`/api/clients/${clientId}/accounts/${selectedAccount.id}`, { method: "PATCH", body: JSON.stringify({ chargesPositive: value }) });
+      const res = await api<{ resignedTransactions?: number }>(`/api/clients/${clientId}/accounts/${selectedAccount.id}`, { method: "PATCH", body: JSON.stringify({ chargesPositive: value }) });
       await loadAccounts();
+      if (res.resignedTransactions) {
+        setMessage(`${res.resignedTransactions} transaction(s) already imported into ${selectedAccount.name} were re-signed to match.`);
+        await loadTransactions();
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save the account setting");
     } finally {

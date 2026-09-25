@@ -7,6 +7,7 @@ import { requireSession } from "../middleware/session";
 import { requireOwner } from "../middleware/beta";
 import { ensureFirm } from "../services/firm";
 import { EmailDispatcherService } from "../services/email-dispatcher";
+import { loadBetaMetrics } from "../services/beta-metrics";
 import { TelegramNotifierService } from "../services/telegram-notifier";
 
 export const adminRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
@@ -89,6 +90,12 @@ adminRoutes.get("/metrics", async (c) => {
   });
 });
 
+/** Beta metrics across every firm, over the last `days` days (default 30). */
+adminRoutes.get("/beta-metrics", async (c) => {
+  const days = z.coerce.number().int().min(1).max(365).catch(30).parse(c.req.query("days") ?? 30);
+  return c.json({ days, metrics: await loadBetaMetrics(createDb(c.env), days) });
+});
+
 /**
  * List all live support tickets across the platform
  */
@@ -133,9 +140,9 @@ adminRoutes.post("/tickets/:id/reply", async (c) => {
     replyMessage: body.replyMessage,
   });
 
-  // Mark ticket in progress or updated
+  // Mark ticket in progress; the first human reply is the response time the beta metrics measure.
   await db.query(
-    `UPDATE support_tickets SET status = 'in_progress' WHERE id = $1`,
+    `UPDATE support_tickets SET status = 'in_progress', first_response_at = COALESCE(first_response_at, NOW()) WHERE id = $1`,
     [ticket.id],
   );
 

@@ -128,6 +128,28 @@ app.use("*", async (c, next) => {
   c.header("X-Frame-Options", "DENY");
 });
 
+// Beta metrics: API requests and the 5xx responses the app returns, per UTC day (services/beta-metrics.ts).
+// Written after the response in waitUntil, so it never slows or fails a request.
+app.use("/api/*", async (c, next) => {
+  await next();
+  // Health checks and CORS preflights are not user traffic.
+  if (c.req.method === "OPTIONS" || c.req.path === "/api/health") return;
+  const serverError = c.res.status >= 500 ? 1 : 0;
+  try {
+    c.executionCtx.waitUntil(
+      createDb(c.env)
+        .query(
+          `INSERT INTO api_daily_stats (day, requests, server_errors) VALUES ((NOW() AT TIME ZONE 'UTC')::date, 1, $1)
+           ON CONFLICT (day) DO UPDATE SET requests = api_daily_stats.requests + 1, server_errors = api_daily_stats.server_errors + $1`,
+          [serverError],
+        )
+        .catch(() => undefined),
+    );
+  } catch {
+    // No execution context (unit tests): nothing to count.
+  }
+});
+
 app.get("/api/health", (c) =>
   c.json({
     ok: true,

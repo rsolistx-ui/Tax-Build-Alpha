@@ -56,8 +56,20 @@ Deployed as Worker `9551ca69`. Tests: 645 api, 84 web, 42 script. Full smoke tes
   - Estimated payments: federal and per-state totals by quarter.
   - Writes are preparer and up (`tax-handoff` segment).
   - Auditor: GREEN. Two AMBERs fixed: the mileage year filter now uses the date index; short payer names no longer "match" everything.
-- **Proposed, awaiting the owner's OK (about 1 hour):** a per-account "charges show as positive" sign setting for card CSVs (Amex, Capital One, Discover export charges as positive), plus a preview warning when a card import looks inverted. Today a single-amount-column card CSV is taken as-is.
-- **Next:** milestone 5 (beta metrics dashboard). If keys arrive first, wire them first: Azure (11), then Turnstile and Telegram (12).
+- **Card sign setting shipped** (owner approved; commit ad2dc0a, migration 0075, fixed after audit with migration 0077).
+  - An account can say "charges show as positive numbers" (Amex, Capital One, Discover).
+  - Imports from a single amount column into that account flip each amount. `bank_transactions.sign_flipped` records it; debit/credit-column rows stay NULL and are never flipped.
+  - Duplicate fingerprints use the file's own amount, so a re-import after changing the setting is still a duplicate.
+  - Changing the setting re-signs the rows already in the account; assigning an import aligns its rows with the account.
+  - `POST bank-transactions/sign-check` warns on the import screen when a card file still looks backwards (more than 80% of 3+ charges positive, or 2+ payments all negative).
+- **Milestone 5 shipped:** beta metrics on /control (owner only, `GET /api/admin/beta-metrics?days=`, `services/beta-metrics.ts`, migration 0076).
+  - Receipts filed with no field edited (first `receipt_review_edited` snapshot vs filed), upload to filed, request sent to completed, and hours saved per active client.
+  - App 5xx rate from an `/api/*` middleware counting per UTC day into `api_daily_stats` in waitUntil. It skips `/api/health` and OPTIONS, counts smoke traffic (disclosed), and cannot see platform CPU 503s (disclosed).
+  - Support first human response: `support_tickets.first_response_at`, set by the /control reply.
+  - Status is green or red only with a target and enough data; otherwise "Collecting data" or "No pass line yet".
+- **Audit (card setting + milestone 5):** one RED (re-import after toggling doubled the rows) and AMBERs (debit/credit double flip, false-alarm thresholds, health checks counted), all fixed. One AMBER, smoke leftovers polluting metrics, was not reproduced: the cleanup runs even on failed runs (observed three times, residue clean).
+- **Not yet verified live:** the re-sign and re-import-duplicate smoke steps. The last smoke run (Worker `876e443b`) stopped earlier at receipt extraction (daily Workers AI allowance, Groq backup also failed), before those steps. Unit tests pass. **Run the full smoke first thing next session.**
+- **Next:** milestone 6 (public status page and published support response target). If keys arrive first, wire them first: Azure (11), then Turnstile and Telegram (12).
 
 ## 0-new. Session of 2026-09-25: client assignment (read section 00 first)
 
@@ -83,7 +95,7 @@ Committed and pushed to `main`, deployed (Worker `fe85aba5`). Neon migration 007
 | 2 | Add a person who already has a Truepost account to a firm | Staff seats | Nothing (built 2026-09-25, Worker 16b02183) | about 2 hours |
 | 3 | Per-client balance sheet and cash flow statement from the client's own books (receipts, bank activity, journals) | Reports vs Wave/QBO | Nothing (built 2026-09-25, Worker 3db09d56) | about 4 to 6 hours |
 | 4 | Tax handoff, the rest of what the preparer digs up by hand: vehicle mileage and business-use % (Schedule C Part IV), home office square footage and expenses (Form 8829), assets placed in service with dates and cost (depreciation), 1099s received tied to booked income, estimated tax payments made. Inputs only; Truepost computes no tax | Return handoff (Phase 3 option A) | Nothing (built 2026-09-25, Worker 52700601) | about 3 to 4 hours |
-| 5 | Beta metrics dashboard: receipt fields correct without edits %, upload-to-categorized median, request-to-completed days, 5xx rate counting retries, support first-response time, preparer hours saved | "Nothing is proven" | Nothing | about 3 to 4 hours |
+| 5 | Beta metrics dashboard: receipt fields correct without edits %, upload-to-categorized median, request-to-completed days, 5xx rate counting retries, support first-response time, preparer hours saved | "Nothing is proven" | Nothing (built 2026-09-25, Worker 876e443b) | about 3 to 4 hours |
 | 6 | Public status page from real health checks, plus a published support response target | Tax-season crashes, no support | Nothing | about 2 to 3 hours |
 | 7 | Imports: QuickBooks Online export files (no Intuit key) and prior-year data from tax software exports | Poor data import | Nothing | about 4 to 6 hours |
 | 8 | 1099 preparation: recipient copies (PDF) and a filing summary; IRS IRIS e-file once the owner's filer code (TCC) is approved | 1099 alert only | Owner applying for IRIS TCC (about 45 days) | about 4 to 5 hours |

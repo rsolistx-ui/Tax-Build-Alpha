@@ -1570,6 +1570,19 @@ try {
   $cardBs = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$cardClientId/balance-sheet?asOf=2026-12-31")
   $cardOwed = (@($cardBs.balanceSheet.liabilities) | Where-Object { $_.key -eq "account:$cardAcctId" }).amount
   if ([decimal]$cardOwed -ne 0) { throw "The card should owe 0 after 120 of charges and a 120 payment; it shows $cardOwed." }
+  # Re-importing the same file is a duplicate even after changing the setting, and the setting re-signs what is already there.
+  $cardCsvPath2 = Join-Path $env:TEMP "folio-smoke-amex2-$([guid]::NewGuid().ToString('N')).csv"
+  [System.IO.File]::WriteAllText($cardCsvPath2, "Date,Description,Amount`r`n2026-04-02,OFFICE DEPOT,40.00`r`n2026-04-03,SHELL OIL,60.00`r`n2026-04-04,ADOBE SYSTEMS,20.00`r`n2026-04-20,AUTOPAY PAYMENT - THANK YOU,-120.00`r`n")
+  $cardMappingPath2 = New-JsonPayloadFile (@{ date = "Date"; description = "Description"; amount = "Amount" } | ConvertTo-Json -Compress)
+  $offPath2 = New-JsonPayloadFile (@{ chargesPositive = $false } | ConvertTo-Json -Compress)
+  try {
+    $resign = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-H", "Content-Type: application/json", "-X", "PATCH", "--data-binary", "@$offPath2", "$BaseUrl/api/clients/$cardClientId/accounts/$cardAcctId")
+    if ([int]$resign.resignedTransactions -ne 4) { throw "Turning the setting off re-signed $($resign.resignedTransactions) row(s), expected 4." }
+    $reimport = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-F", "file=@$cardCsvPath2", "-F", "mapping=<$cardMappingPath2", "-F", "accountId=$cardAcctId", "$BaseUrl/api/clients/$cardClientId/bank-transactions/import")
+    if ([int]$reimport.insertedCount -ne 0) { throw "Re-importing the same card file after changing the setting inserted $($reimport.insertedCount) row(s); expected 0 (duplicates)." }
+  } finally {
+    Remove-TempFile $cardCsvPath2; Remove-TempFile $cardMappingPath2; Remove-TempFile $offPath2
+  }
   Write-Host "Card imports verified: sign check passes with the setting on and warns with it off, charges saved as money out, payment as money in, card balance 0 after paying 120 of charges."
 
   Write-Host "Creating a fully resolved dashboard client (Client A) with no open work..."

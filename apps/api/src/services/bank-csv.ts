@@ -50,8 +50,9 @@ export function cardSignCheck(rows: Array<{ description: string; amount: number 
   const charges = rows.filter((r) => !CARD_PAYMENT.test(r.description) && r.amount !== 0);
   const positiveCharges = charges.filter((r) => r.amount > 0).length;
   const negativePayments = payments.filter((r) => r.amount < 0).length;
-  const chargesInverted = charges.length >= 3 && positiveCharges / charges.length > 0.6;
-  const paymentsInverted = payments.length > 0 && negativePayments === payments.length;
+  // High bars, so a refund-heavy month or one merchant with "payment" in its name does not raise a false alarm.
+  const chargesInverted = charges.length >= 3 && positiveCharges / charges.length > 0.8;
+  const paymentsInverted = payments.length >= 2 && negativePayments === payments.length;
   return {
     charges: charges.length,
     positiveCharges,

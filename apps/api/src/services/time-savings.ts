@@ -13,6 +13,9 @@ export type TimeSavings = {
   progressPercent: number;
 };
 
+/** Minutes of preparer work each completed event replaces (also used by services/beta-metrics.ts). */
+export const TIME_SAVED_MINUTES = { receipt: 4.5, bankLine: 2.5, request: 15, signature: 25 } as const;
+
 /**
  * A deliberately conservative, evidence-derived estimate. It measures only
  * completed records created this week; it never invents an opening baseline
@@ -25,10 +28,10 @@ export async function getWeeklyTimeSavings(db: Db, firmId: string): Promise<Time
   const [signatures] = await db.query<{ count: number }>(`SELECT COUNT(*)::int AS count FROM signature_requests WHERE firm_id=$1 AND status='signed' AND signed_at >= date_trunc('week', NOW())`, [firmId]);
   const receiptCount = Number(receipts?.count || 0); const bankCount = Number(bank?.count || 0);
   const requestCount = Number(requests?.count || 0); const signatureCount = Number(signatures?.count || 0);
-  const hoursFromReceipts = Math.round(receiptCount * 4.5) / 60;
-  const hoursFromBank = Math.round(bankCount * 2.5) / 60;
-  const hoursFromChasing = Math.round(requestCount * 15) / 60;
-  const hoursFromEsign = Math.round(signatureCount * 25) / 60;
+  const hoursFromReceipts = Math.round(receiptCount * TIME_SAVED_MINUTES.receipt) / 60;
+  const hoursFromBank = Math.round(bankCount * TIME_SAVED_MINUTES.bankLine) / 60;
+  const hoursFromChasing = Math.round(requestCount * TIME_SAVED_MINUTES.request) / 60;
+  const hoursFromEsign = Math.round(signatureCount * TIME_SAVED_MINUTES.signature) / 60;
   const totalHoursSaved = Math.round((hoursFromReceipts + hoursFromBank + hoursFromChasing + hoursFromEsign) * 10) / 10;
   const target = 10;
   return {

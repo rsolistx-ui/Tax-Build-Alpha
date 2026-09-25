@@ -136,8 +136,14 @@ financialStatementRoutes.patch("/:clientId/accounts/:accountId", async (c) => {
     [accountId, client.id, body.data.name ?? null, body.data.kind ?? null, body.data.openingBalance ?? null, body.data.chargesPositive ?? null],
   );
   if (!updated) return c.json({ error: "This client already has an account with that name." }, 409);
-  await insertWorkAuditEvent(db, { firmId: firm.id, entityType: "client_account", entityId: accountId, action: "client_account_updated", actorUserId: c.get("userId"), afterJson: body.data });
-  return c.json({ ok: true });
+  // The setting governs every row imported from a single amount column into this account: re-sign the ones that disagree.
+  const resigned = body.data.chargesPositive === undefined ? [] : await db.query<{ id: string }>(
+    `UPDATE bank_transactions SET amount = -amount, sign_flipped = $3
+      WHERE account_id = $1 AND client_id = $2 AND sign_flipped IS NOT NULL AND sign_flipped <> $3 RETURNING id`,
+    [accountId, client.id, body.data.chargesPositive],
+  );
+  await insertWorkAuditEvent(db, { firmId: firm.id, entityType: "client_account", entityId: accountId, action: "client_account_updated", actorUserId: c.get("userId"), afterJson: { ...body.data, resignedTransactions: resigned.length } });
+  return c.json({ ok: true, resignedTransactions: resigned.length });
 });
 
 financialStatementRoutes.delete("/:clientId/accounts/:accountId", async (c) => {
@@ -161,15 +167,20 @@ financialStatementRoutes.post("/:clientId/accounts/assign-import", async (c) => 
   const body = z.object({ importBatchId: z.string().min(1).nullable(), accountId: z.string().min(1).nullable() })
     .safeParse(await c.req.json().catch(() => null));
   if (!body.success) return c.json({ error: "Choose an import and an account." }, 400);
+  let chargesPositive = false;
   if (body.data.accountId) {
-    const [account] = await db.query<{ kind: AccountKind }>(`SELECT kind FROM client_accounts WHERE id = $1 AND client_id = $2`, [body.data.accountId, client.id]);
+    const [account] = await db.query<{ kind: AccountKind; charges_positive: boolean }>(`SELECT kind, charges_positive FROM client_accounts WHERE id = $1 AND client_id = $2`, [body.data.accountId, client.id]);
     if (!account) return c.json({ error: "Account not found" }, 404);
     if (!ASSIGNABLE_KINDS.has(account.kind)) return c.json({ error: "Bank activity goes to a checking, savings, or credit card account. Classify loan payments as loan instead." }, 400);
+    chargesPositive = account.charges_positive === true;
   }
+  // Rows from a single amount column take the new account's sign setting (unassigned means no flip).
   const updated = await db.query<{ id: string }>(
-    `UPDATE bank_transactions SET account_id = $3
+    `UPDATE bank_transactions SET account_id = $3,
+            amount = CASE WHEN sign_flipped IS NOT NULL AND sign_flipped <> $4 THEN -amount ELSE amount END,
+            sign_flipped = CASE WHEN sign_flipped IS NULL THEN NULL ELSE $4 END
       WHERE client_id = $1 AND (raw_json->>'importBatchId') IS NOT DISTINCT FROM $2 RETURNING id`,
-    [client.id, body.data.importBatchId, body.data.accountId],
+    [client.id, body.data.importBatchId, body.data.accountId, chargesPositive],
   );
   await insertWorkAuditEvent(db, { firmId: firm.id, entityType: "client", entityId: client.id, action: "bank_import_assigned_to_account", actorUserId: c.get("userId"), afterJson: { ...body.data, transactions: updated.length } });
   return c.json({ ok: true, transactions: updated.length });

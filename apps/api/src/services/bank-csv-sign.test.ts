@@ -23,7 +23,13 @@ describe("cardSignCheck", () => {
   });
 
   it("flags payments that all read as spending even with few charges", () => {
-    expect(cardSignCheck([{ description: "ONLINE PAYMENT", amount: -300 }]).looksInverted).toBe(true);
+    expect(cardSignCheck([{ description: "ONLINE PAYMENT", amount: -300 }, { description: "AUTOPAY", amount: -200 }]).looksInverted).toBe(true);
+  });
+
+  it("does not flag a refund-heavy month or a single merchant named payment", () => {
+    const refunds = [-30, -40, -50, 20, 25, 30, 35, 40].map((amount, i) => ({ description: `STORE ${i}`, amount }));
+    expect(cardSignCheck(refunds).looksInverted).toBe(false);
+    expect(cardSignCheck([{ description: "PAYMENT CENTER LLC", amount: -15 }, { description: "A", amount: -5 }]).looksInverted).toBe(false);
   });
 
   it("does not guess from one or two charges and no payments", () => {
