@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { visibleClientSql } from "../services/client-assignment";
 import { createDb } from "../db";
 import type { Env } from "../env";
 import type { AuthedVars } from "../middleware/session";
@@ -112,9 +113,9 @@ workbenchListRoutes.get("/:taxYear", async (c) => {
      FROM clients c
      LEFT JOIN tax_year_readiness r ON r.client_id = c.id AND r.tax_year = $2
      LEFT JOIN client_profiles p ON p.client_id = c.id
-     WHERE c.firm_id = $1
+     WHERE c.firm_id = $1 AND ${visibleClientSql("c.id", "$3")}
      ORDER BY LOWER(c.name)`,
-    [firm.id, taxYear]);
+    [firm.id, taxYear, c.get("clientScopeUserId") ?? null]);
   return c.json({
     taxYear,
     clients: rows.map((r) => ({

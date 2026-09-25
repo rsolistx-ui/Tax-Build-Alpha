@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useSeesAllClients } from "@/lib/firm-role";
 import { Link, useNavigate } from "react-router-dom";
 import {
   AlertTriangle,
@@ -240,9 +241,11 @@ function QuickActions({
       <Button size="sm" onClick={() => navigate("/clients?new=1")}>
         <Plus className="h-3.5 w-3.5" /> Add client
       </Button>
-      <Button size="sm" variant="outline" onClick={onOpenWave}>
-        <UploadCloud className="h-3.5 w-3.5" /> Import Books CSV
-      </Button>
+      {onOpenWave ? (
+        <Button size="sm" variant="outline" onClick={onOpenWave}>
+          <UploadCloud className="h-3.5 w-3.5" /> Import Books CSV
+        </Button>
+      ) : null}
       <Button size="sm" variant="secondary" onClick={() => onPickClient("review")}>
         <Upload className="h-3.5 w-3.5" /> Review client evidence
       </Button>
@@ -309,6 +312,8 @@ export function DashboardPage() {
   const [pickerTab, setPickerTab] = useState<string | null>(null);
   const [waveModalOpen, setWaveModalOpen] = useState(false);
   const navigate = useNavigate();
+  // Staff limited to assigned clients: firm-wide import and time savings are refused by the server.
+  const seesAllClients = useSeesAllClients();
 
   const greetingData = useMemo(() => {
     const hour = new Date().getHours();
@@ -369,13 +374,19 @@ export function DashboardPage() {
     return (
       <EmptyState
         icon={LayoutDashboard}
-        title="No clients yet"
-        description="Add your first client to start tracking receipts, bank activity, and reporting readiness in one place."
+        title={seesAllClients ? "No clients yet" : "No clients assigned to you yet"}
+        description={
+          seesAllClients
+            ? "Add your first client to start tracking receipts, bank activity, and reporting readiness in one place."
+            : "Your firm owner assigns clients to you on the Team page. A client you add is assigned to you."
+        }
         action={
           <div className="flex items-center gap-2">
-            <Button variant="outline" onClick={() => setWaveModalOpen(true)}>
-              <UploadCloud className="h-4 w-4" /> Import Books CSV
-            </Button>
+            {seesAllClients ? (
+              <Button variant="outline" onClick={() => setWaveModalOpen(true)}>
+                <UploadCloud className="h-4 w-4" /> Import Books CSV
+              </Button>
+            ) : null}
             <Button onClick={() => navigate("/clients?new=1")}>
               <Plus className="h-4 w-4" /> Add client
             </Button>
@@ -396,12 +407,12 @@ export function DashboardPage() {
             Here is your firm's real-time operations command center across books, evidence, and filings.
           </p>
         </div>
-        <QuickActions onPickClient={(tab) => setPickerTab(tab)} onOpenWave={() => setWaveModalOpen(true)} />
+        <QuickActions onPickClient={(tab) => setPickerTab(tab)} onOpenWave={seesAllClients ? () => setWaveModalOpen(true) : undefined} />
       </div>
 
       <SummaryStrip summary={data.summary} />
       {data.operationsCommandCenter ? <PracticeOsStrip counts={data.operationsCommandCenter} /> : null}
-      <TimeSavingsTracker />
+      {seesAllClients ? <TimeSavingsTracker /> : null}
 
       {caughtUp ? (
         <Card>

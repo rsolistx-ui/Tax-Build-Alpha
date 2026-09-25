@@ -27,6 +27,11 @@ if (-not $env:SMOKE_CLEANUP_TOKEN) {
   Write-Error "SMOKE_CLEANUP_TOKEN is not set. Refusing to start: this script cannot run without a way to clean up the synthetic production data it creates."
   exit 1
 }
+# smoke-admin.mjs seeds the test invitation straight into Neon.
+if (-not $env:DATABASE_URL) {
+  Write-Error "DATABASE_URL is not set. Load it from apps\api\.dev.vars first (see the smoke test command in HANDOFF.md)."
+  exit 1
+}
 
 function Invoke-CurlJson([string[]]$CurlArgs, [int]$Attempt = 0) {
   $previousPreference = $ErrorActionPreference
@@ -1257,6 +1262,34 @@ try {
     $staffUserId = [string]$meS.user.id
     $statusS = Invoke-CurlJson @("-c", $cookieJarS, "-b", $cookieJarS, "$BaseUrl/api/beta/status")
     if (-not $statusS.allowed -or $statusS.firmRole -ne "bookkeeper") { throw "Staff access status is allowed=$($statusS.allowed), role=$($statusS.firmRole); expected allowed bookkeeper." }
+
+    # Client assignment: new staff see no clients until the owner assigns them.
+    if ($statusS.seesAllClients -ne $false) { throw "New staff should start limited to assigned clients (seesAllClients=$($statusS.seesAllClients))." }
+    if (@((Invoke-CurlJson @("-c", $cookieJarS, "-b", $cookieJarS, "$BaseUrl/api/clients")).clients).Count -ne 0) { throw "Unassigned staff saw clients in the client list." }
+    $unassignedClientStatus = Get-HttpStatusOnly "$BaseUrl/api/clients/$clientId/overview" $cookieJarS
+    $unassignedFirmWideStatus = Get-HttpStatusOnly "$BaseUrl/api/time-savings" $cookieJarS
+    if ($unassignedClientStatus -ne "403") { throw "Unassigned staff opened a client (HTTP $unassignedClientStatus); expected 403." }
+    if ($unassignedFirmWideStatus -ne "403") { throw "Assigned-only staff reached a firm-wide report (HTTP $unassignedFirmWideStatus); expected 403." }
+    $otherClientPath = New-JsonPayloadFile (@{ name = "Folio Smoke Unassigned Client" } | ConvertTo-Json -Compress)
+    $otherClientId = [string](Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-H", "Content-Type: application/json", "--data-binary", "@$otherClientPath", "$BaseUrl/api/clients")).client.id
+    Remove-TempFile $otherClientPath
+    $assignPath = New-JsonPayloadFile (@{ seesAllClients = $false; clientIds = @($clientId) } | ConvertTo-Json -Compress)
+    $null = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "-H", "Content-Type: application/json", "-X", "PUT", "--data-binary", "@$assignPath", "$BaseUrl/api/firm/staff/$staffUserId/clients")
+    Remove-TempFile $assignPath
+    $assignedIds = @((Invoke-CurlJson @("-c", $cookieJarS, "-b", $cookieJarS, "$BaseUrl/api/clients")).clients | ForEach-Object { [string]$_.id })
+    if ($assignedIds.Count -ne 1 -or $assignedIds[0] -ne $clientId) { throw "Assigned staff client list is '$($assignedIds -join ",")'; expected only $clientId." }
+    $dashboardIds = @((Invoke-CurlJson @("-c", $cookieJarS, "-b", $cookieJarS, "$BaseUrl/api/dashboard")).clients | ForEach-Object { [string]$_.id })
+    if ($dashboardIds -contains $otherClientId) { throw "Assigned staff dashboard includes an unassigned client." }
+    $otherClientStatus = Get-HttpStatusOnly "$BaseUrl/api/clients/$otherClientId/overview" $cookieJarS
+    if ($otherClientStatus -ne "403") { throw "Assigned staff opened an unassigned client (HTTP $otherClientStatus); expected 403." }
+    $ownClientPath = New-JsonPayloadFile (@{ name = "Folio Smoke Staff-Created Client" } | ConvertTo-Json -Compress)
+    $ownClientId = [string](Invoke-CurlJson @("-c", $cookieJarS, "-b", $cookieJarS, "-H", "Content-Type: application/json", "--data-binary", "@$ownClientPath", "$BaseUrl/api/clients")).client.id
+    Remove-TempFile $ownClientPath
+    if ((Get-HttpStatusOnly "$BaseUrl/api/clients/$ownClientId/overview" $cookieJarS) -ne "200") { throw "Staff could not open the client they created." }
+    $teamAssign = Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/firm/staff")
+    $staffRow = @($teamAssign.members) | Where-Object { $_.userId -eq $staffUserId }
+    if ($staffRow.seesAllClients -ne $false -or @($staffRow.clientIds) -notcontains $clientId -or @($staffRow.clientIds) -notcontains $ownClientId) { throw "Owner's team view does not show the staff member's assigned clients." }
+    Write-Host "Client assignment verified: new staff saw 0 clients, unassigned and firm-wide reads refused (403), assignment showed exactly 1 client, a staff-created client was assigned to its creator."
     $null = Invoke-CurlJson @("-c", $cookieJarS, "-b", $cookieJarS, "$BaseUrl/api/clients/$clientId/tax-handoff/2026")
     $null = Invoke-CurlJson @("-c", $cookieJarS, "-b", $cookieJarS, "-X", "POST", "$BaseUrl/api/clients/$clientId/tax-readiness/2026/checklist/generate")
     $signoffPath = New-JsonPayloadFile (@{ status = "professional_review" } | ConvertTo-Json -Compress)

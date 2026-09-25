@@ -9,6 +9,8 @@ export type AuthedVars = {
   userName: string;
   /** Set by requireActiveBeta. Unset means the gate did not run; readers treat that as read_only. */
   firmRole?: FirmRole;
+  /** Set by requireActiveBeta: the user id when the caller only sees assigned clients, else null. */
+  clientScopeUserId?: string | null;
 };
 
 export const requireSession = createMiddleware<{

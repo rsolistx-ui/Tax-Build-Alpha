@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { visibleClientSql } from "../services/client-assignment";
 import { createDb } from "../db";
 import type { Env } from "../env";
 import type { AuthedVars } from "../middleware/session";
@@ -50,6 +51,7 @@ dashboardRoutes.use("*", requireActiveBeta);
 dashboardRoutes.get("/", async (c) => {
   const db = createDb(c.env);
   const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
+  const scopeUserId = c.get("clientScopeUserId") ?? null;
 
   const clientRows = await db.query<{
     id: string;
@@ -63,9 +65,9 @@ dashboardRoutes.get("/", async (c) => {
     `SELECT c.id, c.name, c.legal_name, c.updated_at, cp.tax_year, cp.accounting_basis, cp.default_currency
      FROM clients c
      LEFT JOIN client_profiles cp ON cp.client_id = c.id
-     WHERE c.firm_id = $1
+     WHERE c.firm_id = $1 AND ${visibleClientSql("c.id", "$2")}
      ORDER BY LOWER(c.name)`,
-    [firm.id],
+    [firm.id, scopeUserId],
   );
 
   if (clientRows.length === 0) {
@@ -93,8 +95,8 @@ dashboardRoutes.get("/", async (c) => {
     `SELECT bt.id, bt.client_id, bt.txn_date, bt.description, bt.amount, bt.disposition, bt.triage, bt.category_id, bt.currency
      FROM bank_transactions bt
      JOIN clients c ON c.id = bt.client_id
-     WHERE c.firm_id = $1`,
-    [firm.id],
+     WHERE c.firm_id = $1 AND ${visibleClientSql("c.id", "$2")}`,
+    [firm.id, scopeUserId],
   );
 
   const receiptRows = await db.query<{
@@ -112,8 +114,8 @@ dashboardRoutes.get("/", async (c) => {
      FROM receipts r
      JOIN clients c ON c.id = r.client_id
      LEFT JOIN bank_transactions bt ON bt.matched_receipt_id = r.id AND bt.client_id = r.client_id
-     WHERE c.firm_id = $1`,
-    [firm.id],
+     WHERE c.firm_id = $1 AND ${visibleClientSql("c.id", "$2")}`,
+    [firm.id, scopeUserId],
   );
 
   const activityRows = await db.query<{
@@ -127,10 +129,10 @@ dashboardRoutes.get("/", async (c) => {
     `SELECT ae.id, ae.client_id, c.name AS client_name, ae.action, ae.actor_user_id, ae.created_at
      FROM audit_events ae
      JOIN clients c ON c.id = ae.client_id
-     WHERE c.firm_id = $1
+     WHERE c.firm_id = $1 AND ${visibleClientSql("c.id", "$2")}
      ORDER BY ae.created_at DESC
      LIMIT 50`,
-    [firm.id],
+    [firm.id, scopeUserId],
   );
 
   const checklistRows = await db.query<{
@@ -144,8 +146,8 @@ dashboardRoutes.get("/", async (c) => {
     `SELECT dci.id, dci.client_id, dci.tax_year, dci.doc_type, dci.custom_label, dci.status
      FROM document_checklist_items dci
      JOIN clients c ON c.id = dci.client_id
-     WHERE c.firm_id = $1`,
-    [firm.id],
+     WHERE c.firm_id = $1 AND ${visibleClientSql("c.id", "$2")}`,
+    [firm.id, scopeUserId],
   );
 
   const documentRows = await db.query<{
@@ -158,8 +160,8 @@ dashboardRoutes.get("/", async (c) => {
     `SELECT cd.id, cd.client_id, cd.filename, cd.document_type, cd.status
      FROM client_documents cd
      JOIN clients c ON c.id = cd.client_id
-     WHERE c.firm_id = $1`,
-    [firm.id],
+     WHERE c.firm_id = $1 AND ${visibleClientSql("c.id", "$2")}`,
+    [firm.id, scopeUserId],
   );
 
   // Operations-readiness period: the client's configured tax year when one
@@ -287,40 +289,40 @@ dashboardRoutes.get("/", async (c) => {
   );
 
   const [engagementCounts] = await db.query<{ open_engagements: number }>(
-    `SELECT COUNT(*)::int AS open_engagements FROM engagements WHERE firm_id = $1 AND status NOT IN ('complete', 'archived')`,
-    [firm.id],
+    `SELECT COUNT(*)::int AS open_engagements FROM engagements WHERE firm_id = $1 AND ${visibleClientSql("client_id", "$2")} AND status NOT IN ('complete', 'archived')`,
+    [firm.id, scopeUserId],
   );
   const [waitingOnClient] = await db.query<{ n: number }>(
-    `SELECT COUNT(*)::int AS n FROM work_items WHERE firm_id = $1 AND status = 'waiting_on_client'`,
-    [firm.id],
+    `SELECT COUNT(*)::int AS n FROM work_items WHERE firm_id = $1 AND ${visibleClientSql("client_id", "$2")} AND status = 'waiting_on_client'`,
+    [firm.id, scopeUserId],
   );
   const [overdueWork] = await db.query<{ n: number }>(
-    `SELECT COUNT(*)::int AS n FROM work_items WHERE firm_id = $1 AND status NOT IN ('complete', 'cancelled') AND due_at IS NOT NULL AND due_at < NOW()`,
-    [firm.id],
+    `SELECT COUNT(*)::int AS n FROM work_items WHERE firm_id = $1 AND ${visibleClientSql("client_id", "$2")} AND status NOT IN ('complete', 'cancelled') AND due_at IS NOT NULL AND due_at < NOW()`,
+    [firm.id, scopeUserId],
   );
   const [dueWork] = await db.query<{ n: number }>(
-    `SELECT COUNT(*)::int AS n FROM work_items WHERE firm_id = $1 AND status NOT IN ('complete', 'cancelled') AND due_at IS NOT NULL AND due_at <= NOW() + INTERVAL '7 days'`,
-    [firm.id],
+    `SELECT COUNT(*)::int AS n FROM work_items WHERE firm_id = $1 AND ${visibleClientSql("client_id", "$2")} AND status NOT IN ('complete', 'cancelled') AND due_at IS NOT NULL AND due_at <= NOW() + INTERVAL '7 days'`,
+    [firm.id, scopeUserId],
   );
   const [dueTodayWork] = await db.query<{ n: number }>(
-    `SELECT COUNT(*)::int AS n FROM work_items WHERE firm_id = $1 AND status NOT IN ('complete', 'cancelled') AND due_at IS NOT NULL AND due_at::date = CURRENT_DATE`,
-    [firm.id],
+    `SELECT COUNT(*)::int AS n FROM work_items WHERE firm_id = $1 AND ${visibleClientSql("client_id", "$2")} AND status NOT IN ('complete', 'cancelled') AND due_at IS NOT NULL AND due_at::date = CURRENT_DATE`,
+    [firm.id, scopeUserId],
   );
   const [professionalReview] = await db.query<{ n: number }>(
-    `SELECT COUNT(*)::int AS n FROM work_items WHERE firm_id = $1 AND work_type = 'review' AND status NOT IN ('complete', 'cancelled')`,
-    [firm.id],
+    `SELECT COUNT(*)::int AS n FROM work_items WHERE firm_id = $1 AND ${visibleClientSql("client_id", "$2")} AND work_type = 'review' AND status NOT IN ('complete', 'cancelled')`,
+    [firm.id, scopeUserId],
   );
   const [blockedWork] = await db.query<{ n: number }>(
-    `SELECT COUNT(*)::int AS n FROM work_items WHERE firm_id = $1 AND status = 'blocked'`,
-    [firm.id],
+    `SELECT COUNT(*)::int AS n FROM work_items WHERE firm_id = $1 AND ${visibleClientSql("client_id", "$2")} AND status = 'blocked'`,
+    [firm.id, scopeUserId],
   );
   const [requestAging] = await db.query<{ oldest_pending_days: number | null }>(
-    `SELECT EXTRACT(DAY FROM NOW() - MIN(created_at))::int AS oldest_pending_days FROM client_requests WHERE firm_id = $1 AND status IN ('requested', 'viewed')`,
-    [firm.id],
+    `SELECT EXTRACT(DAY FROM NOW() - MIN(created_at))::int AS oldest_pending_days FROM client_requests WHERE firm_id = $1 AND ${visibleClientSql("client_id", "$2")} AND status IN ('requested', 'viewed')`,
+    [firm.id, scopeUserId],
   );
   const [agentApprovals] = await db.query<{ n: number }>(
-    `SELECT COUNT(*)::int AS n FROM agent_tasks WHERE firm_id = $1 AND status = 'awaiting_approval'`,
-    [firm.id],
+    `SELECT COUNT(*)::int AS n FROM agent_tasks WHERE firm_id = $1 AND ${visibleClientSql("client_id", "$2")} AND status = 'awaiting_approval'`,
+    [firm.id, scopeUserId],
   );
 
   return c.json({

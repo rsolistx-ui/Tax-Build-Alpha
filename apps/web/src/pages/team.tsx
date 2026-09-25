@@ -7,7 +7,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { formatDate } from "@/lib/formatters";
 
 type Role = "owner" | "preparer" | "bookkeeper" | "read_only";
-type Member = { userId: string; role: Role; name: string | null; email: string | null; joinedAt: string; isMe: boolean };
+type Member = {
+  userId: string; role: Role; name: string | null; email: string | null; joinedAt: string; isMe: boolean;
+  seesAllClients: boolean;
+  /** Only sent to the owner. */
+  clientIds?: string[];
+};
+type ClientOption = { id: string; name: string };
+type AccessDraft = { userId: string; seesAllClients: boolean; clientIds: Set<string> };
 type Invitation = { id: string; email: string; role: Role; expiresAt: string };
 type Team = { myRole: Role; assignableRoles: Role[]; members: Member[]; invitations: Invitation[] };
 
@@ -22,7 +29,7 @@ const ROLE_SUMMARY: Record<Role, string> = {
   owner: "Everything, including billing, staff and deleting clients",
   preparer: "All client and tax work, including tax sign-off",
   bookkeeper: "Receipts, bank, documents and requests; no tax sign-off",
-  read_only: "Sees everything, changes nothing",
+  read_only: "Views their clients, changes nothing",
 };
 
 const selectClass = "h-9 rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-2 text-sm";
@@ -35,13 +42,29 @@ export function TeamPage() {
   const [role, setRole] = useState<Role>("preparer");
   const [newLink, setNewLink] = useState<{ email: string; link: string } | null>(null);
   const [copied, setCopied] = useState(false);
+  const [clients, setClients] = useState<ClientOption[]>([]);
+  const [draft, setDraft] = useState<AccessDraft | null>(null);
 
   async function load() {
     try {
-      setTeam(await api<Team>("/api/firm/staff"));
+      const t = await api<Team>("/api/firm/staff");
+      setTeam(t);
+      if (t.myRole === "owner") setClients((await api<{ clients: ClientOption[] }>("/api/clients")).clients);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not load the team.");
     }
+  }
+
+  function saveAccess() {
+    if (!draft) return;
+    const d = draft;
+    void run(async () => {
+      await api(`/api/firm/staff/${d.userId}/clients`, {
+        method: "PUT",
+        body: JSON.stringify({ seesAllClients: d.seesAllClients, clientIds: [...d.clientIds] }),
+      });
+      setDraft(null);
+    });
   }
 
   useEffect(() => {
@@ -111,6 +134,15 @@ export function TeamPage() {
                 </div>
                 {isOwner && m.role !== "owner" ? (
                   <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={busy}
+                      aria-expanded={draft?.userId === m.userId}
+                      onClick={() => setDraft(draft?.userId === m.userId ? null : { userId: m.userId, seesAllClients: m.seesAllClients, clientIds: new Set(m.clientIds ?? []) })}
+                    >
+                      {m.seesAllClients ? "All clients" : `${m.clientIds?.length ?? 0} client${m.clientIds?.length === 1 ? "" : "s"}`}
+                    </Button>
                     <select
                       className={selectClass}
                       value={m.role}
@@ -136,6 +168,45 @@ export function TeamPage() {
                 ) : (
                   <Badge>{ROLE_LABELS[m.role]}</Badge>
                 )}
+                {draft?.userId === m.userId ? (
+                  <div className="w-full space-y-2 rounded-md border border-[var(--color-border)] p-3">
+                    <label className="flex items-center gap-2 font-medium">
+                      <input
+                        type="checkbox"
+                        checked={draft.seesAllClients}
+                        onChange={(e) => setDraft({ ...draft, seesAllClients: e.target.checked })}
+                      />
+                      All clients, including ones added later
+                    </label>
+                    {clients.length === 0 ? (
+                      <p className="text-xs text-[var(--color-muted-foreground)]">No clients yet.</p>
+                    ) : (
+                      <ul className={`max-h-64 space-y-1 overflow-y-auto ${draft.seesAllClients ? "opacity-50" : ""}`}>
+                        {clients.map((cl) => (
+                          <li key={cl.id}>
+                            <label className="flex items-center gap-2">
+                              <input
+                                type="checkbox"
+                                disabled={draft.seesAllClients}
+                                checked={draft.clientIds.has(cl.id)}
+                                onChange={(e) => {
+                                  const next = new Set(draft.clientIds);
+                                  if (e.target.checked) next.add(cl.id); else next.delete(cl.id);
+                                  setDraft({ ...draft, clientIds: next });
+                                }}
+                              />
+                              {cl.name}
+                            </label>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    <div className="flex gap-2">
+                      <Button size="sm" disabled={busy} onClick={saveAccess}>Save access</Button>
+                      <Button size="sm" variant="outline" disabled={busy} onClick={() => setDraft(null)}>Cancel</Button>
+                    </div>
+                  </div>
+                ) : null}
               </li>
             ))}
           </ul>
@@ -174,6 +245,7 @@ export function TeamPage() {
               </div>
             ) : null}
             <ul className="space-y-1 text-xs text-[var(--color-muted-foreground)]">
+              <li>New staff see no clients until you assign them under Members, or choose All clients.</li>
               {(Object.keys(ROLE_SUMMARY) as Role[]).map((r) => <li key={r}><span className="font-medium text-[var(--color-foreground)]">{ROLE_LABELS[r]}:</span> {ROLE_SUMMARY[r]}</li>)}
             </ul>
           </CardContent>

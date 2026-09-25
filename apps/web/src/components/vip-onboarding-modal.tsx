@@ -16,7 +16,8 @@ interface VipOnboardingModalProps {
   onClose: () => void;
   userName?: string;
   firmName?: string;
-  onOpenImport: () => void;
+  /** Absent for staff limited to assigned clients (the import is firm-wide). */
+  onOpenImport?: () => void;
   onOpenMobileLink: () => void;
   onOpenDictation: () => void;
 }
@@ -109,18 +110,20 @@ export function VipOnboardingModal({
               ⚡ Instant Quick-Start Launchpad
             </h4>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  onClose();
-                  onOpenImport();
-                }}
-                className="justify-start gap-2 bg-[var(--color-card)] hover:bg-emerald-50 text-xs h-9 border-[var(--color-border)]"
-              >
-                <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-600" />
-                <span>Mass Data Migration</span>
-              </Button>
+              {onOpenImport ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    onClose();
+                    onOpenImport();
+                  }}
+                  className="justify-start gap-2 bg-[var(--color-card)] hover:bg-emerald-50 text-xs h-9 border-[var(--color-border)]"
+                >
+                  <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-600" />
+                  <span>Mass Data Migration</span>
+                </Button>
+              ) : null}
 
               <Button
                 variant="outline"

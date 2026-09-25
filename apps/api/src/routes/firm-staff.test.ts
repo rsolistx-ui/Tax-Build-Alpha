@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../env";
 
 const queryMock = vi.fn();
-vi.mock("../db", () => ({ createDb: () => ({ query: queryMock, transaction: vi.fn() }) }));
+const transactionMock = vi.fn();
+vi.mock("../db", () => ({ createDb: () => ({ query: queryMock, transaction: transactionMock }) }));
 vi.mock("../middleware/session", () => ({
   requireSession: async (c: any, next: any) => {
     c.set("userId", "user-me");
@@ -106,5 +107,49 @@ describe("firm staff seats", () => {
     expect(del?.[0]).toContain("role <> 'owner'");
     expect(del?.[1]).toEqual(["firm_1", "user-staff"]);
     expect(authDbSql.some((sql) => sql.includes("DELETE FROM session"))).toBe(true);
+  });
+});
+
+describe("client assignment", () => {
+  function withStaffAndClients(clientIdsInFirm: string[]) {
+    queryMock.mockImplementation(async (sql: string) => {
+      if (sql.includes("FROM firms f")) return [{ id: "firm_1", name: "Firm", owner_user_id: "user-owner" }];
+      if (sql.includes("SELECT firm_id, role FROM firm_members")) return [{ firm_id: "firm_1", role: myRole }];
+      if (sql.includes("SELECT id FROM firm_members")) return [{ id: "fm_2" }];
+      if (sql.includes("SELECT id FROM clients")) return clientIdsInFirm.map((id) => ({ id }));
+      return [];
+    });
+  }
+
+  beforeEach(() => transactionMock.mockReset());
+
+  it("lets only the firm owner assign clients", async () => {
+    myRole = "preparer";
+    withStaffAndClients(["cli_a"]);
+    const res = await call("/staff/user-staff/clients", { method: "PUT", body: JSON.stringify({ seesAllClients: false, clientIds: ["cli_a"] }) });
+    expect(res.status).toBe(403);
+    expect(transactionMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses a client that is not in the owner's firm", async () => {
+    myRole = "owner";
+    withStaffAndClients(["cli_a"]);
+    const res = await call("/staff/user-staff/clients", { method: "PUT", body: JSON.stringify({ seesAllClients: false, clientIds: ["cli_a", "cli_elsewhere"] }) });
+    expect(res.status).toBe(400);
+    expect(transactionMock).not.toHaveBeenCalled();
+  });
+
+  it("replaces the member's assignments and switch in one transaction", async () => {
+    myRole = "owner";
+    withStaffAndClients(["cli_a", "cli_b"]);
+    const res = await call("/staff/user-staff/clients", { method: "PUT", body: JSON.stringify({ seesAllClients: false, clientIds: ["cli_a", "cli_b", "cli_a"] }) });
+    expect(res.status).toBe(200);
+    const [statements] = transactionMock.mock.calls[0] as [{ query: string; params: unknown[] }[]];
+    expect(statements[0].query).toContain("sees_all_clients");
+    expect(statements[0].params).toEqual(["firm_1", "user-staff", false]);
+    expect(statements[1].query).toContain("client_assignments");
+    // Arrays reach Neon as JSON text, so the insert unpacks them as jsonb.
+    expect(statements[2].query).toContain("jsonb_array_elements_text($1::jsonb)");
+    expect(statements[2].params).toEqual([["cli_a", "cli_b"], "firm_1", "user-staff", "user-me"]);
   });
 });

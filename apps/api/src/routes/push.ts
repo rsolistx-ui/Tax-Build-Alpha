@@ -4,11 +4,14 @@ import { createDb } from "../db";
 import type { Env } from "../env";
 import type { AuthedVars } from "../middleware/session";
 import { requireSession } from "../middleware/session";
+import { requireActiveBeta } from "../middleware/beta";
 import { ensureFirm } from "../services/firm";
 import { listSubs, addSub, removeSub } from "../services/push";
 
 export const pushRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 pushRoutes.use("*", requireSession);
+// The sync feed carries firm-wide activity, so it follows beta access and client assignment.
+pushRoutes.use("*", requireActiveBeta);
 
 pushRoutes.get("/subscriptions", async (c) => {
   const db = createDb(c.env);

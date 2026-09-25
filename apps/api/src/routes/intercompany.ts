@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { isClientVisible } from "../services/client-assignment";
 import { z } from "zod";
 import { createDb } from "../db";
 import type { Env } from "../env";
@@ -61,6 +62,11 @@ intercompanyRoutes.post("/:clientId/intercompany/reconcile", async (c) => {
   if (body.sourceClientId !== clientId && body.mirrorClientId !== clientId) {
     return c.json({ error: "Unauthorized client mismatch in mirror reconciliation" }, 403);
   }
+  // The other side must be a client the caller can see (client assignment).
+  const otherClientId = body.sourceClientId === clientId ? body.mirrorClientId : body.sourceClientId;
+  if (!(await isClientVisible(db, c.get("clientScopeUserId"), otherClientId))) {
+    return c.json({ error: "The other client is not assigned to you." }, 403);
+  }
 
   const service = new IntercompanyMirrorService(db);
   const result = await service.reconcileMirrorMatch(
@@ -114,7 +120,7 @@ intercompanyRoutes.post("/:clientId/intercompany/affiliates", async (c) => {
 
   // Validate the related client exists in the same firm
   const relatedClient = await getClient(db, body.relatedClientId, firm.id);
-  if (!relatedClient) {
+  if (!relatedClient || !(await isClientVisible(db, c.get("clientScopeUserId"), relatedClient.id))) {
     return c.json({ error: "Related affiliate client not found in this firm" }, 404);
   }
 

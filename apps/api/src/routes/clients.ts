@@ -50,14 +50,15 @@ export const clientRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>()
 clientRoutes.get("/", async (c) => {
   const db = createDb(c.env);
   const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
-  return c.json({ firm, clients: await clients.listClients(db, firm.id) });
+  return c.json({ firm, clients: await clients.listClients(db, firm.id, c.get("clientScopeUserId") ?? null) });
 });
 
 clientRoutes.post("/", async (c) => {
   const body = createSchema.parse(await c.req.json());
   const db = createDb(c.env);
   const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
-  const created = await clients.createClient(db, firm.id, body);
+  // A staff member who sees only assigned clients is assigned the client they create.
+  const created = await clients.createClient(db, firm.id, body, c.get("clientScopeUserId") ?? null);
   if (created) {
     await db.query(
       "INSERT INTO audit_events (id, client_id, actor_user_id, action, after_json) VALUES ($1, $2, $3, 'client_created', $4::jsonb)",

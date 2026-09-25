@@ -70,7 +70,7 @@ describe("engagement-letter agent tasks by role", () => {
       await app.request("/", {}, {} as Env);
       const list = queryMock.mock.calls.find(([sql]) => String(sql).includes("FROM agent_tasks at"));
       expect(list?.[0]).toContain("engagement_letter_draft");
-      expect(list?.[1]).toEqual(["firm_1", hidden]);
+      expect(list?.[1]).toEqual(["firm_1", hidden, null]);
     }
   });
 

@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { isClientVisible } from "../services/client-assignment";
 import { createDb } from "../db";
 import type { Env } from "../env";
 import type { AuthedVars } from "../middleware/session";
@@ -7,7 +8,7 @@ import { requireActiveBeta } from "../middleware/beta";
 import { ensureFirm } from "../services/firm";
 import { getClient } from "../services/clients";
 import { getEngagement } from "../services/engagements";
-import { createWorkItem, queryWorkQueue, updateWorkItemStatus, type WorkQueueFilter } from "../services/work-items";
+import { createWorkItem, getWorkItem, queryWorkQueue, updateWorkItemStatus, type WorkQueueFilter } from "../services/work-items";
 import { isoTimestampSchema } from "../services/date-validation";
 import { z } from "zod";
 
@@ -57,6 +58,7 @@ workQueueRoutes.get("/", async (c) => {
     view: query.view,
     cursor: query.cursor,
     limit: query.limit,
+    scopeUserId: c.get("clientScopeUserId") ?? null,
   };
 
   const result = await queryWorkQueue(db, firm.id, filter);
@@ -87,7 +89,7 @@ workQueueRoutes.post("/", async (c) => {
   const body = createSchema.parse(await c.req.json());
 
   const client = await getClient(db, body.clientId, firm.id);
-  if (!client) return c.json({ error: "Not found" }, 404);
+  if (!client || !(await isClientVisible(db, c.get("clientScopeUserId"), client.id))) return c.json({ error: "Not found" }, 404);
 
   if (body.engagementId) {
     const engagement = await getEngagement(db, body.engagementId, firm.id);
@@ -114,6 +116,12 @@ workQueueRoutes.patch("/:workItemId/status", async (c) => {
   const db = createDb(c.env);
   const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
   const body = statusSchema.parse(await c.req.json());
+
+  const scopeUserId = c.get("clientScopeUserId");
+  if (scopeUserId) {
+    const item = await getWorkItem(db, c.req.param("workItemId"), firm.id);
+    if (!item || !item.client_id || !(await isClientVisible(db, scopeUserId, item.client_id))) return c.json({ error: "Not found" }, 404);
+  }
 
   const updated = await updateWorkItemStatus(db, c.req.param("workItemId"), firm.id, c.get("userId"), body.status);
   if (!updated) return c.json({ error: "Not found" }, 404);

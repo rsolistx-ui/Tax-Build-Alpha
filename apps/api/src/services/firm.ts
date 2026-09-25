@@ -78,13 +78,14 @@ export type AccessEntitlement = {
 export async function loadAccessEntitlement(
   db: Db,
   userId: string,
-): Promise<{ entitlement: AccessEntitlement | null; role: FirmRole }> {
+): Promise<{ entitlement: AccessEntitlement | null; role: FirmRole; seesAllClients: boolean }> {
   const [row] = await db.query<{
     role: string | null;
+    sees_all_clients: boolean | null;
     own_status: string | null; own_starts: string | null; own_expires: string | null;
     firm_status: string | null; firm_starts: string | null; firm_expires: string | null;
   }>(
-    `SELECT m.role,
+    `SELECT m.role, m.sees_all_clients,
             own.status AS own_status, own.starts_at AS own_starts, own.expires_at AS own_expires,
             fe.status AS firm_status, fe.starts_at AS firm_starts, fe.expires_at AS firm_expires
        FROM (SELECT $1::text AS uid) u
@@ -95,11 +96,12 @@ export async function loadAccessEntitlement(
     [userId],
   );
   const role = row?.role ? toFirmRole(row.role) : "owner";
+  const seesAllClients = role === "owner" || row?.sees_all_clients === true;
   if (row?.own_status) {
-    return { role, entitlement: { status: row.own_status, starts_at: row.own_starts!, expires_at: row.own_expires!, source: "own" } };
+    return { role, seesAllClients, entitlement: { status: row.own_status, starts_at: row.own_starts!, expires_at: row.own_expires!, source: "own" } };
   }
   if (row?.firm_status) {
-    return { role, entitlement: { status: row.firm_status, starts_at: row.firm_starts!, expires_at: row.firm_expires!, source: "firm" } };
+    return { role, seesAllClients, entitlement: { status: row.firm_status, starts_at: row.firm_starts!, expires_at: row.firm_expires!, source: "firm" } };
   }
-  return { role, entitlement: null };
+  return { role, seesAllClients, entitlement: null };
 }

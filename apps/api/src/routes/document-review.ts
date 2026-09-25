@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { visibleClientSql } from "../services/client-assignment";
 import { createDb } from "../db";
 import type { Env } from "../env";
 import type { AuthedVars } from "../middleware/session";
@@ -36,9 +37,10 @@ documentReviewRoutes.get("/review", async (c) => {
      LEFT JOIN document_checklist_items dci ON dci.id = cd.checklist_item_id
      WHERE c.firm_id = $1 AND cd.status = 'needs_review'
        AND ($2::boolean = false OR NOT ${signedRecordDocumentSql("cd")})
+       AND ${visibleClientSql("c.id", "$3")}
      ORDER BY cd.uploaded_at ASC
      LIMIT 200`,
-    [firm.id, !canReadSignedRecords(c.get("firmRole") ?? "read_only")],
+    [firm.id, !canReadSignedRecords(c.get("firmRole") ?? "read_only"), c.get("clientScopeUserId") ?? null],
   );
 
   return c.json({
@@ -64,7 +66,7 @@ documentReviewRoutes.patch("/review/:documentId", async (c) => {
   const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
   const body = (await c.req.json()) as DocumentReviewAction;
   const documentId = c.req.param("documentId");
-  const result = await applyDocumentReviewAction(db, firm.id, documentId, c.get("userId"), body, !canReadSignedRecords(c.get("firmRole") ?? "read_only"));
+  const result = await applyDocumentReviewAction(db, firm.id, documentId, c.get("userId"), body, !canReadSignedRecords(c.get("firmRole") ?? "read_only"), c.get("clientScopeUserId") ?? null);
   if (!result.ok) return c.json({ error: result.error }, result.status as 400 | 404);
   // Terminal actions (confirm/mark_duplicate/mark_not_needed) resolve the
   // review queue's reason for showing this document - the caller removes

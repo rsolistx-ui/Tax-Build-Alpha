@@ -6,7 +6,7 @@ import { LockedScreen } from "@/components/locked";
 import { MfaEnrollment } from "@/components/mfa-enrollment";
 import { AgreementGate } from "@/components/agreement-gate";
 import { api } from "@/lib/api";
-import { FirmRoleProvider, type FirmRole } from "@/lib/firm-role";
+import { FirmRoleProvider, SeesAllClientsProvider, type FirmRole } from "@/lib/firm-role";
 
 type BetaStatus = {
   isOwner: boolean;
@@ -15,6 +15,7 @@ type BetaStatus = {
   entitlement?: { status: string; startsAt: string; expiresAt: string } | null;
   mfaRequired?: boolean;
   firmRole?: FirmRole;
+  seesAllClients?: boolean;
 };
 
 export function ProtectedLayout() {
@@ -87,12 +88,14 @@ export function ProtectedLayout() {
 
   return (
     <FirmRoleProvider value={betaStatus.firmRole ?? "owner"}>
-      <AppShell
-        firmName={firmName}
-        userName={session.user.name}
-        isOwner={betaStatus.isOwner}
-        daysLeft={daysLeft}
-      />
+      <SeesAllClientsProvider value={betaStatus.isOwner || betaStatus.seesAllClients === true}>
+        <AppShell
+          firmName={firmName}
+          userName={session.user.name}
+          isOwner={betaStatus.isOwner}
+          daysLeft={daysLeft}
+        />
+      </SeesAllClientsProvider>
     </FirmRoleProvider>
   );
 }

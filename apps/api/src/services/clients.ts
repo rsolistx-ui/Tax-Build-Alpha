@@ -1,4 +1,5 @@
 import type { Db } from "../db";
+import { visibleClientSql } from "./client-assignment";
 import { DEFAULT_CATEGORIES } from "../lib/defaults";
 import { newId } from "../lib/id";
 
@@ -17,11 +18,11 @@ export type ClientRow = {
   updated_at: string;
 };
 
-export async function listClients(db: Db, firmId: string): Promise<ClientRow[]> {
+export async function listClients(db: Db, firmId: string, scopeUserId: string | null = null): Promise<ClientRow[]> {
   return db.query<ClientRow>(
     `SELECT id, firm_id, name, legal_name, notes, email, phone, pipeline_status, created_at, updated_at
-     FROM clients WHERE firm_id = $1 ORDER BY LOWER(name)`,
-    [firmId],
+     FROM clients WHERE firm_id = $1 AND ${visibleClientSql("id", "$2")} ORDER BY LOWER(name)`,
+    [firmId, scopeUserId],
   );
 }
 
@@ -37,6 +38,7 @@ export async function createClient(
   db: Db,
   firmId: string,
   input: { name: string; legal_name?: string; notes?: string; email?: string; phone?: string },
+  assignToUserId: string | null = null,
 ): Promise<ClientRow | undefined> {
   const id = newId("cli");
   const statements = [
@@ -53,6 +55,12 @@ export async function createClient(
       query: `INSERT INTO client_profiles (client_id, default_currency) VALUES ($1, 'USD')`,
       params: [id],
     },
+    ...(assignToUserId
+      ? [{
+          query: `INSERT INTO client_assignments (client_id, firm_id, user_id, assigned_by_user_id) VALUES ($1, $2, $3, $3)`,
+          params: [id, firmId, assignToUserId],
+        }]
+      : []),
   ];
 
   await db.transaction(statements);

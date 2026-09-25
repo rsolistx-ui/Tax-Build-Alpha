@@ -32,6 +32,14 @@ async function runQuery(query) {
 
 const checks = [
   {
+    label: "per-member sees-all-clients switch (migration 0072)",
+    query: `SELECT 1 FROM information_schema.columns WHERE table_name = 'firm_members' AND column_name = 'sees_all_clients'`,
+  },
+  {
+    label: "client_assignments same-firm foreign key (migration 0072)",
+    query: `SELECT 1 FROM pg_constraint WHERE conname = 'fk_client_assignments_client_same_firm'`,
+  },
+  {
     label: "staff invitations carry firm and role (migration 0071)",
     query: `SELECT 1 FROM information_schema.columns WHERE table_name = 'beta_invitations' AND column_name = 'firm_role'`,
   },

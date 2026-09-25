@@ -242,7 +242,7 @@ betaRoutes.get("/status", requireSession, async (c) => {
   if (owner) {
     return c.json({ isOwner: true, allowed: true, entitlement: null, mfaRequired });
   }
-  const { entitlement: row, role: firmRole } = await loadAccessEntitlement(db, c.get("userId"));
+  const { entitlement: row, role: firmRole, seesAllClients } = await loadAccessEntitlement(db, c.get("userId"));
   const entitlement: EntitlementRow | null = row
     ? { status: row.status as EntitlementRow["status"], expiresAt: row.expires_at }
     : null;
@@ -253,6 +253,7 @@ betaRoutes.get("/status", requireSession, async (c) => {
     reason: decision.allowed ? null : decision.reason,
     entitlement: row ? { status: row.status, startsAt: row.starts_at, expiresAt: row.expires_at } : null,
     firmRole,
+    seesAllClients,
     mfaRequired,
   });
 });

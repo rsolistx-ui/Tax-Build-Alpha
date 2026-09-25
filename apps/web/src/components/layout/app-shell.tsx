@@ -15,6 +15,7 @@ import { VipOnboardingModal } from "@/components/vip-onboarding-modal";
 import { VoiceRuleDictationModal } from "@/components/voice-rule-dictation-modal";
 import { AccountingImportModal } from "@/components/accounting-import-modal";
 import { UniversalCommandPalette } from "@/components/universal-command-palette";
+import { useSeesAllClients } from "@/lib/firm-role";
 
 export function AppShell({
   firmName,
@@ -28,6 +29,7 @@ export function AppShell({
   daysLeft?: number;
 }) {
   const navigate = useNavigate();
+  const seesAllClients = useSeesAllClients();
   const [tourOpen, setTourOpen] = useState(false);
   const [featureRequestOpen, setFeatureRequestOpen] = useState(false);
   const [supportModalOpen, setSupportModalOpen] = useState(false);
@@ -95,6 +97,7 @@ export function AppShell({
                   Clients
                 </span>
               </NavLink>
+              {seesAllClients ? (
               <NavLink
                 to="/projects"
                 className={({ isActive }) =>
@@ -109,6 +112,8 @@ export function AppShell({
                   Projects
                 </span>
               </NavLink>
+              ) : null}
+              {seesAllClients ? (
               <NavLink
                 to="/calendar"
                 className={({ isActive }) =>
@@ -123,6 +128,7 @@ export function AppShell({
                   Deadlines
                 </span>
               </NavLink>
+              ) : null}
               <NavLink
                 to="/work-queue"
                 className={({ isActive }) =>
@@ -233,9 +239,11 @@ export function AppShell({
               </span>
             ) : null}
             <span className="text-sm text-[var(--color-muted-foreground)]">{userName}</span>
-            <Button asChild variant="ghost" size="icon" aria-label="Connections and settings" title="Connections and settings">
-              <Link to="/connections"><Settings className="h-4 w-4" /></Link>
-            </Button>
+            {seesAllClients ? (
+              <Button asChild variant="ghost" size="icon" aria-label="Connections and settings" title="Connections and settings">
+                <Link to="/connections"><Settings className="h-4 w-4" /></Link>
+              </Button>
+            ) : null}
             <ThemeToggle />
             <Button variant="ghost" size="icon" onClick={signOut} aria-label="Sign out">
               <LogOut className="h-4 w-4" />
@@ -248,14 +256,14 @@ export function AppShell({
         <PasskeyOffer />
         <Outlet />
       </main>
-      <nav className="fixed inset-x-3 bottom-3 z-30 grid grid-cols-5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-card)]/95 p-1 shadow-lg backdrop-blur sm:hidden" aria-label="Primary navigation">
+      <nav className={cn("fixed inset-x-3 bottom-3 z-30 grid rounded-2xl border border-[var(--color-border)] bg-[var(--color-card)]/95 p-1 shadow-lg backdrop-blur sm:hidden", seesAllClients ? "grid-cols-5" : "grid-cols-4")} aria-label="Primary navigation">
         {[
           { to: "/", label: "Operations", icon: LayoutDashboard, end: true },
           { to: "/clients", label: "Clients", icon: Users },
           { to: "/projects", label: "Projects", icon: FolderKanban },
           { to: "/work-queue", label: "Work queue", icon: ClipboardList },
           { to: "/agent-desk", label: "Agent desk", icon: Bot },
-        ].map(({ to, label, icon: Icon, end }) => <NavLink key={to} to={to} end={end} className={({ isActive }) => cn("flex flex-col items-center gap-1 rounded-xl px-2 py-2 text-[10px] font-medium text-[var(--color-muted-foreground)]", isActive && "bg-[#14201c] text-white")}><Icon className="h-4 w-4" />{label}</NavLink>)}
+        ].filter(({ to }) => seesAllClients || to !== "/projects").map(({ to, label, icon: Icon, end }) => <NavLink key={to} to={to} end={end} className={({ isActive }) => cn("flex flex-col items-center gap-1 rounded-xl px-2 py-2 text-[10px] font-medium text-[var(--color-muted-foreground)]", isActive && "bg-[#14201c] text-white")}><Icon className="h-4 w-4" />{label}</NavLink>)}
       </nav>
       <WelcomeTour forceOpen={tourOpen} onClose={() => setTourOpen(false)} />
       <FeatureRequestModal
@@ -271,7 +279,7 @@ export function AppShell({
         onClose={() => setVipOnboardingOpen(false)}
         userName={userName}
         firmName={firmName}
-        onOpenImport={() => setAccountingImportOpen(true)}
+        onOpenImport={seesAllClients ? () => setAccountingImportOpen(true) : undefined}
         onOpenMobileLink={() => navigate("/clients")}
         onOpenDictation={() => setVoiceModalOpen(true)}
       />

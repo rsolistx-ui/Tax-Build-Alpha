@@ -1,4 +1,5 @@
 import type { Db, DbStatement } from "../db";
+import { visibleClientSql } from "./client-assignment";
 import { newId } from "../lib/id";
 import { workAuditEventStatement } from "./work-audit";
 
@@ -31,6 +32,8 @@ export type WorkQueueFilter = {
   view?: "overdue" | "due_today" | "due_soon" | "waiting_on_client" | "professional_review" | "blocked" | "recently_completed";
   cursor?: string;
   limit?: number;
+  /** Staff who see only assigned clients: their user id. Null or absent: no filter. */
+  scopeUserId?: string | null;
 };
 
 const MAX_PAGE_SIZE = 100;
@@ -168,6 +171,10 @@ export async function queryWorkQueue(db: Db, firmId: string, filter: WorkQueueFi
   if (filter.assignedUserId) addCondition("assigned_user_id", filter.assignedUserId);
   if (filter.status) addCondition("status", filter.status);
   if (filter.priority) addCondition("priority", filter.priority);
+  if (filter.scopeUserId) {
+    params.push(filter.scopeUserId);
+    conditions.push(visibleClientSql("client_id", `$${params.length}`));
+  }
 
   switch (filter.view) {
     case "overdue":

@@ -4,6 +4,27 @@
 
 ## Status: core loop verified live. M6 (native e-sign) and M7 (Tax Workbench) done. Staff seats, roles and the Schedule C handoff to the preparer's tax software shipped 2026-09-24. Truepost does not compute or e-file returns (decision 2026-09-24: hand off to MyTAXPrepOffice instead; no 1040/MeF build for the 2027 season).
 
+## 0-new. Session of 2026-09-25: client assignment (latest; read this first, then section 0)
+
+Committed and pushed to `main`, deployed (Worker `0c9e1b3d`). Neon migration 0072 applied; `verify-neon-schema.mjs` passes. Tests: 640 api, 84 web, 42 script. Full `smoke-production.ps1` passed live on `0c9e1b3d`, including the new assignment checks.
+
+- **What it does.** Staff see only the clients the owner assigns them, unless the owner ticks "All clients" for that person (Team page, Clients button per member). Owners always see all. New staff start with no clients. A client staff create is assigned to them.
+- **Enforcement** (`services/client-assignment.ts`, called from `requireActiveBeta`):
+  - Every `cli_` id in the path or query must be assigned, else 403 `CLIENT_NOT_ASSIGNED`.
+  - A URL naming no client is refused (403 `CLIENT_SCOPE_FORBIDDEN`) unless listed in `SCOPED_FIRM_WIDE`; those handlers filter with `visibleClientSql` and `c.get("clientScopeUserId")`.
+  - **A new firm-wide route is closed to assigned-only staff until it is added to that list and filters its rows.**
+  - Body client ids are checked with `isClientVisible` (document reassignment, intercompany).
+- **Data:** `client_assignments` (FK to `clients(id, firm_id)`, cascades), `firm_members.sees_all_clients`. API: `PUT /api/firm/staff/:userId/clients`.
+- **Web:** assigned-only staff do not see Projects, Deadlines, Connections, bulk import or time savings; those pages show an "open one of your clients" notice.
+- **Also changed:** `/api/push/*` now runs `requireActiveBeta` (the sync feed carried firm-wide activity).
+- **Smoke command fix:** it needs `DATABASE_URL` (now in the command block below); the script stops early with a clear message if it is missing.
+- **Auditor:** one pass, GREEN with one AMBER (web defaulted to "sees all" if the flag was missing); fixed.
+
+**Found, not fixed (owner decision):**
+- `POST /api/push/notify` lets any signed-in beta user send a push message to every subscriber in every firm when no clientId/userId is given (`routes/push.ts`). Should be scoped to the caller's firm or removed.
+- `services/time-tracking.ts:230` passes a JS array to `ANY($2::text[])`; the Db wrapper sends arrays as JSON text, so time-entry invoicing likely fails. Use `jsonb_array_elements_text`.
+- Affiliate lists (`intercompany/affiliates`) show the name of a linked client even if it is not assigned.
+
 ## 0. Session of 2026-09-24, afternoon (latest; read this first)
 
 Everything is committed and pushed to `main` (last commit `9cf6785`) and deployed (Worker `e5fd1662`). Neon migrations 0070 and 0071 are applied and `node scripts/verify-neon-schema.mjs` passes. Tests: 627 api, 84 web, 42 script. Market and gap analysis written up as a Claude doc: https://claude.ai/artifact/1vnuSfcSnxUBciTvw2ZrLR
@@ -54,6 +75,8 @@ node scripts/neon-migrate.mjs migrations/neon/<file>.sql
 node scripts/verify-neon-schema.mjs
 
 # Full production smoke test (about 5 minutes, self-cleaning, uses Workers AI allowance)
+# It needs DATABASE_URL too (it seeds the test invitation in Neon); load it as above.
+$env:DATABASE_URL = ((Get-Content "apps\api\.dev.vars" | Where-Object { $_ -like 'DATABASE_URL=*' }) -replace '^DATABASE_URL=','').Trim('"')
 $env:SMOKE_CLEANUP_TOKEN = ((Get-Content "$env:OneDrive\Desktop\Truepost-SMOKE_CLEANUP_TOKEN.txt") | Where-Object { $_ -match '^[0-9a-f]{64}$' } | Select-Object -First 1)
 .\scripts\smoke-production.ps1 -BaseUrl https://folio-api.rsolistx.workers.dev
 ```
@@ -62,7 +85,7 @@ $env:SMOKE_CLEANUP_TOKEN = ((Get-Content "$env:OneDrive\Desktop\Truepost-SMOKE_C
 
 **Left as designed / open:**
 - The 1099 radar shows W-9 request status to bookkeepers. That's bookkeeping, and those requests have no document. It's a one-line change if the owner wants it hidden.
-- Next build is **client assignment**: staff see only the clients the owner assigns, with a per-person "sees all" switch. About 3 to 4 hours.
+- Client assignment shipped 2026-09-25 (see section 0-new above).
 - Pre-existing, not yet fixed:
   - `POST /:clientId/signature-requests` does not check that `documentId` belongs to that client.
   - The S-Corp calculator uses the 2024 Social Security wage base ($168,600).

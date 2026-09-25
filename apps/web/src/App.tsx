@@ -1,4 +1,5 @@
 import { lazy, Suspense } from "react";
+import { AllClientsOnly } from "@/lib/firm-role";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { ProtectedLayout } from "@/components/protected";
 import { ChunkLoadRecovery } from "@/components/chunk-load-recovery";
@@ -44,8 +45,8 @@ export default function App() {
           <Route path="/" element={<DashboardPage />} />
           <Route path="/clients" element={<ClientsPage />} />
           <Route path="/clients/:clientId" element={<ClientWorkspacePage />} />
-          <Route path="/projects" element={<ProjectsPage />} />
-          <Route path="/calendar" element={<CalendarPage />} />
+          <Route path="/projects" element={<AllClientsOnly><ProjectsPage /></AllClientsOnly>} />
+          <Route path="/calendar" element={<AllClientsOnly><CalendarPage /></AllClientsOnly>} />
           <Route path="/control" element={<AdminPanel />} />
           <Route path="/system-control" element={<AdminPanel />} />
           <Route path="/admin" element={<Navigate to="/control" replace />} />
@@ -55,8 +56,8 @@ export default function App() {
           <Route path="/workbench" element={<TaxWorkbenchPage />} />
           <Route path="/team" element={<TeamPage />} />
           <Route path="/agent-desk" element={<AgentDeskPage />} />
-          <Route path="/analytics" element={<AnalyticsDashboard />} />
-          <Route path="/connections" element={<ConnectionsPage />} />
+          <Route path="/analytics" element={<AllClientsOnly><AnalyticsDashboard /></AllClientsOnly>} />
+          <Route path="/connections" element={<AllClientsOnly><ConnectionsPage /></AllClientsOnly>} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

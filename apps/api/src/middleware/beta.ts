@@ -6,6 +6,7 @@ import { computeAccessDecision, type EntitlementRow } from "../services/beta";
 import { insertBetaAccessEvent } from "../services/beta-db";
 import { loadAccessEntitlement } from "../services/firm";
 import { firmRoleAllows } from "../services/firm-roles";
+import { allClientsAssigned, clientIdsInRequest, scopedFirmWideAllowed } from "../services/client-assignment";
 import { getCookie } from "hono/cookie";
 import { ADMIN_UNLOCK_COOKIE, isValidAdminUnlock, turnstileConfigured } from "../services/admin-unlock";
 
@@ -39,6 +40,7 @@ export function isValidAdminMasterToken(env: Env, tokenHeader?: string | null): 
 export const requireActiveBeta = createMiddleware<{ Bindings: Env; Variables: AuthedVars }>(async (c, next) => {
   if (isOwnerEmail(c.env, c.get("userEmail"))) {
     c.set("firmRole", "owner");
+    c.set("clientScopeUserId", null);
     await next();
     return;
   }
@@ -46,7 +48,7 @@ export const requireActiveBeta = createMiddleware<{ Bindings: Env; Variables: Au
   const db = createDb(c.env);
   const userId = c.get("userId");
   // Own entitlement, or the firm owner's for a staff member, plus firm role (one query).
-  const { entitlement: row, role } = await loadAccessEntitlement(db, userId);
+  const { entitlement: row, role, seesAllClients } = await loadAccessEntitlement(db, userId);
   const entitlement: EntitlementRow | null = row
     ? { status: row.status as EntitlementRow["status"], expiresAt: row.expires_at }
     : null;
@@ -75,7 +77,21 @@ export const requireActiveBeta = createMiddleware<{ Bindings: Env; Variables: Au
     return c.json({ error: "Your role in this firm does not allow this.", code: "FIRM_ROLE_FORBIDDEN", role }, 403);
   }
 
+  // Client assignment (services/client-assignment.ts): staff without "sees all
+  // clients" reach only the clients the owner assigned them.
+  const scopeUserId = seesAllClients ? null : userId;
+  if (scopeUserId) {
+    const { pathIds, queryIds } = clientIdsInRequest(c.req.path, c.req.queries());
+    if (pathIds.length === 0 && !scopedFirmWideAllowed(c.req.method, c.req.path, queryIds.length > 0)) {
+      return c.json({ error: "Your firm owner gives you access client by client. Open one of your clients instead.", code: "CLIENT_SCOPE_FORBIDDEN" }, 403);
+    }
+    if (!(await allClientsAssigned(db, scopeUserId, [...pathIds, ...queryIds]))) {
+      return c.json({ error: "This client is not assigned to you.", code: "CLIENT_NOT_ASSIGNED" }, 403);
+    }
+  }
+
   c.set("firmRole", role);
+  c.set("clientScopeUserId", scopeUserId);
   await next();
 });
 

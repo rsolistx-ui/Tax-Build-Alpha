@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { visibleClientSql } from "../services/client-assignment";
 import { createDb, type Db, type DbStatement } from "../db";
 import type { Env } from "../env";
 import type { AuthedVars } from "../middleware/session";
@@ -589,14 +590,16 @@ export async function applyDocumentReviewAction(
   actorUserId: string,
   body: DocumentReviewAction,
   hideSigned: boolean,
+  scopeUserId: string | null = null,
 ): Promise<{ ok: true; terminal: boolean } | { ok: false; status: number; error: string }> {
   // hideSigned: the caller's role cannot read signed records, so a signed
   // record is treated as not found (no metadata, no changes).
   const [document] = await db.query<{ id: string; client_id: string; status: string; document_type: string; tax_year: number | null; firm_id: string }>(
     `SELECT cd.id, cd.client_id, cd.status, cd.document_type, cd.tax_year, c.firm_id
      FROM client_documents cd JOIN clients c ON c.id = cd.client_id
-     WHERE cd.id = $1 AND c.firm_id = $2 AND ($3::boolean = false OR NOT ${signedRecordDocumentSql("cd")})`,
-    [documentId, firmId, hideSigned],
+     WHERE cd.id = $1 AND c.firm_id = $2 AND ($3::boolean = false OR NOT ${signedRecordDocumentSql("cd")})
+       AND ${visibleClientSql("cd.client_id", "$4")}`,
+    [documentId, firmId, hideSigned, scopeUserId],
   );
   if (!document) return { ok: false, status: 404, error: "Not found" };
 
@@ -648,7 +651,10 @@ export async function applyDocumentReviewAction(
     }
     case "assign_client": {
       if (!body.targetClientId) return { ok: false, status: 400, error: "targetClientId is required" };
-      const [target] = await db.query<{ id: string }>(`SELECT id FROM clients WHERE id = $1 AND firm_id = $2`, [body.targetClientId, firmId]);
+      const [target] = await db.query<{ id: string }>(
+        `SELECT id FROM clients WHERE id = $1 AND firm_id = $2 AND ${visibleClientSql("id", "$3")}`,
+        [body.targetClientId, firmId, scopeUserId],
+      );
       if (!target) return { ok: false, status: 404, error: "Target client not found in this firm" };
       // A checklist match or duplicate target is always specific to the client
       // it was set under, so both relationships are cleared on reassignment -
@@ -755,7 +761,7 @@ workspaceRoutes.patch("/:clientId/documents/:documentId", async (c) => {
   if (!client) return c.json({ error: "Not found" }, 404);
   const body = (await c.req.json()) as DocumentReviewAction;
   const documentId = c.req.param("documentId");
-  const result = await applyDocumentReviewAction(db, firm.id, documentId, c.get("userId"), body, !canReadSignedRecords(c.get("firmRole") ?? "read_only"));
+  const result = await applyDocumentReviewAction(db, firm.id, documentId, c.get("userId"), body, !canReadSignedRecords(c.get("firmRole") ?? "read_only"), c.get("clientScopeUserId") ?? null);
   if (!result.ok) return c.json({ error: result.error }, result.status as 400 | 404);
   const document = result.terminal ? null : await loadReviewDocument(db, documentId, firm.id);
   return c.json({ ok: true, terminal: result.terminal, document });

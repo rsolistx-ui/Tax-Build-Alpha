@@ -407,7 +407,7 @@ describe("applyDocumentReviewAction signed records", () => {
     expect(result).toEqual({ ok: false, status: 404, error: "Not found" });
     const lookup = seen.find((q) => q.sql.includes("cd.id, cd.client_id, cd.status"));
     expect(lookup?.sql).toContain("signature_requests");
-    expect(lookup?.params).toEqual(["doc_signed", "firm_1", true]);
+    expect(lookup?.params).toEqual(["doc_signed", "firm_1", true, null]);
     expect(transactionCalls).toHaveLength(0);
   });
 });

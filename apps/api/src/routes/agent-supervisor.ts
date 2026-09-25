@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { visibleClientSql } from "../services/client-assignment";
 import { z } from "zod";
 import { createDb } from "../db";
 import type { DbStatement } from "../db";
@@ -40,8 +41,9 @@ agentDeskRoutes.get("/", async (c) => {
      JOIN clients c ON c.id = at.client_id AND c.firm_id = at.firm_id
      WHERE at.firm_id = $1 AND at.status = 'awaiting_approval'
        AND ($2::boolean = false OR at.action_type <> 'engagement_letter_draft')
+       AND ${visibleClientSql("at.client_id", "$3")}
      ORDER BY at.created_at ASC`,
-    [firm.id, !canReadSignedRecords(c.get("firmRole") ?? "read_only")],
+    [firm.id, !canReadSignedRecords(c.get("firmRole") ?? "read_only"), c.get("clientScopeUserId") ?? null],
   );
   return c.json({ tasks });
 });
