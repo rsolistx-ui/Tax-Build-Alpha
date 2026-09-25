@@ -11,6 +11,7 @@ import ExcelJS from "exceljs";
 import { sanitizeSpreadsheetCell } from "./excel-safety";
 import type { PnlReport } from "./reporting";
 import type { TaxHandoff } from "./tax-handoff";
+import type { TaxInputsSummary } from "./tax-inputs";
 import type {
   BankLedgerRow,
   ReceiptEvidenceRow,
@@ -191,6 +192,7 @@ export async function buildTaxHandoffWorkbook(input: {
   legalName: string | null;
   generatedAt: string;
   handoff: TaxHandoff;
+  inputs?: TaxInputsSummary;
 }): Promise<Uint8Array> {
   const { handoff } = input;
   const workbook = new ExcelJS.Workbook();
@@ -245,6 +247,74 @@ export async function buildTaxHandoffWorkbook(input: {
     row.getCell(3).numFmt = "#,##0.00";
   }
 
+  if (input.inputs) addReturnInputsSheet(workbook, input.inputs);
+
   const buffer = await workbook.xlsx.writeBuffer();
   return new Uint8Array(buffer);
+}
+
+/** Vehicles, home office, assets, 1099s received and estimated payments, as entered; no tax computed. */
+function addReturnInputsSheet(workbook: ExcelJS.Workbook, inputs: TaxInputsSummary): void {
+  const sheet = workbook.addWorksheet("RETURN INPUTS");
+  sheet.columns = [{ width: 34 }, { width: 18 }, { width: 18 }, { width: 18 }, { width: 18 }, { width: 50 }];
+  const money = (row: ExcelJS.Row, ...cols: number[]) => cols.forEach((col) => { row.getCell(col).numFmt = "#,##0.00"; });
+  const title = (text: string) => {
+    sheet.addRow([]);
+    sheet.addRow(safeRow([text])).font = { bold: true };
+  };
+
+  title("VEHICLES (Schedule C Part IV / Form 4562 Part V)");
+  addHeaderRow(sheet, ["Vehicle", "Total miles", "Business miles", "Commuting miles", "Business use %", "Notes"]);
+  for (const v of inputs.vehicles) {
+    sheet.addRow(safeRow([v.description, v.totalMiles, v.businessMiles, v.commutingMiles, v.businessUsePercent, [
+      v.placedInService ? `Placed in service ${v.placedInService}` : "",
+      v.method === "standard_mileage" ? "Standard mileage" : "Actual expenses",
+      `Personal use off duty: ${v.availableForPersonalUse ? "yes" : "no"}`,
+      `Another vehicle for personal use: ${v.anotherVehicleAvailable ? "yes" : "no"}`,
+      `Written evidence: ${v.writtenEvidence ? "yes (mileage log)" : "no"}`,
+      ...v.problems,
+    ].filter(Boolean).join("; ")]));
+  }
+  if (inputs.unassignedTripMiles > 0) sheet.addRow(safeRow(["Log miles not matched to a vehicle", "", inputs.unassignedTripMiles]));
+
+  title("HOME OFFICE");
+  const ho = inputs.homeOffice;
+  if (ho) {
+    for (const [label, value] of [
+      ["Method", ho.method === "regular" ? "Regular (Form 8829)" : "Simplified"],
+      ["Office sq ft", ho.officeSqFt],
+      ["Home sq ft", ho.homeSqFt ?? ""],
+      ["Business use %", ho.businessUsePercent ?? ""],
+      ["Qualifies", ho.qualifies ? "yes" : `no: ${ho.problems.join(" ")}`],
+    ] as Array<[string, string | number]>) sheet.addRow(safeRow([label, value]));
+    if (ho.simplifiedDeduction !== null) money(sheet.addRow(safeRow(["Simplified deduction", ho.simplifiedDeduction])), 2);
+    for (const e of ho.expenses) money(sheet.addRow(safeRow([`Home expense: ${e.name}`, e.total, e.businessShare])), 2, 3);
+    if (ho.businessShareTotal !== null) money(sheet.addRow(safeRow(["Business share of home expenses", "", ho.businessShareTotal])), 3);
+    for (const note of ho.notes) sheet.addRow(safeRow([note]));
+  } else {
+    sheet.addRow(safeRow(["None entered"]));
+  }
+
+  title("ASSETS PLACED IN SERVICE (Form 4562)");
+  addHeaderRow(sheet, ["Asset", "Placed in service", "Cost", "Business use %", "Business basis", "Category / note"]);
+  for (const a of inputs.assets) {
+    money(sheet.addRow(safeRow([a.description, a.placedInService, a.cost, a.businessUsePercent, a.businessBasis, [a.category, a.note].filter(Boolean).join("; ")])), 3, 5);
+  }
+
+  title("1099s RECEIVED");
+  addHeaderRow(sheet, ["Payer", "Form", "Amount", "Federal withholding", "Possible deposits", "Notes"]);
+  for (const f of inputs.forms1099) {
+    money(sheet.addRow(safeRow([f.payerName, f.form, f.amount, f.federalWithholding, f.possibleDeposits?.total ?? "", f.possibleDeposits ? `${f.possibleDeposits.count} deposit(s) naming this payer, classified business income` : ""])), 3, 4, 5);
+  }
+  money(sheet.addRow(safeRow(["Business 1099s (NEC, MISC, K)", "", inputs.tieOut.reportedOnBusiness1099s])), 3);
+  money(sheet.addRow(safeRow(["Booked business income", "", inputs.tieOut.bookedBusinessIncome])), 3);
+  for (const note of inputs.tieOut.notes) sheet.addRow(safeRow([note])).font = { bold: true, color: { argb: "FFB00020" } };
+
+  title("ESTIMATED TAX PAYMENTS MADE");
+  addHeaderRow(sheet, ["Paid", "Jurisdiction", "Quarter", "Amount", "Confirmation", ""]);
+  for (const p of inputs.estimatedPayments.payments) {
+    money(sheet.addRow(safeRow([p.paidDate, p.jurisdiction === "federal" ? "Federal" : p.state, `Q${p.quarter}`, p.amount, p.confirmation])), 4);
+  }
+  money(sheet.addRow(safeRow(["Federal total", "", "", inputs.estimatedPayments.federal.total])), 4);
+  for (const s of inputs.estimatedPayments.states) money(sheet.addRow(safeRow([`${s.state} total`, "", "", s.total])), 4);
 }

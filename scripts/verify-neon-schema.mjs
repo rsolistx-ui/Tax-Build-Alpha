@@ -32,6 +32,14 @@ async function runQuery(query) {
 
 const checks = [
   {
+    label: "client tax inputs, same-firm (migration 0074)",
+    query: `SELECT 1 FROM pg_constraint WHERE conname = 'fk_client_tax_inputs_client_same_firm'`,
+  },
+  {
+    label: "one home office worksheet per client and year (migration 0074)",
+    query: `SELECT 1 FROM pg_indexes WHERE indexname = 'idx_client_tax_inputs_one_home_office'`,
+  },
+  {
     label: "client money accounts, same-firm (migration 0073)",
     query: `SELECT 1 FROM pg_constraint WHERE conname = 'fk_client_accounts_client_same_firm'`,
   },

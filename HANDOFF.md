@@ -47,7 +47,17 @@ Deployed as Worker `9551ca69`. Tests: 645 api, 84 web, 42 script. Full smoke tes
   - API: `/api/clients/:id/accounts` (GET, POST, PATCH, DELETE, `books-start`, `assign-import`), `balance-sheet?asOf`, `cash-flow?start&end`, `statement-lines` (drill-down). "accounts" writes are bookkeeping (bookkeepers allowed).
   - Auditor: GREEN math, access and roles; 7 AMBERs, all fixed (the owner-funded catch-all split into real lines; evidence judged by receipt status; loan per-account; the opening-balance field shows the saved value after a failed save; Books group; labels; a spacing nit).
   - Not verified in a signed-in browser (two-step sign-in); verified by API smoke and tests.
-- **Next:** milestone 4 (tax handoff inputs: mileage, home office, assets, 1099s received, estimated payments). If keys arrive first, wire them first: Azure (11), then Turnstile and Telegram (12).
+- **Milestone 4 shipped** (Worker `52700601`, Neon migration 0074 applied and verified, smoke passed; 672 api tests): return inputs under the Schedule C handoff (Tax Bridge & 1099 tab) and in a RETURN INPUTS sheet of the handoff spreadsheet.
+  - `client_tax_inputs` holds one row per input, per client and tax year (kind plus JSONB data, validated per kind by zod in `services/tax-inputs.ts`; one home office per year).
+  - Vehicles: business miles come from the mileage log, matched by vehicle name.
+  - Home office: simplified amount capped at the books' net profit (`report.net`, not the handoff's line 29, which understates while categories lack a line). The regular method shows the business share of each home expense.
+  - Assets: business basis only, no depreciation.
+  - 1099s received: tied to booked business income, flagged when larger, with possible matching deposits for payer names of 3+ characters.
+  - Estimated payments: federal and per-state totals by quarter.
+  - Writes are preparer and up (`tax-handoff` segment).
+  - Auditor: GREEN. Two AMBERs fixed: the mileage year filter now uses the date index; short payer names no longer "match" everything.
+- **Proposed, awaiting the owner's OK (about 1 hour):** a per-account "charges show as positive" sign setting for card CSVs (Amex, Capital One, Discover export charges as positive), plus a preview warning when a card import looks inverted. Today a single-amount-column card CSV is taken as-is.
+- **Next:** milestone 5 (beta metrics dashboard). If keys arrive first, wire them first: Azure (11), then Turnstile and Telegram (12).
 
 ## 0-new. Session of 2026-09-25: client assignment (read section 00 first)
 
@@ -72,7 +82,7 @@ Committed and pushed to `main`, deployed (Worker `fe85aba5`). Neon migration 007
 | 1 | Small cleanup batch: signature requests check the document and engagement belong to that client; Social Security wage base 2026 ($184,500); duplicate `/1099-radar` route removed; Team link in the mobile nav; em dashes out of `tax-extended-panels.tsx` | Defects | Nothing (built 2026-09-25, Worker 9551ca69) | about 1 hour |
 | 2 | Add a person who already has a Truepost account to a firm | Staff seats | Nothing (built 2026-09-25, Worker 16b02183) | about 2 hours |
 | 3 | Per-client balance sheet and cash flow statement from the client's own books (receipts, bank activity, journals) | Reports vs Wave/QBO | Nothing (built 2026-09-25, Worker 3db09d56) | about 4 to 6 hours |
-| 4 | Tax handoff, the rest of what the preparer digs up by hand: vehicle mileage and business-use % (Schedule C Part IV), home office square footage and expenses (Form 8829), assets placed in service with dates and cost (depreciation), 1099s received tied to booked income, estimated tax payments made. Inputs only; Truepost computes no tax | Return handoff (Phase 3 option A) | Nothing | about 3 to 4 hours |
+| 4 | Tax handoff, the rest of what the preparer digs up by hand: vehicle mileage and business-use % (Schedule C Part IV), home office square footage and expenses (Form 8829), assets placed in service with dates and cost (depreciation), 1099s received tied to booked income, estimated tax payments made. Inputs only; Truepost computes no tax | Return handoff (Phase 3 option A) | Nothing (built 2026-09-25, Worker 52700601) | about 3 to 4 hours |
 | 5 | Beta metrics dashboard: receipt fields correct without edits %, upload-to-categorized median, request-to-completed days, 5xx rate counting retries, support first-response time, preparer hours saved | "Nothing is proven" | Nothing | about 3 to 4 hours |
 | 6 | Public status page from real health checks, plus a published support response target | Tax-season crashes, no support | Nothing | about 2 to 3 hours |
 | 7 | Imports: QuickBooks Online export files (no Intuit key) and prior-year data from tax software exports | Poor data import | Nothing | about 4 to 6 hours |

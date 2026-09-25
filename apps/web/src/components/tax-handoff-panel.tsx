@@ -4,6 +4,7 @@ import { api, apiUrl } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { TaxInputsSection, type TaxInputs } from "@/components/tax-inputs-section";
 
 type LineOption = { code: string; line: string; label: string; kind: "income" | "cogs" | "expense" };
 type HandoffLine = LineOption & { amount: number; categories: string[]; note: string | null };
@@ -34,6 +35,7 @@ const money = (n: number) => n.toLocaleString("en-US", { style: "currency", curr
  */
 export function TaxHandoffPanel({ clientId, taxYear }: { clientId: string; taxYear: number }) {
   const [handoff, setHandoff] = useState<Handoff | null>(null);
+  const [inputs, setInputs] = useState<TaxInputs | null>(null);
   const [options, setOptions] = useState<LineOption[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
@@ -42,8 +44,9 @@ export function TaxHandoffPanel({ clientId, taxYear }: { clientId: string; taxYe
   async function load() {
     setError(null);
     try {
-      const res = await api<{ handoff: Handoff; lineOptions: LineOption[] }>(`/api/clients/${clientId}/tax-handoff/${taxYear}`);
+      const res = await api<{ handoff: Handoff; inputs: TaxInputs; lineOptions: LineOption[] }>(`/api/clients/${clientId}/tax-handoff/${taxYear}`);
       setHandoff(res.handoff);
+      setInputs(res.inputs);
       setOptions(res.lineOptions);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not load the Schedule C handoff.");
@@ -92,6 +95,7 @@ export function TaxHandoffPanel({ clientId, taxYear }: { clientId: string; taxYe
   const shownLines = handoff.lines.filter((l) => l.amount !== 0);
 
   return (
+    <div className="space-y-4">
     <Card>
       <CardHeader className="pb-2">
         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -191,5 +195,7 @@ export function TaxHandoffPanel({ clientId, taxYear }: { clientId: string; taxYe
         </section>
       </CardContent>
     </Card>
+    {inputs ? <TaxInputsSection clientId={clientId} taxYear={handoff.taxYear} inputs={inputs} onChanged={load} /> : null}
+    </div>
   );
 }

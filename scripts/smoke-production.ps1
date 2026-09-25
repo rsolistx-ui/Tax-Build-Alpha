@@ -1244,6 +1244,51 @@ try {
   if ($removedSubmitStatus -ne "404" -or $removedAckStatus -ne "404") { throw "Removed e-file endpoints still answer (submit $removedSubmitStatus, ack $removedAckStatus); expected 404." }
   Write-Host "Handoff reconciled: income $handoffIncome, expenses $handoffExpenses, $(@($handoff.needsLine).Count) needing a line; fake e-file endpoints return 404."
 
+  Write-Host "Verifying return inputs: vehicle miles from the mileage log, home office, asset, 1099 tie-out, estimated payment, spreadsheet sheet..."
+  $inputsBase = "$BaseUrl/api/clients/$clientId/tax-handoff/2026/inputs"
+  $postJsonStatus = {
+    param($url, $object)
+    $path = New-JsonPayloadFile ($object | ConvertTo-Json -Compress -Depth 5)
+    $prev = $ErrorActionPreference; $ErrorActionPreference = "Continue"
+    try { return (& curl.exe --silent --output NUL --write-out "%{http_code}" -c $cookieJar -b $cookieJar -H "Content-Type: application/json" --data-binary "@$path" $url) }
+    finally { $ErrorActionPreference = $prev; Remove-TempFile $path }
+  }
+  $tripStatus = & $postJsonStatus "$BaseUrl/api/clients/$clientId/mileage" @{ tripDate = "2026-03-10"; destination = "Supplier"; businessPurpose = "Pick up stock"; miles = 120; vehicle = "Smoke Van" }
+  if ($tripStatus -ne "201") { throw "Adding a mileage trip returned HTTP $tripStatus." }
+  foreach ($entry in @(
+    @{ kind = "vehicle"; data = @{ description = "smoke van"; totalMiles = 10000; commutingMiles = 500 } },
+    @{ kind = "home_office"; data = @{ method = "simplified"; officeSqFt = 150; homeSqFt = 1500; regularAndExclusiveUse = $true; principalPlaceOrClientMeetings = $true } },
+    @{ kind = "asset"; data = @{ description = "Smoke laptop"; category = "computer_equipment"; placedInService = "2026-02-01"; cost = 2000; businessUsePercent = 80 } },
+    @{ kind = "form_1099"; data = @{ form = "1099-NEC"; payerName = "Smoke Payer"; amount = 999999 } },
+    @{ kind = "estimated_payment"; data = @{ jurisdiction = "federal"; paidDate = "2026-04-15"; quarter = 1; amount = 500 } }
+  )) {
+    $status = & $postJsonStatus $inputsBase $entry
+    if ($status -ne "201") { throw "Saving a $($entry.kind) input returned HTTP $status." }
+  }
+  $secondHomeOffice = & $postJsonStatus $inputsBase @{ kind = "home_office"; data = @{ method = "simplified"; officeSqFt = 10; regularAndExclusiveUse = $true; principalPlaceOrClientMeetings = $true } }
+  if ($secondHomeOffice -ne "409") { throw "A second home office for the same year returned HTTP $secondHomeOffice; expected 409." }
+  $badAsset = & $postJsonStatus $inputsBase @{ kind = "asset"; data = @{ description = "Bad"; category = "other"; placedInService = "2026-01-01"; cost = 1; businessUsePercent = 120 } }
+  if ($badAsset -ne "400") { throw "An asset over 100% business use returned HTTP $badAsset; expected 400." }
+  $withInputs = (Invoke-CurlJson @("-c", $cookieJar, "-b", $cookieJar, "$BaseUrl/api/clients/$clientId/tax-handoff/2026")).inputs
+  $van = @($withInputs.vehicles)[0]
+  if ([decimal]$van.businessMiles -ne 120 -or [decimal]$van.businessUsePercent -ne 1.2) { throw "Vehicle business miles $($van.businessMiles) ($($van.businessUsePercent)%) did not come from the 120-mile log trip." }
+  if ([decimal]$withInputs.homeOffice.simplifiedDeduction -ne 750 -or [decimal]$withInputs.homeOffice.businessUsePercent -ne 10) { throw "Home office simplified amount $($withInputs.homeOffice.simplifiedDeduction) or business use $($withInputs.homeOffice.businessUsePercent)% is wrong." }
+  if ([decimal]@($withInputs.assets)[0].businessBasis -ne 1600) { throw "Asset business basis is $(@($withInputs.assets)[0].businessBasis), expected 1600." }
+  if ([decimal]$withInputs.tieOut.reportedMoreThanBooked -le 0) { throw "A 1099 larger than booked income was not flagged." }
+  if ([decimal]$withInputs.estimatedPayments.federal.total -ne 500) { throw "Estimated payments total $($withInputs.estimatedPayments.federal.total), expected 500." }
+  $inputsXlsxPath = Join-Path $env:TEMP "folio-smoke-inputs-$([guid]::NewGuid().ToString('N')).xlsx"
+  try {
+    $null = & curl.exe --silent --output $inputsXlsxPath -c $cookieJar -b $cookieJar "$BaseUrl/api/clients/$clientId/tax-handoff/2026/xlsx"
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $zip = [System.IO.Compression.ZipFile]::OpenRead($inputsXlsxPath)
+    try {
+      $reader = New-Object System.IO.StreamReader(($zip.Entries | Where-Object { $_.FullName -eq "xl/workbook.xml" }).Open())
+      $workbookXml = $reader.ReadToEnd(); $reader.Close()
+    } finally { $zip.Dispose() }
+    if ($workbookXml -notmatch "RETURN INPUTS") { throw "The handoff spreadsheet has no RETURN INPUTS sheet." }
+  } finally { Remove-TempFile $inputsXlsxPath }
+  Write-Host "Return inputs verified: 120 log miles on the van (1.2% business), simplified home office 750 at 10%, asset basis 1600, 1099 shortfall flagged, estimated payments 500, second home office refused (409), over-100% asset refused (400), RETURN INPUTS sheet in the spreadsheet."
+
   Write-Host "Verifying staff seats and roles: owner invites a bookkeeper, bookkeeper joins the firm, role limits hold, owner removes them..."
   $emailS = "folio-smoke-staff-$runId@example.com"
   $passwordS = "Smoke!$([guid]::NewGuid().ToString('N').Substring(0, 18))"
