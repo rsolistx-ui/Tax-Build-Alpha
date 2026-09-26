@@ -72,7 +72,8 @@ Deployed as Worker `9551ca69`. Tests: 645 api, 84 web, 42 script. Full smoke tes
 - **Milestone 6 shipped:** public `/status` reads only the last scheduled live database and sign-in check (`GET /api/status`, migration 0078). A missing or stale check is explicitly **Unknown**, never presented as healthy. Support's published target is the same business day; auto-acknowledgements do not count.
 - **Milestone 7 shipped:** the proof-first CSV migration flow now accepts QuickBooks Online exports as well as Wave, preserving source-specific duplicate records and draft-only invoices/bills. Prior-year tax-software CSV summaries (tax year, AGI, total tax) are stored by client with migration 0079, never overwrite an existing summary, and prefill the estimated-tax worksheet for review.
 - **Migration tooling note:** the no-argument `npm run db:migrate:neon` currently replays the entire historical set and stops at the pre-existing migration 0012 constraint `uq_clients_id_firm`. Migrations 0078 and 0079 were applied safely with the runner's supported explicit-file mode, then `db:verify:neon` passed. Repair the migration-history mechanism before relying on the no-argument path.
-- **Next:** milestone 8 (1099 preparation) awaits the owner's IRS IRIS filer code. If keys arrive first, wire them first: Azure (11), then Turnstile and Telegram (12).
+- **Azure Document Intelligence wired (2026-09-26):** the East US resource endpoint and subscription key are deployed as Worker secrets; `US_ONLY_READING=true` and `AZURE_DI_REGION=eastus` are deployed configuration. Typecheck and the Azure/US-reader tests pass. The full production smoke runner was interrupted locally before its first receipt upload, so live extraction remains the next verification—not yet claimed complete.
+- **Next:** milestone 8 (1099 preparation) awaits the owner's IRS IRIS filer code. Then verify Azure with one cleanup-protected production smoke run; Turnstile and Telegram still need their keys.
 
 ## 0-new. Session of 2026-09-25: client assignment (read section 00 first)
 
@@ -104,7 +105,7 @@ Committed and pushed to `main`, deployed (Worker `fe85aba5`). Neon migration 007
 | 8 | 1099 preparation: recipient copies (PDF) and a filing summary; IRS IRIS e-file once the owner's filer code (TCC) is approved | 1099 alert only | Owner applying for IRIS TCC (about 45 days) | about 4 to 5 hours |
 | 9 | Payroll tracking only: import payroll provider reports, post journal entries, reconcile W-2 and 941 totals. Truepost does not run payroll | Wave payroll add-on | Nothing | about 4 to 6 hours |
 | 10 | Pricing page: one flat price with a written price lock | Price hikes, add-ons | Owner's price | about 2 hours |
-| 11 | US-only receipt reading: Azure Document Intelligence (Textract backup skipped for now: paid after 3 months) | Receipt cap | Owner's Azure key | about 1 to 2 hours after key |
+| 11 | US-only receipt reading: Azure Document Intelligence (Textract backup skipped for now: paid after 3 months) | Receipt cap | Configured 2026-09-26; live receipt-extraction verification pending | about 1 to 2 hours after key |
 | 12 | Admin panel security check (Turnstile) and Telegram alerts. Admin notification email set 2026-09-25 (richard@solisequityholdings.com) | Admin security | Owner's Turnstile keys, Telegram token | about 30 minutes after keys |
 | 13 | Load test | Tax-season crashes | Workers Paid (owner buying 2026-09-25) | about 1 to 2 hours |
 | 14 | Onboard Phyllis (invite, first sign-in, her staff and client assignment) | | Owner's email-code enrollment; attorney review before real client data | about 1 hour with you |
