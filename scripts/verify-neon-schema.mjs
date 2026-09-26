@@ -1,3 +1,8 @@
+import { createHash } from "node:crypto";
+import { readFile, readdir } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 // Verifies that production Neon schema actually reflects every migration
 // that is expected to have run, so a missed or partially-applied migration
 // fails deployment loudly instead of silently shipping a Worker against a
@@ -598,5 +603,22 @@ if (!allPresent) {
   console.error("Production schema verification failed: one or more required migrations were not applied. Deployment is stopped before the Worker is deployed.");
   process.exit(1);
 }
+
+const migrationsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "migrations", "neon");
+const migrationFiles = (await readdir(migrationsDir)).filter((name) => name.endsWith(".sql")).sort();
+const expectedLedger = await Promise.all(migrationFiles.map(async (filename) => ({
+  filename,
+  checksum: createHash("sha256").update(await readFile(path.join(migrationsDir, filename), "utf8"), "utf8").digest("hex"),
+})));
+const ledgerResult = await runQuery("SELECT filename, checksum_sha256 FROM truepost_schema_migrations ORDER BY filename");
+const ledgerRows = ledgerResult?.rows ?? ledgerResult?.results?.[0]?.rows ?? [];
+const recordedLedger = new Map(ledgerRows.map((row) => [Array.isArray(row) ? row[0] : row.filename, Array.isArray(row) ? row[1] : row.checksum_sha256]));
+const ledgerDrift = expectedLedger.filter(({ filename, checksum }) => recordedLedger.get(filename) !== checksum);
+const unexpectedLedger = [...recordedLedger.keys()].filter((filename) => !expectedLedger.some((migration) => migration.filename === filename));
+if (ledgerDrift.length || unexpectedLedger.length) {
+  console.error(`Migration ledger verification failed. Missing/checksum-drift: ${ledgerDrift.map((item) => item.filename).join(", ") || "none"}; unexpected: ${unexpectedLedger.join(", ") || "none"}.`);
+  process.exit(1);
+}
+console.log(`Migration ledger verification passed (${expectedLedger.length} checksums).`);
 
 console.log("Production schema verification passed.");

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { execFileSync } from "node:child_process";
 import { splitSqlStatements } from "./lib/sql-split.mjs";
 import { discoverMigrationFiles } from "./lib/discover-migrations.mjs";
 
@@ -50,6 +51,13 @@ const legacySchema = Array.isArray(legacyRow) ? legacyRow[0] === true || legacyR
 
 if (ledger.size === 0 && legacySchema) {
   if (!baseline) throw new Error("Pre-ledger schema detected. Run `npm run db:verify:neon`, then `npm run db:baseline:neon` exactly once.");
+  // A baseline is an assertion about the existing production schema. Make the
+  // assertion executable: callers cannot skip the complete verifier by calling
+  // this runner directly with --baseline.
+  execFileSync(process.execPath, [path.join(path.dirname(fileURLToPath(import.meta.url)), "verify-neon-schema.mjs")], {
+    stdio: "inherit",
+    env: process.env,
+  });
   const boundary = migrations.findIndex((migration) => migration.name === "0080_schema_migration_ledger.sql");
   if (boundary < 0) throw new Error("0080_schema_migration_ledger.sql is required for a baseline.");
   const historical = migrations.slice(0, boundary);
