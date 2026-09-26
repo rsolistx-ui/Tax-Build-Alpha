@@ -3,6 +3,7 @@ import type { Env } from "../env";
 import { newId } from "../lib/id";
 import { EmailDispatcherService, type RuleAlertPayload, type SupportContactPayload } from "./email-dispatcher";
 import { TelegramNotifierService } from "./telegram-notifier";
+import { issueSigningAccessLink } from "./signature-access";
 
 export type OutboxOperationKind =
   | "support_client_confirmation"
@@ -12,7 +13,8 @@ export type OutboxOperationKind =
   | "rule_admin_alert"
   | "rule_admin_telegram"
   | "rule_activation_confirmation"
-  | "prepared_email";
+  | "prepared_email"
+  | "signature_reminder";
 
 type OutboxRow = {
   id: string;
@@ -53,7 +55,7 @@ export async function processDurableOutbox(env: Env, limit = 20): Promise<Outbox
 
   for (const operation of claimed) {
     try {
-      const delivery = await deliverOperation(env, operation);
+      const delivery = await deliverOperation(env, db, operation);
       if (!delivery.success) throw new Error(delivery.error || "Provider did not accept the operation");
       const completed = await db.query<{ id: string }>(
         `UPDATE operation_outbox
@@ -123,7 +125,7 @@ export function isDeliveryAccepted(result: { success: boolean; delivered: boolea
   return result.success && result.delivered && !result.simulated;
 }
 
-async function deliverOperation(env: Env, operation: OutboxRow): Promise<{ success: boolean; error?: string; messageId?: string }> {
+async function deliverOperation(env: Env, db: Db, operation: OutboxRow): Promise<{ success: boolean; error?: string; messageId?: string }> {
   const dispatcher = new EmailDispatcherService(env);
   const payload = { ...(operation.payload as Record<string, unknown>), idempotencyKey: operation.idempotency_key };
   let response;
@@ -148,6 +150,16 @@ async function deliverOperation(env: Env, operation: OutboxRow): Promise<{ succe
     }
     case "rule_activation_confirmation": response = await dispatcher.sendScopedRuleActivationConfirmation(payload as never); break;
     case "prepared_email": response = await dispatcher.sendPreparedEmail(payload as never); break;
+    case "signature_reminder": {
+      const input = payload as unknown as { authorizationId: string; firmId: string; clientId: string; requestId: string; taxpayerName: string; taxpayerEmail: string; firmName: string; formType: string; taxYear: number };
+      const link = await issueSigningAccessLink(db, { firmId: input.firmId, clientId: input.clientId, requestId: input.requestId, recipientEmail: input.taxpayerEmail, recipientName: input.taxpayerName, issuedByUserId: "system:signature-reminder" });
+      const url = `${env.APP_ORIGIN || env.BETTER_AUTH_URL}/sign#token=${encodeURIComponent(link.token)}`;
+      const subject = `${input.firmName}: your Form ${input.formType} for ${input.taxYear} is waiting for your signature`;
+      const text = `Hello ${input.taxpayerName},\n\nYour Form ${input.formType} for tax year ${input.taxYear} still needs your signature before your return can be filed. Download it, sign and date it by hand, and upload a photo:\n\n${url}\n\nThis new link replaces earlier ones and expires in 7 days.\n\n${input.firmName}`;
+      const html = `<p>Hello ${escapeTelegramHtml(input.taxpayerName)},</p><p>Your Form ${escapeTelegramHtml(input.formType)} for tax year ${input.taxYear} still needs your signature before your return can be filed.</p><p><a href="${escapeTelegramHtml(url)}">Sign your form</a></p><p>${escapeTelegramHtml(input.firmName)}</p>`;
+      response = await dispatcher.sendPreparedEmail({ to: input.taxpayerEmail, subject, text, html, ticketNumber: `signature-reminder:${input.authorizationId}`, idempotencyKey: operation.idempotency_key });
+      break;
+    }
   }
   // A mock is useful in local development, but it is not a delivered
   // customer notification. Keep it pending in production until a provider is

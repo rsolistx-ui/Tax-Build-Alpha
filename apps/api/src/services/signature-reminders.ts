@@ -1,7 +1,6 @@
 import type { Db } from "../db";
 import type { Env } from "../env";
 import { newId } from "../lib/id";
-import { prepareSigningAccessLink } from "./signature-access";
 import { enqueueOutboxStatements } from "./durable-outbox";
 
 /** Sends one email through Resend. Returns false (and sends nothing) when email is not configured. */
@@ -34,24 +33,17 @@ export async function runSignatureReminders(db: Db, env: Env, deps: { fetch?: ty
        AND NOT EXISTS (SELECT 1 FROM signature_access_links l WHERE l.signature_request_id = ea.signature_request_id AND l.created_at > NOW() - make_interval(days => ${REMIND_EVERY_DAYS}))
      LIMIT 50`,
   );
-  const origin = env.APP_ORIGIN || env.BETTER_AUTH_URL;
   let sent = 0;
   for (const row of due) {
     if (Number(row.links) >= MAX_LINKS) continue;
-    const link = await prepareSigningAccessLink({ firmId: row.firm_id, clientId: row.client_id, requestId: row.signature_request_id, recipientEmail: row.taxpayer_email, recipientName: row.taxpayer_name, issuedByUserId: "system:signature-reminder" });
-    const url = `${origin}/sign#token=${encodeURIComponent(link.token)}`;
-    const subject = `${row.firm_name}: your Form ${row.form_type} for ${row.tax_year} is waiting for your signature`;
-    const text = `Hello ${row.taxpayer_name},\n\nYour Form ${row.form_type} for tax year ${row.tax_year} still needs your signature before your return can be filed. Download it, sign and date it by hand, and upload a photo:\n\n${url}\n\nThis new link replaces earlier ones and expires in 7 days.\n\n${row.firm_name}`;
-    const html = `<p>Hello ${esc(row.taxpayer_name)},</p><p>Your Form ${esc(row.form_type)} for tax year ${row.tax_year} still needs your signature before your return can be filed. Download it, sign and date it by hand, and upload a photo.</p><p><a href="${esc(url)}" style="display:inline-block;padding:10px 18px;background:#0b3b91;color:#fff;border-radius:6px;text-decoration:none">Sign your form</a></p><p>This new link replaces earlier ones and expires in 7 days.</p><p>${esc(row.firm_name)}</p>`;
     await db.transaction([
-      ...link.statements,
       ...enqueueOutboxStatements({
         firmId: row.firm_id,
         ticketNumber: `signature-reminder:${row.id}:${Number(row.links) + 1}`,
         operations: [{
-          kind: "prepared_email",
+          kind: "signature_reminder",
           key: "taxpayer-email",
-          payload: { to: row.taxpayer_email, subject, text, html, ticketNumber: `signature-reminder:${row.id}` },
+          payload: { authorizationId: row.id, firmId: row.firm_id, clientId: row.client_id, requestId: row.signature_request_id, taxpayerName: row.taxpayer_name, taxpayerEmail: row.taxpayer_email, firmName: row.firm_name, formType: row.form_type, taxYear: row.tax_year },
         }],
       }),
       {
