@@ -3,7 +3,8 @@ import type { Env } from "../env";
 import { newId } from "../lib/id";
 import { EmailDispatcherService, type RuleAlertPayload, type SupportContactPayload } from "./email-dispatcher";
 import { TelegramNotifierService } from "./telegram-notifier";
-import { issueSigningAccessLink } from "./signature-access";
+import { prepareSigningAccessLink } from "./signature-access";
+import { decryptOutboxDeliverySecret, encryptOutboxDeliverySecret } from "./outbox-delivery-secret";
 
 export type OutboxOperationKind =
   | "support_client_confirmation"
@@ -152,8 +153,26 @@ async function deliverOperation(env: Env, db: Db, operation: OutboxRow): Promise
     case "prepared_email": response = await dispatcher.sendPreparedEmail(payload as never); break;
     case "signature_reminder": {
       const input = payload as unknown as { authorizationId: string; firmId: string; clientId: string; requestId: string; taxpayerName: string; taxpayerEmail: string; firmName: string; formType: string; taxYear: number };
-      const link = await issueSigningAccessLink(db, { firmId: input.firmId, clientId: input.clientId, requestId: input.requestId, recipientEmail: input.taxpayerEmail, recipientName: input.taxpayerName, issuedByUserId: "system:signature-reminder" });
-      const url = `${env.APP_ORIGIN || env.BETTER_AUTH_URL}/sign#token=${encodeURIComponent(link.token)}`;
+      let [stored] = await db.query<{ ciphertext: string; iv: string }>(`SELECT ciphertext, iv FROM outbox_delivery_secrets WHERE outbox_id = $1`, [operation.id]);
+      let token: string;
+      if (stored) {
+        token = await decryptOutboxDeliverySecret(stored.ciphertext, stored.iv, env.BETTER_AUTH_SECRET, operation.id);
+      } else {
+        const link = await prepareSigningAccessLink({ firmId: input.firmId, clientId: input.clientId, requestId: input.requestId, recipientEmail: input.taxpayerEmail, recipientName: input.taxpayerName, issuedByUserId: "system:signature-reminder" });
+        const encrypted = await encryptOutboxDeliverySecret(link.token, env.BETTER_AUTH_SECRET, operation.id);
+        try {
+          await db.transaction([...link.statements, {
+            query: `INSERT INTO outbox_delivery_secrets (outbox_id, ciphertext, iv) VALUES ($1, $2, $3)`,
+            params: [operation.id, encrypted.ciphertext, encrypted.iv],
+          }]);
+          token = link.token;
+        } catch (error) {
+          [stored] = await db.query<{ ciphertext: string; iv: string }>(`SELECT ciphertext, iv FROM outbox_delivery_secrets WHERE outbox_id = $1`, [operation.id]);
+          if (!stored) throw error;
+          token = await decryptOutboxDeliverySecret(stored.ciphertext, stored.iv, env.BETTER_AUTH_SECRET, operation.id);
+        }
+      }
+      const url = `${env.APP_ORIGIN || env.BETTER_AUTH_URL}/sign#token=${encodeURIComponent(token)}`;
       const subject = `${input.firmName}: your Form ${input.formType} for ${input.taxYear} is waiting for your signature`;
       const text = `Hello ${input.taxpayerName},\n\nYour Form ${input.formType} for tax year ${input.taxYear} still needs your signature before your return can be filed. Download it, sign and date it by hand, and upload a photo:\n\n${url}\n\nThis new link replaces earlier ones and expires in 7 days.\n\n${input.firmName}`;
       const html = `<p>Hello ${escapeTelegramHtml(input.taxpayerName)},</p><p>Your Form ${escapeTelegramHtml(input.formType)} for tax year ${input.taxYear} still needs your signature before your return can be filed.</p><p><a href="${escapeTelegramHtml(url)}">Sign your form</a></p><p>${escapeTelegramHtml(input.firmName)}</p>`;

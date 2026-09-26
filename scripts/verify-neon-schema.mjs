@@ -38,6 +38,10 @@ async function runQuery(query) {
 
 const checks = [
   {
+    label: "encrypted outbox delivery secrets (migration 0085)",
+    query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'outbox_delivery_secrets'`,
+  },
+  {
     label: "durable operation outbox with fenced claims (migration 0082)",
     query: `SELECT 1 FROM information_schema.columns WHERE table_name = 'operation_outbox' AND column_name = 'claim_token'`,
   },
