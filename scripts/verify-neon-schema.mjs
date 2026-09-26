@@ -586,6 +586,10 @@ const optionalLegacyChecks = [
 console.log(`Verifying ${checks.length} required production schema object(s)...`);
 let allPresent = true;
 for (const check of checks) {
+  // A one-time legacy baseline creates the ledger immediately before this
+  // verifier runs, so 0080 cannot be recorded until after schema-object
+  // verification succeeds. Normal verification always requires this row.
+  if (skipLedgerParity && check.label === "schema ledger records migration 0080") continue;
   const result = await runQuery(check.query);
   const rows = result?.rows ?? [];
   const present = rows.length > 0;
