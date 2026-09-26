@@ -11,6 +11,8 @@ export interface RuleAlertPayload {
   directiveText: string;
   markdownContent: string;
   clientName?: string | null;
+  /** Provider idempotency key supplied by the durable outbox. */
+  idempotencyKey?: string;
 }
 
 export interface SupportContactPayload {
@@ -21,6 +23,8 @@ export interface SupportContactPayload {
   subject: string;
   message: string;
   category?: string;
+  /** Provider idempotency key supplied by the durable outbox. */
+  idempotencyKey?: string;
 }
 
 export interface EmailDispatchResult {
@@ -136,6 +140,7 @@ https://truepost.app`;
       html,
       ticketNumber: payload.ticketNumber,
       draftReply: text,
+      idempotencyKey: payload.idempotencyKey,
     });
   }
 
@@ -149,6 +154,7 @@ https://truepost.app`;
     firmName: string;
     clientName?: string | null;
     directiveText: string;
+    idempotencyKey?: string;
   }): Promise<EmailDispatchResult> {
     const firstName = payload.userName.split(" ")[0] || "there";
     const subject = `[Truepost Directive #${payload.ticketNumber}] Custom Rule Request Queued: ${payload.clientName || "Practice Rule"}`;
@@ -199,6 +205,7 @@ Truepost Operations Desk`;
       html,
       ticketNumber: payload.ticketNumber,
       draftReply: text,
+      idempotencyKey: payload.idempotencyKey,
     });
   }
 
@@ -209,6 +216,7 @@ Truepost Operations Desk`;
     userEmail: string;
     clientName?: string | null;
     summary: string;
+    idempotencyKey?: string;
   }): Promise<EmailDispatchResult> {
     const firstName = payload.userName.split(" ")[0] || "there";
     const scope = payload.clientName || "the selected client";
@@ -217,6 +225,7 @@ Truepost Operations Desk`;
     return this.sendOutboundEmail({
       to: [payload.userEmail], subject, text, html: `<p>${text.replace(/\n/g, "<br />")}</p>`,
       ticketNumber: payload.ticketNumber, draftReply: text,
+      idempotencyKey: payload.idempotencyKey,
     });
   }
 
@@ -290,6 +299,7 @@ ${payload.markdownContent}
       html,
       ticketNumber: payload.ticketNumber,
       draftReply,
+      idempotencyKey: payload.idempotencyKey,
     });
   }
 
@@ -351,6 +361,7 @@ ${draftReply}
       html,
       ticketNumber: payload.ticketNumber,
       draftReply,
+      idempotencyKey: payload.idempotencyKey,
     });
   }
 
@@ -400,6 +411,7 @@ ${draftReply}
     html,
     ticketNumber,
     draftReply,
+    idempotencyKey,
   }: {
     to: string[];
     subject: string;
@@ -407,6 +419,7 @@ ${draftReply}
     html: string;
     ticketNumber: string;
     draftReply: string;
+    idempotencyKey?: string;
   }): Promise<EmailDispatchResult> {
     const apiKey = this.env.RESEND_API_KEY;
     const sender = this.env.SENDER_EMAIL || "Truepost Concierge <onboarding@resend.dev>";
@@ -429,6 +442,7 @@ ${draftReply}
         headers: {
           Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
+          ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
         },
         body: JSON.stringify({
           from: sender,

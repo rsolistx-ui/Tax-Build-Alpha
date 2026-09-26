@@ -75,6 +75,7 @@ import { runScheduledOperations } from "./services/scheduled-operations";
 import { runSupervisorHeartbeat } from "./services/supervisor-heartbeat";
 import { runBankFeedHeartbeat } from "./services/bank-feed-heartbeat";
 import { runPublicStatusCheck } from "./services/public-status";
+import { processDurableOutbox } from "./services/durable-outbox";
 
 const app = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 
@@ -289,12 +290,12 @@ app.onError((err, c) => {
 const worker = Object.assign(app, {
   scheduled(controller: ScheduledController, env: Env, executionCtx: ExecutionContext) {
     const operation = controller.cron === "*/30 * * * *"
-      ? Promise.allSettled([runSupervisorHeartbeat(env), runBankFeedHeartbeat(env), runPublicStatusCheck(env)]).then((results) => {
+      ? Promise.allSettled([runSupervisorHeartbeat(env), runBankFeedHeartbeat(env), runPublicStatusCheck(env), processDurableOutbox(env)]).then((results) => {
           for (const result of results) {
             if (result.status === "rejected") console.error("[scheduled-half-hourly] task failed", result.reason);
           }
         })
-      : runScheduledOperations(env);
+      : Promise.all([runScheduledOperations(env), processDurableOutbox(env)]).then(([scheduled]) => scheduled);
     executionCtx.waitUntil(
       operation.catch((error) => {
         console.error("[scheduled-operations]", { cron: controller.cron, error });

@@ -7,8 +7,8 @@ import { requireSession } from "../middleware/session";
 import { ensureFirm } from "../services/firm";
 import { EmailDispatcherService } from "../services/email-dispatcher";
 import { insertWorkAuditEvent } from "../services/work-audit";
-import { newId } from "../lib/id";
 import { activateSafeScopedRule } from "../services/scoped-rule-automation";
+import { enqueueOutboxStatements, processDurableOutbox } from "../services/durable-outbox";
 
 export const supportRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 supportRoutes.use("*", requireSession);
@@ -31,13 +31,14 @@ supportRoutes.post("/contact", async (c) => {
   const db = createDb(c.env);
   const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
 
-  const ticketNumber = `ENG-${Math.floor(1000 + Math.random() * 9000)}`;
+  const ticketNumber = `ENG-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
   const userName = c.get("userName") || "Practitioner";
   const userEmail = c.get("userEmail") || c.get("userId");
 
   const emailDispatcher = new EmailDispatcherService(c.env);
 
-  // 1. Immediately send AI auto-response to the customer
+  // Capture the exact customer-facing copy with the request. Delivery is
+  // queued atomically below, before any external provider is contacted.
   const clientResponse = emailDispatcher.buildClientSupportAutoResponse({
     ticketNumber,
     firmName: firm.name,
@@ -48,7 +49,7 @@ supportRoutes.post("/contact", async (c) => {
     category: body.category,
   });
 
-  await emailDispatcher.sendClientAutoResponse({
+  const supportPayload = {
     ticketNumber,
     firmName: firm.name,
     userName,
@@ -56,35 +57,22 @@ supportRoutes.post("/contact", async (c) => {
     subject: body.subject,
     message: body.message,
     category: body.category,
-  });
-
-  // 2. Alert the platform admin
-  await emailDispatcher.notifyAdminOfSupportContact({
-    ticketNumber,
-    firmName: firm.name,
-    userName,
-    userEmail,
-    subject: body.subject,
-    message: body.message,
-    category: body.category,
-  });
-
-  // 3. Store in database for live admin telemetry
-  await db.query(
-    `INSERT INTO support_tickets (id, firm_id, user_id, user_name, user_email, subject, message, category, status, ai_response, auto_responded_at, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'auto_responded', $9, NOW(), NOW())`,
-    [
+  };
+  await db.transaction([
+    {
+      query: `INSERT INTO support_tickets (id, firm_id, user_id, user_name, user_email, subject, message, category, status, ai_response, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending_delivery', $9, NOW())`,
+      params: [ticketNumber, firm.id, c.get("userId"), userName, userEmail, body.subject, body.message, body.category || "General", clientResponse.text],
+    },
+    ...enqueueOutboxStatements({
+      firmId: firm.id,
       ticketNumber,
-      firm.id,
-      c.get("userId"),
-      userName,
-      userEmail,
-      body.subject,
-      body.message,
-      body.category || "General",
-      clientResponse.text,
-    ],
-  );
+      operations: [
+        { kind: "support_client_confirmation", payload: supportPayload, key: "client-confirmation" },
+        { kind: "support_admin_alert", payload: supportPayload, key: "admin-alert" },
+      ],
+    }),
+  ]);
 
   await insertWorkAuditEvent(db, {
     firmId: firm.id,
@@ -95,15 +83,17 @@ supportRoutes.post("/contact", async (c) => {
     afterJson: {
       subject: body.subject,
       category: body.category,
-      autoResponded: true,
+      deliveryQueued: true,
     },
-  }).catch(() => {});
+  }).catch((error) => console.error("[support-ticket-audit]", error));
+
+  c.executionCtx.waitUntil(processDurableOutbox(c.env).catch((error) => console.error("[outbox-support]", error)));
 
   return c.json({
     ok: true,
     ticketNumber,
-    status: "auto_responded",
-    message: "Your inquiry has been received. Our Sentinel system has dispatched an instant confirmation to your email, and a Truepost specialist is reviewing your account.",
+    status: "pending_delivery",
+    message: "Your inquiry has been received. A confirmation is being delivered to your email, and a Truepost specialist is reviewing your account.",
   });
 });
 
@@ -115,24 +105,19 @@ supportRoutes.post("/request-rule", async (c) => {
   const db = createDb(c.env);
   const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
 
-  const ticketNumber = `RUL-${Math.floor(1000 + Math.random() * 9000)}`;
+  const ticketNumber = `RUL-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
   const userName = c.get("userName") || "Practitioner";
   const userEmail = c.get("userEmail") || c.get("userId");
 
-  const emailDispatcher = new EmailDispatcherService(c.env);
-
-  // 1. Send immediate confirmation to client
-  await emailDispatcher.sendClientRuleRequestAutoResponse({
+  const clientConfirmation = {
     ticketNumber,
     userName,
     userEmail,
     firmName: firm.name,
     clientName: body.clientName,
     directiveText: body.directiveText,
-  });
-
-  // 2. Alert platform admin
-  await emailDispatcher.notifyAdminOfRuleRequest({
+  };
+  const adminAlert = {
     ticketNumber,
     firmName: firm.name,
     userName,
@@ -142,23 +127,24 @@ supportRoutes.post("/request-rule", async (c) => {
     directiveText: body.directiveText,
     markdownContent: `# Directive Request #${ticketNumber}\n\nClient: ${body.clientName || "Global"}\nRequested: "${body.directiveText}"`,
     clientName: body.clientName,
-  });
+  };
 
-  // 3. Persist the original instruction before attempting controlled activation.
-  await db.query(
-    `INSERT INTO client_rule_requests (id, firm_id, client_id, client_name, requested_by, user_email, directive_text, rule_type, status, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending_review', NOW())`,
-    [
+  // Persist the instruction and delivery intent before controlled activation.
+  await db.transaction([
+    {
+      query: `INSERT INTO client_rule_requests (id, firm_id, client_id, client_name, requested_by, user_email, directive_text, rule_type, status, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending_review', NOW())`,
+      params: [ticketNumber, firm.id, body.clientId || null, body.clientName || null, userName, userEmail, body.directiveText, body.ruleType],
+    },
+    ...enqueueOutboxStatements({
+      firmId: firm.id,
       ticketNumber,
-      firm.id,
-      body.clientId || null,
-      body.clientName || null,
-      userName,
-      userEmail,
-      body.directiveText,
-      body.ruleType,
-    ],
-  );
+      operations: [
+        { kind: "rule_client_confirmation", payload: clientConfirmation, key: "client-confirmation" },
+        { kind: "rule_admin_alert", payload: adminAlert, key: "admin-alert" },
+      ],
+    }),
+  ]);
 
   // 4. Narrow, non-tax client rules may activate immediately for *future*
   // intake suggestions. They are never retroactively applied here and they
@@ -181,13 +167,15 @@ supportRoutes.post("/request-rule", async (c) => {
        WHERE id = $2 AND firm_id = $3`,
       [automation.summary, ticketNumber, firm.id],
     );
-    await emailDispatcher.sendScopedRuleActivationConfirmation({
+    await db.transaction(enqueueOutboxStatements({
+      firmId: firm.id,
       ticketNumber,
-      userName,
-      userEmail,
-      clientName: body.clientName,
-      summary: automation.summary,
-    }).catch((error) => console.error("[rule-activation-confirmation]", error));
+      operations: [{
+        kind: "rule_activation_confirmation",
+        payload: { ticketNumber, userName, userEmail, clientName: body.clientName, summary: automation.summary },
+        key: "activation-confirmation",
+      }],
+    }));
   } else {
     await db.query(
       `UPDATE client_rule_requests SET ai_notes = $1 WHERE id = $2 AND firm_id = $3`,
@@ -195,12 +183,13 @@ supportRoutes.post("/request-rule", async (c) => {
     );
   }
 
+  c.executionCtx.waitUntil(processDurableOutbox(c.env).catch((error) => console.error("[outbox-rule]", error)));
   return c.json({
     ok: true,
     ticketNumber,
     status: automation.status,
     message: automation.status === "activated"
-      ? "Your client-scoped rule is active for future intake suggestions. A confirmation has been sent to your email."
-      : "Your directive is safely queued for practitioner review. An automated confirmation has been sent to your email.",
+      ? "Your client-scoped rule is active for future intake suggestions. A confirmation is being delivered to your email."
+      : "Your directive is safely queued for practitioner review. An automated confirmation is being delivered to your email.",
   });
 });
