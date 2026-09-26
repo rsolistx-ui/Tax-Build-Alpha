@@ -108,6 +108,8 @@ Use this for reminders, support notifications, push events, receipt extraction r
 
 **Acceptance evidence:** deliberately failed provider calls retry correctly, never double-send, and appear in an operations queue.
 
+**In progress, support-notification slice released 2026-09-26:** migrations 0081 and 0082 add a checksum-tracked outbox with idempotency keys, retry backoff, dead-letter status, claim fencing, and owner-only list/replay controls. Support tickets and rule directives now record notification intent with the originating business write; activation confirmation is committed with the activation state. Email uses the provider idempotency key. Telegram is a separate, durable supplemental alert with at-least-once delivery semantics. The owner dashboard surfaces dead-letter count. Remaining rollout: move reminders, signature follow-ups, receipt retries, bank reconnect alerts, and push delivery onto this same rail; add integration coverage against a disposable database and provider failure fixture.
+
 ### 1.2 Recovery and continuity
 
 - Define and test recovery-point and recovery-time objectives.

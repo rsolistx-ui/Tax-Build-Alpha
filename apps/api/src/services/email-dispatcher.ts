@@ -102,15 +102,15 @@ https://truepost.app`;
           </div>
         </div>
         <div style="padding: 24px; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 8px 8px; background: #ffffff;">
-          <p style="font-size: 15px; margin-top: 0;">Hi ${firstName},</p>
+          <p style="font-size: 15px; margin-top: 0;">Hi ${escapeHtml(firstName)},</p>
           <p style="color: #334155; font-size: 14px;">
             Thank you for contacting Truepost. Your inquiry has been securely logged with our operations desk under tracking reference <strong>#${payload.ticketNumber}</strong>.
           </p>
 
           <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-left: 4px solid #10b981; padding: 14px 16px; margin: 18px 0; border-radius: 6px;">
             <p style="margin: 0 0 4px; font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 700; letter-spacing: 0.05em;">Inquiry Details</p>
-            <p style="margin: 0 0 6px; font-size: 14px; font-weight: 600; color: #0f172a;">${payload.subject}</p>
-            <p style="margin: 0; font-size: 13px; color: #475569; font-style: italic;">"${payload.message.slice(0, 200)}${payload.message.length > 200 ? "…" : ""}"</p>
+            <p style="margin: 0 0 6px; font-size: 14px; font-weight: 600; color: #0f172a;">${escapeHtml(payload.subject)}</p>
+            <p style="margin: 0; font-size: 13px; color: #475569; font-style: italic;">"${escapeHtml(payload.message.slice(0, 200))}${payload.message.length > 200 ? "…" : ""}"</p>
           </div>
 
           <p style="color: #475569; font-size: 13px;">
@@ -180,14 +180,14 @@ Truepost Operations Desk`;
           </div>
         </div>
         <div style="padding: 24px; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 8px 8px; background: #ffffff;">
-          <p style="font-size: 15px; margin-top: 0;">Hi ${firstName},</p>
+          <p style="font-size: 15px; margin-top: 0;">Hi ${escapeHtml(firstName)},</p>
           <p style="color: #334155; font-size: 14px;">
-            Your custom rule request for <strong>${payload.clientName || "your firm"}</strong> has been securely logged with our operations desk under tracking reference <strong>#${payload.ticketNumber}</strong>.
+            Your custom rule request for <strong>${escapeHtml(payload.clientName || "your firm")}</strong> has been securely logged with our operations desk under tracking reference <strong>#${escapeHtml(payload.ticketNumber)}</strong>.
           </p>
 
           <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-left: 4px solid #8b5cf6; padding: 14px 16px; margin: 18px 0; border-radius: 6px;">
             <p style="margin: 0 0 4px; font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 700; letter-spacing: 0.05em;">Requested Rule Directive</p>
-            <p style="margin: 0; font-size: 13px; color: #1e293b; font-style: italic;">"${payload.directiveText}"</p>
+            <p style="margin: 0; font-size: 13px; color: #1e293b; font-style: italic;">"${escapeHtml(payload.directiveText)}"</p>
           </div>
 
           <p style="color: #475569; font-size: 13px;">
@@ -262,21 +262,21 @@ ${draftReply}
           <p style="margin: 4px 0 0; font-size: 12px; opacity: 0.8;">Ticket #${payload.ticketNumber} · ${payload.firmName}</p>
         </div>
         <div style="padding: 20px; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 8px 8px; background: #ffffff;">
-          <p><strong>Submitted by:</strong> ${payload.userName} (<a href="mailto:${payload.userEmail}">${payload.userEmail}</a>)</p>
-          <p><strong>Target:</strong> ${payload.clientName || "Global (All Clients)"} · <strong>Type:</strong> ${payload.ruleType}</p>
+          <p><strong>Submitted by:</strong> ${escapeHtml(payload.userName)} (<a href="mailto:${escapeHtml(payload.userEmail)}">${escapeHtml(payload.userEmail)}</a>)</p>
+          <p><strong>Target:</strong> ${escapeHtml(payload.clientName || "Global (All Clients)")} · <strong>Type:</strong> ${escapeHtml(payload.ruleType)}</p>
           
           <div style="background: #f8fafc; border-left: 4px solid #3b82f6; padding: 12px; margin: 16px 0; border-radius: 4px;">
             <p style="margin: 0 0 4px; font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: bold;">Practitioner Directive</p>
-            <p style="margin: 0; font-style: italic;">"${payload.directiveText}"</p>
+            <p style="margin: 0; font-style: italic;">"${escapeHtml(payload.directiveText)}"</p>
           </div>
 
           <div style="background: #f1f5f9; padding: 12px; margin: 16px 0; border-radius: 4px; font-family: monospace; font-size: 12px; white-space: pre-wrap;">
-${payload.markdownContent}
+${escapeHtml(payload.markdownContent)}
           </div>
 
           <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid #e2e8f0;">
             <p style="margin: 0 0 8px; font-size: 12px; font-weight: bold; color: #047857;">Suggested Reply:</p>
-            <div style="background: #ecfdf5; border: 1px dashed #059669; padding: 12px; border-radius: 6px; font-size: 13px; white-space: pre-wrap;">${draftReply}</div>
+            <div style="background: #ecfdf5; border: 1px dashed #059669; padding: 12px; border-radius: 6px; font-size: 13px; white-space: pre-wrap;">${escapeHtml(draftReply)}</div>
           </div>
         </div>
       </div>
@@ -323,16 +323,16 @@ ${draftReply}
           <p style="margin: 4px 0 0; font-size: 12px; opacity: 0.8;">Ticket #${payload.ticketNumber} · ${payload.firmName}</p>
         </div>
         <div style="padding: 20px; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 8px 8px; background: #ffffff;">
-          <p><strong>Practitioner:</strong> ${payload.userName} (<a href="mailto:${payload.userEmail}">${payload.userEmail}</a>)</p>
-          <p><strong>Subject:</strong> ${payload.subject}</p>
+          <p><strong>Practitioner:</strong> ${escapeHtml(payload.userName)} (<a href="mailto:${escapeHtml(payload.userEmail)}">${escapeHtml(payload.userEmail)}</a>)</p>
+          <p><strong>Subject:</strong> ${escapeHtml(payload.subject)}</p>
           
           <div style="background: #f8fafc; border-left: 4px solid #8b5cf6; padding: 12px; margin: 16px 0; border-radius: 4px;">
-            <p style="margin: 0; font-size: 13px; white-space: pre-wrap;">${payload.message}</p>
+            <p style="margin: 0; font-size: 13px; white-space: pre-wrap;">${escapeHtml(payload.message)}</p>
           </div>
 
           <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid #e2e8f0;">
             <p style="margin: 0 0 8px; font-size: 12px; font-weight: bold; color: #047857;">Suggested Reply:</p>
-            <div style="background: #ecfdf5; border: 1px dashed #059669; padding: 12px; border-radius: 6px; font-size: 13px; white-space: pre-wrap;">${draftReply}</div>
+            <div style="background: #ecfdf5; border: 1px dashed #059669; padding: 12px; border-radius: 6px; font-size: 13px; white-space: pre-wrap;">${escapeHtml(draftReply)}</div>
           </div>
         </div>
       </div>
@@ -371,7 +371,7 @@ ${draftReply}
           <p style="margin: 4px 0 0; font-size: 12px; color: #94a3b8;">Ticket #${ticketNumber}</p>
         </div>
         <div style="padding: 24px; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 8px 8px; background: #ffffff;">
-          <div style="font-size: 14px; color: #1e293b; white-space: pre-wrap;">${replyMessage}</div>
+          <div style="font-size: 14px; color: #1e293b; white-space: pre-wrap;">${escapeHtml(replyMessage)}</div>
           <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid #f1f5f9; font-size: 12px; color: #94a3b8;">
             Truepost Operations Desk · You can reply directly to this email to continue the thread.
           </div>
@@ -472,4 +472,8 @@ ${draftReply}
       };
     }
   }
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
 }
