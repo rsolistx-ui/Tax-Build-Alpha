@@ -15,6 +15,7 @@
     "auth:migrate:local": "npm run db:migrate:local -w @folio/api",
     "auth:migrate:remote": "npm run db:migrate:remote -w @folio/api",
     "db:migrate:neon": "node scripts/neon-migrate.mjs",
+    "db:baseline:neon": "node scripts/verify-neon-schema.mjs && node scripts/neon-migrate.mjs --baseline",
     "db:verify:neon": "node scripts/verify-neon-schema.mjs",
     "license:hyperformula": "powershell -ExecutionPolicy Bypass -File scripts/set-hyperformula-license.ps1",
     "smoke:plaid:sandbox": "node scripts/smoke-plaid-sandbox.mjs",

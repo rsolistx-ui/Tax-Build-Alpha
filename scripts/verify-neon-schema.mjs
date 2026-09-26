@@ -32,6 +32,22 @@ async function runQuery(query) {
 
 const checks = [
   {
+    label: "checksum-tracked Neon migration ledger (migration 0080)",
+    query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'truepost_schema_migrations'`,
+  },
+  {
+    label: "schema ledger records migration 0080",
+    query: `SELECT 1 FROM truepost_schema_migrations WHERE filename = '0080_schema_migration_ledger.sql'`,
+  },
+  {
+    label: "support tables are migration-owned (migration 0080)",
+    query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'support_tickets' AND EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'client_rule_requests')`,
+  },
+  {
+    label: "intercompany tables are migration-owned (migration 0080)",
+    query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'intercompany_affiliates' AND EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'intercompany_reconciliations')`,
+  },
+  {
     label: "prior-year tax summaries (migration 0079)",
     query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'prior_year_tax_summaries'`,
   },

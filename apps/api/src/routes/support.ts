@@ -26,48 +26,10 @@ const ruleRequestSchema = z.object({
   ruleType: z.enum(["categorization", "personal_vs_business", "tax_deduction", "general"]).default("categorization"),
 });
 
-async function initSupportTables(db: any) {
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS support_tickets (
-      id TEXT PRIMARY KEY,
-      firm_id TEXT NOT NULL,
-      user_id TEXT NOT NULL,
-      user_name TEXT,
-      user_email TEXT NOT NULL,
-      subject TEXT NOT NULL,
-      message TEXT NOT NULL,
-      category TEXT,
-      status TEXT NOT NULL DEFAULT 'auto_responded',
-      ai_response TEXT,
-      auto_responded_at TIMESTAMPTZ DEFAULT NOW(),
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      resolved_at TIMESTAMPTZ
-    )
-  `);
-
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS client_rule_requests (
-      id TEXT PRIMARY KEY,
-      firm_id TEXT NOT NULL,
-      client_id TEXT,
-      client_name TEXT,
-      requested_by TEXT NOT NULL,
-      user_email TEXT NOT NULL,
-      directive_text TEXT NOT NULL,
-      rule_type TEXT NOT NULL DEFAULT 'categorization',
-      status TEXT NOT NULL DEFAULT 'pending_review',
-      ai_notes TEXT,
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      resolved_at TIMESTAMPTZ
-    )
-  `);
-}
-
 supportRoutes.post("/contact", async (c) => {
   const body = contactSchema.parse(await c.req.json());
   const db = createDb(c.env);
   const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
-  await initSupportTables(db);
 
   const ticketNumber = `ENG-${Math.floor(1000 + Math.random() * 9000)}`;
   const userName = c.get("userName") || "Practitioner";
@@ -152,7 +114,6 @@ supportRoutes.post("/request-rule", async (c) => {
   const body = ruleRequestSchema.parse(await c.req.json());
   const db = createDb(c.env);
   const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
-  await initSupportTables(db);
 
   const ticketNumber = `RUL-${Math.floor(1000 + Math.random() * 9000)}`;
   const userName = c.get("userName") || "Practitioner";

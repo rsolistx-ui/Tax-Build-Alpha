@@ -71,6 +71,8 @@ Replacement design:
 
 ### 0.2 Deterministic schema management
 
+**Completed 2026-09-26:** migration 0080 created the checksum ledger and moved the formerly runtime-created support and intercompany tables into the migration train. Production's 79 verified historical migrations were recorded as a one-time baseline; migration 0080 was applied through the new direct-connection runner. A normal rerun now reports no pending migration, and the production verifier checks 132 required schema objects.
+
 - Remove runtime DDL from request handlers.
 - Add a migration ledger with checksum, applied timestamp, and deploy SHA.
 - Make the migration runner apply only unapplied migrations and fail on drift.

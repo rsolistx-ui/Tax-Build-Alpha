@@ -18,42 +18,6 @@ adminRoutes.get("/metrics", async (c) => {
   const db = createDb(c.env);
   const firm = await ensureFirm(db, c.get("userId"), c.get("userName"));
 
-  // Ensure tables exist
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS support_tickets (
-      id TEXT PRIMARY KEY,
-      firm_id TEXT NOT NULL,
-      user_id TEXT NOT NULL,
-      user_name TEXT,
-      user_email TEXT NOT NULL,
-      subject TEXT NOT NULL,
-      message TEXT NOT NULL,
-      category TEXT,
-      status TEXT NOT NULL DEFAULT 'auto_responded',
-      ai_response TEXT,
-      auto_responded_at TIMESTAMPTZ DEFAULT NOW(),
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      resolved_at TIMESTAMPTZ
-    )
-  `).catch(() => {});
-
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS client_rule_requests (
-      id TEXT PRIMARY KEY,
-      firm_id TEXT NOT NULL,
-      client_id TEXT,
-      client_name TEXT,
-      requested_by TEXT NOT NULL,
-      user_email TEXT NOT NULL,
-      directive_text TEXT NOT NULL,
-      rule_type TEXT NOT NULL DEFAULT 'categorization',
-      status TEXT NOT NULL DEFAULT 'pending_review',
-      ai_notes TEXT,
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      resolved_at TIMESTAMPTZ
-    )
-  `).catch(() => {});
-
   const [users] = await db.query<any>(`SELECT COUNT(DISTINCT user_id) as count FROM push_subscriptions WHERE user_id IN (SELECT user_id FROM clients WHERE firm_id=$1)`, [firm.id]).catch(() => [{}]);
   const [totalClients] = await db.query<any>(`SELECT COUNT(*) as count FROM clients WHERE firm_id=$1`, [firm.id]).catch(() => [{}]);
   const [receipts] = await db.query<any>(`SELECT COUNT(*) as count FROM receipts WHERE firm_id=$1`, [firm.id]).catch(() => [{}]);
@@ -197,4 +161,3 @@ adminRoutes.post("/telegram/test", async (c) => {
   );
   return c.json({ ok: result.success, simulated: result.simulated, error: result.error });
 });
-

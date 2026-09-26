@@ -48,44 +48,12 @@ export class IntercompanyMirrorService {
   constructor(private db: Db) {}
 
   /**
-   * Ensures the necessary intercompany tables exist in Neon Postgres.
-   */
-  async ensureTables(): Promise<void> {
-    await this.db.query(`
-      CREATE TABLE IF NOT EXISTS intercompany_affiliates (
-        id TEXT PRIMARY KEY,
-        firm_id TEXT NOT NULL,
-        client_id_a TEXT NOT NULL,
-        client_id_b TEXT NOT NULL,
-        relationship_label TEXT NOT NULL,
-        created_at TIMESTAMPTZ DEFAULT NOW(),
-        UNIQUE (firm_id, client_id_a, client_id_b)
-      );
-
-      CREATE TABLE IF NOT EXISTS intercompany_reconciliations (
-        id TEXT PRIMARY KEY,
-        firm_id TEXT NOT NULL,
-        client_id_a TEXT NOT NULL,
-        txn_id_a TEXT NOT NULL,
-        client_id_b TEXT NOT NULL,
-        txn_id_b TEXT NOT NULL,
-        amount NUMERIC NOT NULL,
-        matched_reason TEXT NOT NULL,
-        reconciled_by TEXT NOT NULL,
-        reconciled_at TIMESTAMPTZ DEFAULT NOW()
-      );
-    `);
-  }
-
-  /**
    * Scans bank feeds across clients in the firm to detect matching intercompany mirror transactions.
    */
   async detectMirrorTransactions(
     firmId: string,
     primaryClientId?: string
   ): Promise<IntercompanyMatchCandidate[]> {
-    await this.ensureTables();
-
     // Fetch all active transactions for the firm's clients
     const query = primaryClientId
       ? `SELECT bt.id, bt.client_id, c.name AS client_name, bt.txn_date, bt.description, bt.amount, bt.triage
@@ -269,8 +237,6 @@ export class IntercompanyMirrorService {
       reason?: string;
     }
   ): Promise<{ success: boolean; auditId: string }> {
-    await this.ensureTables();
-
     const reconciliationId = newId("ic_rec");
     const auditId = newId("audit");
 
@@ -363,8 +329,6 @@ export class IntercompanyMirrorService {
    */
   /** scopeUserId: staff limited to assigned clients see only links whose both clients are assigned to them. */
   async listAffiliates(firmId: string, clientId?: string, scopeUserId: string | null = null): Promise<AffiliateRelationship[]> {
-    await this.ensureTables();
-
     const query = clientId
       ? `SELECT ia.id, ia.firm_id, ia.client_id_a, ca.name AS client_name_a,
                 ia.client_id_b, cb.name AS client_name_b, ia.relationship_label, ia.created_at
@@ -416,8 +380,6 @@ export class IntercompanyMirrorService {
     clientIdB: string,
     relationshipLabel: string
   ): Promise<string> {
-    await this.ensureTables();
-
     const id = newId("aff");
     await this.db.query(
       `INSERT INTO intercompany_affiliates (id, firm_id, client_id_a, client_id_b, relationship_label, created_at)
