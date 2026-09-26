@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 // stale schema. Never logs DATABASE_URL or any other secret.
 
 const databaseUrl = process.env.DATABASE_URL;
+const skipLedgerParity = process.argv.includes("--skip-ledger-parity");
 if (!databaseUrl) {
   console.error("DATABASE_URL is required to verify the production Neon schema.");
   process.exit(1);
@@ -610,6 +611,7 @@ const expectedLedger = await Promise.all(migrationFiles.map(async (filename) => 
   filename,
   checksum: createHash("sha256").update(await readFile(path.join(migrationsDir, filename), "utf8"), "utf8").digest("hex"),
 })));
+if (!skipLedgerParity) {
 const ledgerResult = await runQuery("SELECT filename, checksum_sha256 FROM truepost_schema_migrations ORDER BY filename");
 const ledgerRows = ledgerResult?.rows ?? ledgerResult?.results?.[0]?.rows ?? [];
 const recordedLedger = new Map(ledgerRows.map((row) => [Array.isArray(row) ? row[0] : row.filename, Array.isArray(row) ? row[1] : row.checksum_sha256]));
@@ -620,5 +622,8 @@ if (ledgerDrift.length || unexpectedLedger.length) {
   process.exit(1);
 }
 console.log(`Migration ledger verification passed (${expectedLedger.length} checksums).`);
+} else {
+  console.log("Schema-object verification passed; migration ledger parity deferred for the one-time baseline.");
+}
 
 console.log("Production schema verification passed.");

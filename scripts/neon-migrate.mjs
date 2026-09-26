@@ -54,7 +54,7 @@ if (ledger.size === 0 && legacySchema) {
   // A baseline is an assertion about the existing production schema. Make the
   // assertion executable: callers cannot skip the complete verifier by calling
   // this runner directly with --baseline.
-  execFileSync(process.execPath, [path.join(path.dirname(fileURLToPath(import.meta.url)), "verify-neon-schema.mjs")], {
+  execFileSync(process.execPath, [path.join(path.dirname(fileURLToPath(import.meta.url)), "verify-neon-schema.mjs"), "--skip-ledger-parity"], {
     stdio: "inherit",
     env: process.env,
   });

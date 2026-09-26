@@ -12,6 +12,7 @@ test("the migration runner verifies schema before it can baseline a legacy datab
   const verifier = source.indexOf("verify-neon-schema.mjs", baseline);
   const insert = source.indexOf("Recorded ${historical.length}", baseline);
   assert.ok(verifier > baseline && verifier < insert);
+  assert.match(source.slice(baseline, insert), /--skip-ledger-parity/);
 });
 
 test("the standard API deployment runs migration and schema gates first", async () => {
