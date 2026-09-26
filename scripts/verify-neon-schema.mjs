@@ -38,6 +38,10 @@ async function runQuery(query) {
 
 const checks = [
   {
+    label: "receipt extraction recovery lease fields (migration 0088)",
+    query: `SELECT 1 FROM information_schema.columns WHERE table_name = 'jobs' AND column_name = 'claim_token'`,
+  },
+  {
     label: "outbox can record a human-superseded delivery (migration 0087)",
     query: `SELECT 1 FROM pg_constraint WHERE conname = 'operation_outbox_status_check' AND pg_get_constraintdef(oid) LIKE '%cancelled%'`,
   },

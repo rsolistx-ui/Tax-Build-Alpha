@@ -1,4 +1,4 @@
-import type { Db, DbStatement } from "../db";
+import { createDb, type Db, type DbStatement } from "../db";
 import type { Env } from "../env";
 import { newId } from "../lib/id";
 import { activeDocumentReaders, getLlmProvider, usCategorizerConfig, type ReceiptBusinessContext, type ReceiptExtraction } from "../providers/llm";
@@ -12,7 +12,46 @@ import { AdminRulesService } from "./admin-rules";
 
 export type ReceiptIngestResult =
   | { ok: true; receiptId: string; jobId: string; bankTransactionId: string | null; readingSkipped?: "consent_required" }
-  | { ok: false; receiptId: string; jobId: string; error: string; requestId: string };
+  | { ok: false; receiptId: string; jobId: string; error: string; requestId: string; retryPending: boolean };
+
+type ReceiptExtractionJobPayload = {
+  receiptId: string;
+  clientId: string;
+  r2Key: string;
+  bankTransactionId: string | null;
+  actorUserId: string | null;
+};
+
+type ClaimedReceiptExtraction = ReceiptExtractionJobPayload & {
+  id: string;
+  attempt_count: number;
+  claim_token: string;
+};
+
+type StoredReceiptResume = {
+  receiptId: string;
+  jobId: string;
+  r2Key: string;
+  claimToken: string;
+};
+
+class ReceiptExtractionClaimLostError extends Error {}
+
+export type ReceiptExtractionRecoveryResult = {
+  claimed: number;
+  recovered: number;
+  retried: number;
+  deadLettered: number;
+};
+
+type ReceiptFailureDisposition = "retry" | "dead_letter" | "claim_lost";
+
+const MAX_RECEIPT_EXTRACTION_ATTEMPTS = 4;
+const STALE_RECEIPT_EXTRACTION_CLAIM_MINUTES = 15;
+
+export function receiptExtractionRetryDelaySeconds(attemptCount: number): number {
+  return Math.min(30 * 60, 60 * 2 ** Math.max(0, attemptCount - 1));
+}
 
 /**
  * Receipt-specific upload gate, narrower than the general document
@@ -66,6 +105,7 @@ export async function ingestReceiptForClient(
   file: File,
   actorUserId: string | null,
   bankTransactionId: string | null,
+  resume?: StoredReceiptResume,
 ): Promise<ReceiptIngestResult> {
   if (file.size <= 0) {
     throw new HttpError(400, "file is empty");
@@ -79,7 +119,7 @@ export async function ingestReceiptForClient(
 
   const documentClassification = classifyDocument(file);
 
-  if (bankTransactionId) {
+  if (bankTransactionId && !resume) {
     const [bankTransaction] = await db.query<Record<string, unknown>>(
       `SELECT * FROM bank_transactions WHERE id = $1 AND client_id = $2`,
       [bankTransactionId, client.id],
@@ -90,40 +130,50 @@ export async function ingestReceiptForClient(
     }
   }
 
-  const receiptId = newId("rcp");
-  const jobId = newId("job");
-  const key = `${client.firm_id}/${client.id}/${receiptId}/${file.name}`;
+  const receiptId = resume?.receiptId ?? newId("rcp");
+  const jobId = resume?.jobId ?? newId("job");
+  const claimToken = resume?.claimToken ?? jobId;
+  const key = resume?.r2Key ?? `${client.firm_id}/${client.id}/${receiptId}/${file.name}`;
   const bytes = await file.arrayBuffer();
 
-  await env.RECEIPTS.put(key, bytes, {
-    httpMetadata: { contentType: file.type || "application/octet-stream" },
-    customMetadata: { filename: file.name, clientId: client.id },
-  });
+  if (resume) await assertReceiptExtractionClaim(db, jobId, claimToken);
 
-  await db.transaction([
-    {
-      query: `INSERT INTO receipts
-        (id, client_id, r2_key, filename, content_type, size_bytes, status, validation_status)
-        VALUES ($1, $2, $3, $4, $5, $6, 'uploaded', 'pending')`,
-      params: [receiptId, client.id, key, file.name, file.type || null, file.size],
-    },
-    {
-      query: `INSERT INTO jobs (id, type, payload, status)
-              VALUES ($1, 'receipt_extract', $2::jsonb, 'running')`,
-      params: [jobId, { receiptId, clientId: client.id, r2Key: key }],
-    },
-    {
-      query: `UPDATE receipts SET status = 'extracting', updated_at = NOW() WHERE id = $1`,
-      params: [receiptId],
-    },
-  ]);
+  if (!resume) {
+    await env.RECEIPTS.put(key, bytes, {
+      httpMetadata: { contentType: file.type || "application/octet-stream" },
+      customMetadata: { filename: file.name, clientId: client.id },
+    });
+
+    await db.transaction([
+      {
+        query: `INSERT INTO receipts
+          (id, client_id, r2_key, filename, content_type, size_bytes, status, validation_status)
+          VALUES ($1, $2, $3, $4, $5, $6, 'uploaded', 'pending')`,
+        params: [receiptId, client.id, key, file.name, file.type || null, file.size],
+      },
+      {
+        query: `INSERT INTO jobs (id, type, payload, status, attempt_count, claimed_at, claim_token)
+                VALUES ($1, 'receipt_extract', $2::jsonb, 'extracting', 1, NOW(), $3)`,
+        params: [jobId, { receiptId, clientId: client.id, r2Key: key, bankTransactionId, actorUserId }, jobId],
+      },
+      {
+        query: `UPDATE receipts SET status = 'extracting', updated_at = NOW() WHERE id = $1`,
+        params: [receiptId],
+      },
+    ]);
+  }
 
   // IRC § 7216: nothing is sent to an outside reading service without the
   // client's signed disclosure consent. The file is kept for manual entry.
   const readers = activeDocumentReaders(env);
   if (consentRequired(readers) && !(await hasDocumentReadingConsent(db, client.id, readers.map((r) => r.id)))) {
+    await beginReceiptExtractionFinalization(db, jobId, claimToken);
     const statements: DbStatement[] = [
-      { query: `UPDATE jobs SET status = 'done', result = $1::jsonb, updated_at = NOW() WHERE id = $2`, params: [{ skipped: "consent_required" }, jobId] },
+      {
+        query: `UPDATE jobs SET status = 'done', result = $1::jsonb, claimed_at = NULL, claim_token = NULL, updated_at = NOW()
+                WHERE id = $2 AND type = 'receipt_extract' AND status = 'finalizing' AND claim_token = $3`,
+        params: [{ skipped: "consent_required" }, jobId, claimToken],
+      },
       {
         query: `UPDATE receipts SET status = 'review', extracted_merchant = 'Manual entry needed', extracted_total = 0, confidence = 0,
           validation_status = 'fail', validation_json = $1::jsonb, updated_at = NOW() WHERE id = $2`,
@@ -216,8 +266,9 @@ export async function ingestReceiptForClient(
       },
       ...lineItemStatements(receiptId, extraction),
       {
-        query: `UPDATE jobs SET status = 'done', result = $1::jsonb, updated_at = NOW() WHERE id = $2`,
-        params: [{ extraction, validation, provider: llm.name, model: llm.model }, jobId],
+        query: `UPDATE jobs SET status = 'done', result = $1::jsonb, claimed_at = NULL, claim_token = NULL, updated_at = NOW()
+                WHERE id = $2 AND type = 'receipt_extract' AND status = 'finalizing' AND claim_token = $3`,
+        params: [{ extraction, validation, provider: llm.name, model: llm.model }, jobId, claimToken],
       },
       {
         query: `INSERT INTO audit_events (id, client_id, receipt_id, actor_user_id, action, after_json)
@@ -257,6 +308,7 @@ export async function ingestReceiptForClient(
       });
     }
 
+    await beginReceiptExtractionFinalization(db, jobId, claimToken);
     await db.transaction(statements);
     try {
       await delegateReceiptAgents(db, {
@@ -276,37 +328,161 @@ export async function ingestReceiptForClient(
     }
     return { ok: true, receiptId, jobId, bankTransactionId };
   } catch (error) {
+    if (error instanceof ReceiptExtractionClaimLostError) throw error;
     const requestId = crypto.randomUUID();
     const message = error instanceof Error ? error.message : "extract failed";
     console.error(`[${requestId}] receipt ${receiptId} extraction failed: ${message}`);
-    const validationPayload = JSON.stringify({
+    const failure = await recordReceiptExtractionFailure(db, receiptId, jobId, message, claimToken);
+    if (failure === "claim_lost") throw new ReceiptExtractionClaimLostError("Receipt extraction claim is no longer current");
+    const retryPending = failure === "retry";
+    return { ok: false, receiptId, jobId, error: retryPending ? "Receipt extraction is queued for automatic retry" : "Receipt extraction failed; routed to review queue", requestId, retryPending };
+  }
+}
+
+async function assertReceiptExtractionClaim(db: Db, jobId: string, claimToken: string): Promise<void> {
+  const current = await db.query<{ id: string }>(
+    `SELECT id FROM jobs WHERE id = $1 AND type = 'receipt_extract' AND status = 'extracting' AND claim_token = $2`,
+    [jobId, claimToken],
+  );
+  if (!current.length) throw new ReceiptExtractionClaimLostError("Receipt extraction claim is no longer current");
+}
+
+async function beginReceiptExtractionFinalization(db: Db, jobId: string, claimToken: string): Promise<void> {
+  const finalizing = await db.query<{ id: string }>(
+    `UPDATE jobs SET status = 'finalizing', updated_at = NOW()
+     WHERE id = $1 AND type = 'receipt_extract' AND status = 'extracting' AND claim_token = $2
+     RETURNING id`,
+    [jobId, claimToken],
+  );
+  if (!finalizing.length) throw new ReceiptExtractionClaimLostError("Receipt extraction claim is no longer current");
+}
+
+async function recordReceiptExtractionFailure(db: Db, receiptId: string, jobId: string, message: string, claimToken: string): Promise<ReceiptFailureDisposition> {
+  const failedJob = await db.query<{ status: string }>(
+      `UPDATE jobs
+       SET status = CASE WHEN attempt_count >= $1 THEN 'failed' ELSE 'retry_pending' END,
+           error = $2,
+           next_attempt_at = CASE WHEN attempt_count >= $1 THEN NULL ELSE NOW() + (LEAST(1800, 60 * POWER(2, GREATEST(0, attempt_count - 1))) * INTERVAL '1 second') END,
+           claimed_at = NULL,
+           claim_token = NULL,
+           updated_at = NOW()
+       WHERE id = $3 AND type = 'receipt_extract' AND status IN ('extracting', 'finalizing')
+         AND claim_token = $4
+       RETURNING status`,
+      [MAX_RECEIPT_EXTRACTION_ATTEMPTS, message, jobId, claimToken],
+  );
+  const retryPending = failedJob[0]?.status === "retry_pending";
+  // A newer worker owns the job now. It alone may alter the visible review
+  // state, so a late failure cannot overwrite its extraction result.
+  if (!failedJob.length) return "claim_lost";
+  const validationPayload = JSON.stringify({
       status: "fail",
       checks: [
         {
-          code: "OCR_UNREADABLE",
+          code: retryPending ? "OCR_RETRY_PENDING" : "OCR_UNREADABLE",
           label: "AI Optical Character Recognition",
           status: "fail",
-          message: `The AI could not automatically extract data from this file (${message}). Original evidence is saved; please enter details manually.`,
+          message: retryPending
+            ? "The AI could not automatically extract this file. The original is saved and Truepost will retry automatically; you may enter the details by hand now."
+            : `The AI could not automatically extract data from this file (${message}). Original evidence is saved; please enter details manually.`,
         },
       ],
     });
-    await db.transaction([
-      { query: `UPDATE jobs SET status = 'failed', error = $1, updated_at = NOW() WHERE id = $2`, params: [message, jobId] },
-      {
-        query: `UPDATE receipts SET
+  await db.query(
+    `UPDATE receipts SET
           status = 'review',
           extracted_merchant = 'Unreadable / Blurry Receipt (Manual Review)',
           extracted_total = 0,
           confidence = 0,
           validation_status = 'fail',
-          validation_json = $1::jsonb,
-          updated_at = NOW()
-          WHERE id = $2`,
-        params: [validationPayload, receiptId],
-      },
-    ]);
-    return { ok: false, receiptId, jobId, error: "Receipt extraction failed; routed to review queue", requestId };
+           validation_json = $1::jsonb,
+           updated_at = NOW()
+     WHERE id = $2`,
+    [validationPayload, receiptId],
+  );
+  return retryPending ? "retry" : "dead_letter";
+}
+
+/**
+ * Recovers only receipts whose original source object and job already exist.
+ * The intake path remains synchronous for a fast first answer, while this
+ * bounded worker path handles provider outages without asking the client to
+ * upload the same evidence again. Jobs are fenced by a claim token and use a
+ * finite retry budget; a permanent failure remains visible in manual review.
+ * The R2 source is intentionally retained with the receipt evidence; a
+ * terminal extraction job never deletes taxpayer evidence.
+ */
+export async function recoverReceiptExtractions(env: Env, limit = 10): Promise<ReceiptExtractionRecoveryResult> {
+  return recoverReceiptExtractionsWithDb(createDb(env), env, limit);
+}
+
+export async function recoverReceiptExtractionsWithDb(db: Db, env: Env, limit = 10): Promise<ReceiptExtractionRecoveryResult> {
+  const claimed = await claimDueReceiptExtractions(db, limit);
+  const result: ReceiptExtractionRecoveryResult = { claimed: claimed.length, recovered: 0, retried: 0, deadLettered: 0 };
+
+  for (const job of claimed) {
+    try {
+      const [stored] = await db.query<ClientRow & { filename: string; content_type: string | null; r2_key: string }>(
+        `SELECT c.*, r.filename, r.content_type, r.r2_key
+         FROM receipts r JOIN clients c ON c.id = r.client_id
+         WHERE r.id = $1 AND r.client_id = $2 AND r.r2_key = $3`,
+        [job.receiptId, job.clientId, job.r2Key],
+      );
+      if (!stored) throw new Error("Receipt recovery source record is no longer available");
+      const source = await env.RECEIPTS.get(stored.r2_key);
+      if (!source) throw new Error("Receipt recovery source object is no longer available");
+
+      const file = new File([await source.arrayBuffer()], stored.filename, { type: stored.content_type || "application/octet-stream" });
+      const attempt = await ingestReceiptForClient(
+        db,
+        env,
+        stored,
+        file,
+        job.actorUserId,
+        job.bankTransactionId,
+        { receiptId: job.receiptId, jobId: job.id, r2Key: job.r2Key, claimToken: job.claim_token },
+      );
+      if (attempt.ok) result.recovered += 1;
+      else if (attempt.retryPending) result.retried += 1;
+      else result.deadLettered += 1;
+    } catch (error) {
+      if (error instanceof ReceiptExtractionClaimLostError) continue;
+      const message = error instanceof Error ? error.message : "receipt recovery failed";
+      console.error(`[receipt-extraction-recovery] ${job.id}: ${message}`);
+      const failure = await recordReceiptExtractionFailure(db, job.receiptId, job.id, message, job.claim_token);
+      if (failure === "retry") result.retried += 1;
+      else if (failure === "dead_letter") result.deadLettered += 1;
+    }
   }
+  return result;
+}
+
+async function claimDueReceiptExtractions(db: Db, limit: number): Promise<ClaimedReceiptExtraction[]> {
+  const rows = await db.query<ClaimedReceiptExtraction>(
+    `WITH recovered AS (
+       UPDATE jobs
+       SET status = 'retry_pending', claimed_at = NULL, claim_token = NULL, next_attempt_at = NOW(), updated_at = NOW(),
+           error = COALESCE(error, 'Recovered after stale receipt extraction claim')
+       WHERE type = 'receipt_extract' AND status IN ('extracting', 'finalizing')
+         AND claimed_at < NOW() - ($1 * INTERVAL '1 minute')
+     ), due AS (
+       SELECT id FROM jobs
+       WHERE type = 'receipt_extract' AND status = 'retry_pending' AND next_attempt_at <= NOW()
+       ORDER BY created_at
+       FOR UPDATE SKIP LOCKED
+       LIMIT $2
+     )
+     UPDATE jobs j
+     SET status = 'extracting', attempt_count = j.attempt_count + 1, claimed_at = NOW(),
+         claim_token = md5(j.id || clock_timestamp()::text || random()::text), updated_at = NOW()
+     FROM due
+     WHERE j.id = due.id
+     RETURNING j.id, j.payload->>'receiptId' AS "receiptId", j.payload->>'clientId' AS "clientId",
+       j.payload->>'r2Key' AS "r2Key", j.payload->>'bankTransactionId' AS "bankTransactionId",
+       j.payload->>'actorUserId' AS "actorUserId", j.attempt_count, j.claim_token`,
+    [STALE_RECEIPT_EXTRACTION_CLAIM_MINUTES, Math.max(1, Math.min(limit, 50))],
+  );
+  return rows.filter((row) => Boolean(row.receiptId && row.clientId && row.r2Key));
 }
 
 async function loadBusinessContext(db: Db, client: ClientRow): Promise<ReceiptBusinessContext> {

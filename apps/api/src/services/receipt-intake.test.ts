@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { Db } from "../db";
+import type { Db, DbStatement } from "../db";
 import type { Env } from "../env";
 import type { ClientRow } from "./clients";
-import { HttpError, ingestReceiptForClient, isSupportedReceiptUpload, applyDeterministicMarkdownRules, suggestDeterministicCategory } from "./receipt-intake";
+import { HttpError, ingestReceiptForClient, isSupportedReceiptUpload, applyDeterministicMarkdownRules, receiptExtractionRetryDelaySeconds, recoverReceiptExtractionsWithDb, suggestDeterministicCategory } from "./receipt-intake";
 
 const client: ClientRow = { id: "cli_1", firm_id: "firm_1", name: "Acme", legal_name: null, notes: null, email: null, phone: null, pipeline_status: "active", created_at: "now", updated_at: "now" };
 
@@ -47,6 +47,89 @@ describe("ingestReceiptForClient centralized validation", () => {
   it("rejects a document type that is valid elsewhere (docx) but not for a receipt", async () => {
     const file = fileOf("notes.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", 1024);
     await expect(ingestReceiptForClient(untouchedDb, untouchedEnv, client, file, "user_1", null)).rejects.toThrow(HttpError);
+  });
+});
+
+describe("receipt extraction recovery", () => {
+  it("keeps a provider outage recoverable instead of discarding the stored source", async () => {
+    const statements: DbStatement[] = [];
+    const db: Db = {
+      async query<T>(query: string, params: unknown[] = []) {
+        statements.push({ query, params });
+        return (query.includes("RETURNING status") ? [{ status: "retry_pending" }] : []) as T[];
+      },
+      async transaction<T>(batch: DbStatement[]) { statements.push(...batch); return batch.map(() => []) as T[][]; },
+    };
+    const env = {
+      LLM_PROVIDER: "azure",
+      US_ONLY_READING: "true",
+      RECEIPTS: { put: async () => ({}) },
+    } as unknown as Env;
+
+    const result = await ingestReceiptForClient(db, env, client, fileOf("receipt.png", "image/png", 12), "user_1", null);
+
+    expect(result).toMatchObject({ ok: false, retryPending: true });
+    expect(statements.some((statement) => statement.query.includes("ELSE 'retry_pending'"))).toBe(true);
+    expect(statements.some((statement) => String(statement.params?.[0] ?? "").includes("OCR_RETRY_PENDING"))).toBe(true);
+  });
+
+  it("backs off retries and bounds a single retry delay", () => {
+    expect(receiptExtractionRetryDelaySeconds(1)).toBe(60);
+    expect(receiptExtractionRetryDelaySeconds(5)).toBe(960);
+    expect(receiptExtractionRetryDelaySeconds(9)).toBe(1800);
+  });
+
+  it("reuses the existing receipt and R2 source on a successful recovery", async () => {
+    const statements: DbStatement[] = [];
+    const db: Db = {
+      async query<T>(query: string, params: unknown[] = []) {
+        statements.push({ query, params });
+        if (query.includes("WITH recovered AS")) {
+          return [{ id: "job_1", receiptId: "rcp_1", clientId: "cli_1", r2Key: "firm_1/cli_1/rcp_1/receipt.png", bankTransactionId: null, actorUserId: "user_1", attempt_count: 2, claim_token: "claim_1" }] as T[];
+        }
+        if (query.includes("FROM receipts r JOIN clients")) return [{ ...client, filename: "receipt.png", content_type: "image/png", r2_key: "firm_1/cli_1/rcp_1/receipt.png" }] as T[];
+        if (query.includes("SELECT id FROM jobs WHERE id")) return [{ id: "job_1" }] as T[];
+        if (query.includes("UPDATE jobs SET status = 'finalizing'")) return [{ id: "job_1" }] as T[];
+        return [] as T[];
+      },
+      async transaction<T>(batch: DbStatement[]) { statements.push(...batch); return batch.map(() => []) as T[][]; },
+    };
+    const env = {
+      LLM_PROVIDER: "mock",
+      RECEIPTS: { get: async () => ({ arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer }) },
+    } as unknown as Env;
+
+    const result = await recoverReceiptExtractionsWithDb(db, env);
+
+    expect(result).toEqual({ claimed: 1, recovered: 1, retried: 0, deadLettered: 0 });
+    expect(statements.some((statement) => statement.query.includes("INSERT INTO receipts"))).toBe(false);
+    expect(statements.some((statement) => statement.query.includes("UPDATE jobs SET status = 'done'"))).toBe(true);
+  });
+
+  it("does not write receipt facts when a stale worker loses its finalizing lease", async () => {
+    const statements: DbStatement[] = [];
+    const db: Db = {
+      async query<T>(query: string, params: unknown[] = []) {
+        statements.push({ query, params });
+        if (query.includes("WITH recovered AS")) {
+          return [{ id: "job_1", receiptId: "rcp_1", clientId: "cli_1", r2Key: "firm_1/cli_1/rcp_1/receipt.png", bankTransactionId: null, actorUserId: "user_1", attempt_count: 2, claim_token: "stale_claim" }] as T[];
+        }
+        if (query.includes("FROM receipts r JOIN clients")) return [{ ...client, filename: "receipt.png", content_type: "image/png", r2_key: "firm_1/cli_1/rcp_1/receipt.png" }] as T[];
+        if (query.includes("SELECT id FROM jobs WHERE id")) return [{ id: "job_1" }] as T[];
+        // Simulate a newer claimant winning immediately before final persistence.
+        if (query.includes("UPDATE jobs SET status = 'finalizing'")) return [] as T[];
+        return [] as T[];
+      },
+      async transaction<T>(batch: DbStatement[]) { statements.push(...batch); return batch.map(() => []) as T[][]; },
+    };
+    const env = {
+      LLM_PROVIDER: "mock",
+      RECEIPTS: { get: async () => ({ arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer }) },
+    } as unknown as Env;
+
+    expect(await recoverReceiptExtractionsWithDb(db, env)).toEqual({ claimed: 1, recovered: 0, retried: 0, deadLettered: 0 });
+    expect(statements.some((statement) => statement.query.includes("UPDATE receipts SET\n          status = 'review'"))).toBe(false);
+    expect(statements.some((statement) => statement.query.includes("INSERT INTO receipt_line_items"))).toBe(false);
   });
 });
 

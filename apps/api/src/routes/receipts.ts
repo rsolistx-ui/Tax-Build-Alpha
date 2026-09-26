@@ -93,7 +93,8 @@ receiptRoutes.post("/:clientId/receipts", async (c) => {
   }
 
   if (!result.ok) {
-    return c.json({ receiptId: result.receiptId, jobId: result.jobId, error: result.error, code: "EXTRACTION_FAILED", requestId: result.requestId }, 500);
+    const status = result.retryPending ? 202 : 500;
+    return c.json({ receiptId: result.receiptId, jobId: result.jobId, error: result.error, code: result.retryPending ? "EXTRACTION_RETRY_PENDING" : "EXTRACTION_FAILED", requestId: result.requestId }, status);
   }
   try {
     const { appendSyncEvent, firePushes } = await import("../services/sync");

@@ -87,7 +87,7 @@ describe("receipt pipeline gate (IRC § 7216)", () => {
       AI: { run: async () => { aiCalled = true; return {}; }, toMarkdown: async () => { aiCalled = true; return { format: "markdown", data: "" }; } },
       RECEIPTS: { put: async () => ({}) },
     } as unknown as Env;
-    const { db, statements } = mockDb(() => undefined);
+    const { db, statements } = mockDb((sql) => sql.includes("UPDATE jobs SET status = 'finalizing'") ? [{ id: "job_1" }] : undefined);
     const result = await ingestReceiptForClient(db, env, client, new File([new Uint8Array([1])], "r.png", { type: "image/png" }), "user_1", null);
     expect(aiCalled).toBe(false);
     expect(result).toMatchObject({ ok: true, readingSkipped: "consent_required" });

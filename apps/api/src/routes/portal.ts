@@ -150,9 +150,10 @@ portalRoutes.post("/requests/:requestId/evidence", async (c) => {
   if (request.request_type === "missing_receipt") {
     try {
       const result = await ingestReceiptForClient(db, c.env, client, file, null, request.related_bank_transaction_id);
-      if (!result.ok) return c.json({ error: result.error }, 500);
+      if (!result.ok && !result.retryPending) return c.json({ error: result.error }, 500);
       await addRequestMessage(db, request.id, c.get("portalFirmId"), c.get("portalClientId"), "system", null, `Client uploaded a receipt (${file.name}).`);
       await respondToRequest(db, request.id, c.get("portalFirmId"));
+      if (!result.ok) return c.json({ receiptId: result.receiptId, jobId: result.jobId, status: "retry_pending", message: result.error }, 202);
       return c.json({ receiptId: result.receiptId }, 201);
     } catch (error) {
       if (error instanceof HttpError) return c.json({ error: error.message }, error.status as 400 | 404 | 409);
