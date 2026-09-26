@@ -70,9 +70,11 @@ import { intercompanyRoutes } from "./routes/intercompany";
 import { directUploadSmsRoutes } from "./routes/direct-upload-sms";
 import { turnstileRoutes } from "./routes/turnstile";
 import { adminUnlockRoutes } from "./routes/admin-unlock";
+import { publicStatusRoutes } from "./routes/public-status";
 import { runScheduledOperations } from "./services/scheduled-operations";
 import { runSupervisorHeartbeat } from "./services/supervisor-heartbeat";
 import { runBankFeedHeartbeat } from "./services/bank-feed-heartbeat";
+import { runPublicStatusCheck } from "./services/public-status";
 
 const app = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 
@@ -161,6 +163,10 @@ app.get("/api/health", (c) =>
     queues: Boolean(c.env.JOBS_QUEUE),
   }),
 );
+
+// Public, deliberately narrow availability evidence. It reports only the last
+// scheduled live check, never a caller-specific session or firm state.
+app.route("/api/status", publicStatusRoutes);
 
 // Public registration is closed: Folio is invitation-only during the beta.
 // This specific route is registered before the wildcard below, so Hono
@@ -280,7 +286,7 @@ app.onError((err, c) => {
 const worker = Object.assign(app, {
   scheduled(controller: ScheduledController, env: Env, executionCtx: ExecutionContext) {
     const operation = controller.cron === "*/30 * * * *"
-      ? Promise.allSettled([runSupervisorHeartbeat(env), runBankFeedHeartbeat(env)]).then((results) => {
+      ? Promise.allSettled([runSupervisorHeartbeat(env), runBankFeedHeartbeat(env), runPublicStatusCheck(env)]).then((results) => {
           for (const result of results) {
             if (result.status === "rejected") console.error("[scheduled-half-hourly] task failed", result.reason);
           }

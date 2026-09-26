@@ -20,7 +20,10 @@ type SourceType =
   | "vendors"
   | "invoices"
   | "bills"
-  | "chart_of_accounts";
+  | "chart_of_accounts"
+  | "prior_year_tax_summary";
+
+type SourceSystem = "quickbooks_csv" | "wave_csv" | "tax_software_csv";
 
 interface ClientOption {
   id: string;
@@ -48,6 +51,7 @@ export function AccountingImportModal({
   onSuccess,
 }: AccountingImportModalProps) {
   const [sourceType, setSourceType] = useState<SourceType>("transactions");
+  const [sourceSystem, setSourceSystem] = useState<SourceSystem>("quickbooks_csv");
   const [selectedClientId, setSelectedClientId] = useState<string>(defaultClientId ?? "");
   const [clients, setClients] = useState<ClientOption[]>([]);
   const [file, setFile] = useState<File | null>(null);
@@ -124,7 +128,7 @@ export function AccountingImportModal({
       setError("Select an exported CSV file to import.");
       return;
     }
-    if (sourceType === "transactions" && !selectedClientId) {
+    if ((sourceType === "transactions" || sourceType === "prior_year_tax_summary") && !selectedClientId) {
       setError("Select the client whose books will receive these transactions.");
       return;
     }
@@ -136,7 +140,9 @@ export function AccountingImportModal({
       formData.append("file", file);
       if (selectedClientId) formData.append("clientId", selectedClientId);
       if (sourceType !== "transactions") formData.append("sourceType", sourceType);
-      await api(sourceType === "transactions" ? "/api/wave-import/transactions/apply" : "/api/wave-import/apply", { method: "POST", body: formData });
+      if (sourceSystem !== "tax_software_csv") formData.append("source", sourceSystem);
+      const endpoint = sourceType === "transactions" ? "/api/wave-import/transactions/apply" : sourceType === "prior_year_tax_summary" ? "/api/wave-import/prior-year-tax-summary/apply" : "/api/wave-import/apply";
+      await api(endpoint, { method: "POST", body: formData });
       onSuccess?.();
       onClose();
     } catch (err) {
@@ -188,6 +194,14 @@ export function AccountingImportModal({
           {stage === "select" ? (
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-1.5">
+                <Label htmlFor="import-source-system" className="text-xs font-medium">Exported from</Label>
+                <select id="import-source-system" value={sourceSystem} onChange={(e) => setSourceSystem(e.target.value as SourceSystem)} className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-3 py-2 text-sm text-[var(--color-foreground)]">
+                  <option value="quickbooks_csv">QuickBooks Online CSV export</option>
+                  <option value="wave_csv">Wave CSV export</option>
+                  <option value="tax_software_csv">Tax software prior-year summary CSV</option>
+                </select>
+              </div>
+              <div className="space-y-1.5">
                 <Label htmlFor="import-source-type" className="text-xs font-medium">
                   What are you importing?
                 </Label>
@@ -203,10 +217,11 @@ export function AccountingImportModal({
                   <option value="invoices">Invoices &amp; Receivables</option>
                   <option value="bills">Bills &amp; Payables</option>
                   <option value="chart_of_accounts">Chart of Accounts</option>
+                  <option value="prior_year_tax_summary">Prior-year tax summary (AGI and total tax)</option>
                 </select>
               </div>
 
-              {clients.length > 0 && (sourceType === "transactions" || sourceType === "invoices" || sourceType === "bills") ? (
+              {clients.length > 0 && (sourceType === "transactions" || sourceType === "invoices" || sourceType === "bills" || sourceType === "prior_year_tax_summary") ? (
                 <div className="space-y-1.5">
                   <Label htmlFor="import-client-id" className="text-xs font-medium">
                     Assign to Client
@@ -217,7 +232,7 @@ export function AccountingImportModal({
                     onChange={(e) => setSelectedClientId(e.target.value)}
                     className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-3 py-2 text-sm text-[var(--color-foreground)]"
                   >
-                    <option value="">Auto-create / Detect from CSV</option>
+                    <option value="">{sourceType === "prior_year_tax_summary" ? "Choose a client" : "Auto-create / Detect from CSV"}</option>
                     {clients.map((c) => (
                       <option key={c.id} value={c.id}>
                         {c.name}
@@ -249,7 +264,7 @@ export function AccountingImportModal({
                       Drop export CSV here, or browse
                     </p>
                     <p className="text-xs text-[var(--color-muted-foreground)] mt-1">
-                      Supports Wave standard exports (e.g. Transactions.csv, Customers.csv)
+                      Supports QuickBooks Online, Wave, and tax-software CSV exports
                     </p>
                   </div>
                 )}
@@ -341,15 +356,15 @@ export function AccountingImportModal({
                 </Button>
                 <div className="flex gap-2">
                   <Button size="sm" variant="outline" onClick={onClose}>Done</Button>
-                  <Button size="sm" disabled={!proof?.readyForMappedImport || loading || (sourceType === "transactions" && !selectedClientId)} onClick={() => void applyImport()}>
-                    {sourceType === "transactions" ? "Apply reviewed transaction migration" : "Import as draft records"}
+                  <Button size="sm" disabled={!proof?.readyForMappedImport || loading || ((sourceType === "transactions" || sourceType === "prior_year_tax_summary") && !selectedClientId)} onClick={() => void applyImport()}>
+                    {sourceType === "transactions" ? "Apply reviewed transaction migration" : sourceType === "prior_year_tax_summary" ? "Import prior-year reference values" : "Import as draft records"}
                   </Button>
                 </div>
               </div>
             </div>
           ) : (
             <div className="py-12 text-center space-y-3">
-              <Loader2 className="h-8 w-8 animate-spin mx-auto text-[#0c4eb3]" />
+              <Loader2 className="h-8 w-8 animate-spin mx-auto text-[var(--color-primary)]" />
               <h3 className="text-sm font-semibold">Writing reviewed migration records…</h3>
               <p className="text-xs text-[var(--color-muted-foreground)] max-w-sm mx-auto">Transactions remain unreviewed. Invoices and bills are imported as drafts and are never sent or posted automatically.</p>
             </div>

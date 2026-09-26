@@ -69,7 +69,9 @@ Deployed as Worker `9551ca69`. Tests: 645 api, 84 web, 42 script. Full smoke tes
   - Status is green or red only with a target and enough data; otherwise "Collecting data" or "No pass line yet".
 - **Audit (card setting + milestone 5):** one RED (re-import after toggling doubled the rows) and AMBERs (debit/credit double flip, false-alarm thresholds, health checks counted), all fixed. One AMBER, smoke leftovers polluting metrics, was not reproduced: the cleanup runs even on failed runs (observed three times, residue clean).
 - **Not yet verified live:** the re-sign and re-import-duplicate smoke steps. The last smoke run (Worker `876e443b`) stopped earlier at receipt extraction (daily Workers AI allowance, Groq backup also failed), before those steps. Unit tests pass. **Run the full smoke first thing next session.**
-- **Next:** milestone 6 (public status page and published support response target). If keys arrive first, wire them first: Azure (11), then Turnstile and Telegram (12).
+- **Milestone 6 shipped:** public `/status` reads only the last scheduled live database and sign-in check (`GET /api/status`, migration 0078). A missing or stale check is explicitly **Unknown**, never presented as healthy. Support's published target is the same business day; auto-acknowledgements do not count.
+- **Milestone 7 shipped:** the proof-first CSV migration flow now accepts QuickBooks Online exports as well as Wave, preserving source-specific duplicate records and draft-only invoices/bills. Prior-year tax-software CSV summaries (tax year, AGI, total tax) are stored by client with migration 0079, never overwrite an existing summary, and prefill the estimated-tax worksheet for review.
+- **Next:** milestone 8 (1099 preparation) awaits the owner's IRS IRIS filer code. If keys arrive first, wire them first: Azure (11), then Turnstile and Telegram (12).
 
 ## 0-new. Session of 2026-09-25: client assignment (read section 00 first)
 

@@ -4,7 +4,8 @@ export type MigrationSourceType =
   | "vendors"
   | "invoices"
   | "bills"
-  | "chart_of_accounts";
+  | "chart_of_accounts"
+  | "prior_year_tax_summary";
 
 export type MigrationFinding = {
   row: number | null;
@@ -29,10 +30,23 @@ const REQUIRED_HEADERS: Record<MigrationSourceType, string[]> = {
   invoices: ["invoice number", "customer name", "invoice date", "total"],
   bills: ["bill number", "vendor name", "bill date", "total"],
   chart_of_accounts: ["account name", "account type"],
+  prior_year_tax_summary: ["tax year", "adjusted gross income", "total tax"],
 };
 
-function normalizeHeader(value: string): string {
-  return value.trim().toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
+function normalizeHeader(value: string, sourceType?: MigrationSourceType): string {
+  const raw = value.trim().toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
+  const aliases: Record<string, string> = {
+    "transaction date": "date", "posting date": "date", "memo description": "description", memo: "description", payee: "description",
+    "display name": "name", "customer display name": "name", "vendor display name": "name",
+    "account number": "account number", "account type": "account type",
+    "transaction number": "invoice number", "invoice no": "invoice number", "invoice #": "invoice number", num: "invoice number",
+    customer: "customer name", "customer name": "customer name", vendor: "vendor name", "vendor name": "vendor name",
+    "agi": "adjusted gross income", "adjusted gross income": "adjusted gross income", "total tax": "total tax", "tax year": "tax year",
+  };
+  if (sourceType === "invoices" && (raw === "date" || raw === "transaction date")) return "invoice date";
+  if (sourceType === "bills" && (raw === "date" || raw === "transaction date")) return "bill date";
+  if ((sourceType === "invoices" || sourceType === "bills") && raw === "amount") return "total";
+  return aliases[raw] ?? raw;
 }
 
 /** RFC-4180-compatible enough for user-uploaded CSV preview, including quoted commas and escaped quotes. */
@@ -71,7 +85,7 @@ export function parseCsvRows(text: string): string[][] {
 export function buildMigrationProof(sourceType: MigrationSourceType, text: string): MigrationProof {
   const rows = parseCsvRows(text);
   const headers = rows[0] ?? [];
-  const normalizedHeaders = headers.map(normalizeHeader);
+  const normalizedHeaders = headers.map((header) => normalizeHeader(header, sourceType));
   const findings: MigrationFinding[] = [];
   if (rows.length === 0) {
     return { sourceType, headers: [], sourceRowCount: 0, nonBlankRowCount: 0, duplicateCandidateCount: 0, findings: [{ row: null, severity: "error", message: "The file is empty." }], readyForMappedImport: false };

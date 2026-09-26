@@ -24,6 +24,7 @@ const ProjectsPage = lazy(() => import("@/pages/projects").then((module) => ({ d
 const CalendarPage = lazy(() => import("@/pages/calendar").then((module) => ({ default: module.CalendarPage })));
 const AnalyticsDashboard = lazy(() => import("@/pages/analytics"));
 const ConnectionsPage = lazy(() => import("@/pages/connections").then((module) => ({ default: module.ConnectionsPage })));
+const StatusPage = lazy(() => import("@/pages/status").then((module) => ({ default: module.StatusPage })));
 
 function RouteLoading() {
   return <div className="flex min-h-40 items-center justify-center text-sm text-[var(--color-muted-foreground)]" role="status">Opening workspace…</div>;
@@ -43,6 +44,7 @@ export default function App() {
         <Route path="/sign" element={<SignPage />} />
         <Route path="/consent" element={<ConsentPage />} />
         <Route path="/signup" element={<SignupPage />} />
+        <Route path="/status" element={<StatusPage />} />
         <Route element={<ProtectedLayout />}>
           <Route path="/" element={<DashboardPage />} />
           <Route path="/clients" element={<ClientsPage />} />

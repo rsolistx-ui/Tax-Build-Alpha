@@ -17,6 +17,18 @@ export function EstimatedTaxPanel({ clientId, taxYear }: { clientId: string; tax
   const [form, setForm] = useState({ taxYear: String(taxYear), priorYearTax: "", priorYearAgi: "", currentYearTax: "", expectedWithholding: "", priorYearQualifies: true, marriedFilingSeparately: false, farmerOrFisherman: false });
   const [result, setResult] = useState<EstimateResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [importedSource, setImportedSource] = useState<string | null>(null);
+
+  useEffect(() => {
+    setImportedSource(null);
+    void api<{ summary: { adjustedGrossIncome: number; totalTax: number; sourceFilename: string } | null }>(`/api/wave-import/prior-year-tax-summary/${clientId}?taxYear=${taxYear - 1}`)
+      .then(({ summary }) => {
+        if (!summary) return;
+        setForm((current) => ({ ...current, priorYearTax: current.priorYearTax || String(summary.totalTax), priorYearAgi: current.priorYearAgi || String(summary.adjustedGrossIncome) }));
+        setImportedSource(summary.sourceFilename);
+      })
+      .catch(() => undefined);
+  }, [clientId, taxYear]);
 
   async function compute(e: React.FormEvent) {
     e.preventDefault(); setError(null);
@@ -38,6 +50,7 @@ export function EstimatedTaxPanel({ clientId, taxYear }: { clientId: string; tax
       </CardHeader>
       <CardContent className="space-y-4">
         <form onSubmit={(e) => void compute(e)} className="grid gap-3 sm:grid-cols-3">
+          {importedSource ? <p className="sm:col-span-3 text-xs text-[var(--color-muted-foreground)]">Prior-year AGI and total tax were prefilled from {importedSource}. Review before calculating.</p> : null}
           <label className="text-xs">Tax year<input className={inputClass} inputMode="numeric" value={form.taxYear} onChange={set("taxYear")} /></label>
           <label className="text-xs">Prior-year total tax<input className={inputClass} inputMode="decimal" value={form.priorYearTax} onChange={set("priorYearTax")} placeholder="Form 1040, total tax" /></label>
           <label className="text-xs">Prior-year AGI<input className={inputClass} inputMode="decimal" value={form.priorYearAgi} onChange={set("priorYearAgi")} /></label>

@@ -32,6 +32,14 @@ async function runQuery(query) {
 
 const checks = [
   {
+    label: "prior-year tax summaries (migration 0079)",
+    query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'prior_year_tax_summaries'`,
+  },
+  {
+    label: "public status check history (migration 0078)",
+    query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'public_status_checks'`,
+  },
+  {
     label: "bank transactions record a sign flip (migration 0077)",
     query: `SELECT 1 FROM information_schema.columns WHERE table_name = 'bank_transactions' AND column_name = 'sign_flipped'`,
   },
