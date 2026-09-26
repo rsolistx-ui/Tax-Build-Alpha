@@ -155,6 +155,15 @@ export async function ingestReceiptForClient(
     });
     const withMemory = await applyCorrectionMemory(db, client.id, extraction);
     extraction = applyDeterministicMarkdownRules(withMemory.extraction, context.markdownRules);
+    // Document Intelligence deliberately reads receipt facts but does not make an
+    // accounting judgment. Give the professional a conservative local suggestion
+    // when the merchant/line text plainly matches one of the client's categories.
+    // This remains an approval-gated agent task; it never categorizes or files a
+    // receipt by itself.
+    if (!extraction.category) {
+      const suggested = suggestDeterministicCategory(extraction, context.categories ?? []);
+      if (suggested) extraction = { ...extraction, category: suggested };
+    }
     // US-only readers extract fields only; her rules and memory come first, then an optional US-pinned suggestion.
     const categorizer = !extraction.category ? usCategorizerConfig(env) : null;
     if (categorizer) {
@@ -434,4 +443,36 @@ export function applyDeterministicMarkdownRules(
   }
 
   return extraction;
+}
+
+/**
+ * A deliberately small, local suggestion layer for receipts read by a factual
+ * OCR provider. It only returns a category already present for this client and
+ * only when the receipt text contains an unambiguous, ordinary-language match.
+ * The caller presents the result for professional approval.
+ */
+export function suggestDeterministicCategory(extraction: ReceiptExtraction, categories: string[]): string | null {
+  const text = [extraction.merchant, ...extraction.lineItems.map((item) => item.description)]
+    .filter((value): value is string => Boolean(value))
+    .join(" ")
+    .toLowerCase();
+  const bySlug = new Map(categories.map((category) => [category.trim().toLowerCase(), category]));
+  const commonMatches: Array<[string, RegExp]> = [
+    ["supplies", /\b(?:supply|supplies|office|stationery)\b/i],
+    ["hotel", /\b(?:hotel|motel|lodging)\b/i],
+    ["travel", /\b(?:airline|flight|rental car|uber|lyft|taxi|train)\b/i],
+    ["food", /\b(?:restaurant|cafe|coffee|meal|catering)\b/i],
+  ];
+  for (const [slug, pattern] of commonMatches) {
+    const category = bySlug.get(slug);
+    if (category && pattern.test(text)) return category;
+  }
+
+  // Custom categories can still be suggested, but only when every meaningful
+  // word in their slug appears verbatim in the evidence text.
+  for (const category of categories) {
+    const words = category.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 4);
+    if (words.length > 0 && words.every((word) => new RegExp(`\\b${word}\\b`, "i").test(text))) return category;
+  }
+  return null;
 }

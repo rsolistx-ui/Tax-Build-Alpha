@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Db } from "../db";
 import type { Env } from "../env";
 import type { ClientRow } from "./clients";
-import { HttpError, ingestReceiptForClient, isSupportedReceiptUpload, applyDeterministicMarkdownRules } from "./receipt-intake";
+import { HttpError, ingestReceiptForClient, isSupportedReceiptUpload, applyDeterministicMarkdownRules, suggestDeterministicCategory } from "./receipt-intake";
 
 const client: ClientRow = { id: "cli_1", firm_id: "firm_1", name: "Acme", legal_name: null, notes: null, email: null, phone: null, pipeline_status: "active", created_at: "now", updated_at: "now" };
 
@@ -60,4 +60,19 @@ describe("isSupportedReceiptUpload", () => {
   it("rejects XLSX", () => expect(isSupportedReceiptUpload("a.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")).toBe(false));
   it("rejects CSV", () => expect(isSupportedReceiptUpload("a.csv", "text/csv")).toBe(false));
   it("rejects an unknown extension outright", () => expect(isSupportedReceiptUpload("a.exe", "application/x-msdownload")).toBe(false));
+});
+
+describe("suggestDeterministicCategory", () => {
+  const extraction = (merchant: string, lines: string[] = []) => ({
+    date: null, merchant, subtotal: null, tax: null, tip: null, total: 10, currency: "USD", category: null, confidence: 0.9,
+    lineItems: lines.map((description) => ({ description, quantity: null, unitPrice: null, amount: null, category: null, confidence: 0.9 })),
+  });
+
+  it("offers Supplies from factual office-supply evidence, for professional approval", () => {
+    expect(suggestDeterministicCategory(extraction("Folio Test Supply"), ["hotel", "supplies"])).toBe("supplies");
+  });
+
+  it("does not invent a category when the evidence is ambiguous", () => {
+    expect(suggestDeterministicCategory(extraction("Example Merchant", ["General purchase"]), ["hotel", "supplies"])).toBeNull();
+  });
 });

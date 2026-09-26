@@ -21,7 +21,7 @@ export function EstimatedTaxPanel({ clientId, taxYear }: { clientId: string; tax
 
   useEffect(() => {
     setImportedSource(null);
-    void api<{ summary: { adjustedGrossIncome: number; totalTax: number; sourceFilename: string } | null }>(`/api/wave-import/prior-year-tax-summary/${clientId}?taxYear=${taxYear - 1}`)
+    void api<{ summary: { adjustedGrossIncome: number; totalTax: number; sourceFilename: string } | null }>(`/api/accounting-import/prior-year-tax-summary/${clientId}?taxYear=${taxYear - 1}`)
       .then(({ summary }) => {
         if (!summary) return;
         setForm((current) => ({ ...current, priorYearTax: current.priorYearTax || String(summary.totalTax), priorYearAgi: current.priorYearAgi || String(summary.adjustedGrossIncome) }));

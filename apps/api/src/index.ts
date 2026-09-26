@@ -251,6 +251,9 @@ app.route("/api/stripe/oauth", stripeOAuthRoutes);
 app.route("/api/stripe", stripeRoutes);
 app.route("/api/google-calendar", googleCalendarRoutes);
 app.route("/api/wave-import", waveImportRoutes);
+// Generic read path for imported accounting and prior-year-tax data. Keep the
+// legacy source-specific path above for existing migration links only.
+app.route("/api/accounting-import", waveImportRoutes);
 app.route("/api/estimates", estimatesRoutes);
 app.route("/api/projects", projectsRoutes);
 app.route("/api/agent-schedule", agentSchedulerRoutes);
