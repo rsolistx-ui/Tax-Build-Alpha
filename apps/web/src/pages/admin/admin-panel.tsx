@@ -34,6 +34,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { BetaMetricsCard } from "@/components/beta-metrics-card";
+import { OutboxRecoveryCard } from "@/components/outbox-recovery-card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { api, setAdminToken } from "@/lib/api";
@@ -748,6 +749,7 @@ export function AdminPanel() {
       {activeTab === "dashboard" && (
         <div className="space-y-6">
           <BetaMetricsCard />
+          <OutboxRecoveryCard />
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
             <Card className="border-[var(--color-border)] shadow-sm">
               <CardContent className="p-3.5">
