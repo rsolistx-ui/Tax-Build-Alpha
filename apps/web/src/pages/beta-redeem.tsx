@@ -6,9 +6,6 @@ import {
   ArrowRight,
   ShieldCheck,
   Download,
-  Copy,
-  Check,
-  Monitor,
   Smartphone,
   Lock,
 } from "lucide-react";
@@ -29,9 +26,6 @@ export function BetaRedeemPage() {
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Fast-Pass Station Code State
-  const [fastPassCode, setFastPassCode] = useState<string | null>(null);
-  const [copiedCode, setCopiedCode] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
 
   useEffect(() => {
@@ -65,20 +59,6 @@ export function BetaRedeemPage() {
 
       setSubmitted(true);
 
-      // Automatically generate a 6-character Fast-Pass code for frictionless workstation pairing
-      try {
-        const fpRes = await fetch("/api/beta/fast-pass/create", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-        });
-        if (fpRes.ok) {
-          const fpData = await fpRes.json();
-          if (fpData.code) setFastPassCode(fpData.code);
-        }
-      } catch {
-        /* ignore */
-      }
     } catch (err: any) {
       setError(err?.message || "An error occurred during activation.");
     } finally {
@@ -123,39 +103,6 @@ export function BetaRedeemPage() {
             </div>
 
             <CardContent className="p-6 space-y-5">
-              {/* Option 1: Fast-Pass Workstation Code */}
-              {fastPassCode && (
-                <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-muted)] p-4 space-y-2">
-                  <div className="flex items-center justify-between text-xs font-semibold">
-                    <span className="flex items-center gap-1.5 text-[var(--color-foreground)]">
-                      <Monitor className="h-4 w-4 text-[var(--color-primary)]" />
-                      Workstation Fast-Pass Code
-                    </span>
-                    <Badge className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 text-[10px]">
-                      Valid for 60 Mins
-                    </Badge>
-                  </div>
-                  <div className="flex items-center justify-between rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] p-3 text-sm font-mono font-bold tracking-widest text-emerald-600 dark:text-emerald-400">
-                    <span className="text-base">{fastPassCode}</span>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="h-7 w-7"
-                      onClick={() => {
-                        navigator.clipboard.writeText(fastPassCode);
-                        setCopiedCode(true);
-                        setTimeout(() => setCopiedCode(false), 2000);
-                      }}
-                    >
-                      {copiedCode ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
-                    </Button>
-                  </div>
-                  <p className="text-[11px] text-[var(--color-muted-foreground)] leading-relaxed">
-                    Installing Truepost on your desktop PC or second monitor? Skip passwords! Simply enter this 6-digit Fast-Pass Code on the login screen to link your workstation in 2 seconds.
-                  </p>
-                </div>
-              )}
-
               {/* Action Buttons */}
               <div className="space-y-2.5">
                 <Button
@@ -177,7 +124,7 @@ export function BetaRedeemPage() {
                     variant="outline"
                     className="text-xs h-9 gap-1.5 justify-center border-[var(--color-border)]"
                     onClick={() => {
-                      const mobilePairingUrl = `${window.location.origin}/portal?fast_pass=${fastPassCode || ""}`;
+                      const mobilePairingUrl = `${window.location.origin}/portal`;
                       navigator.clipboard.writeText(mobilePairingUrl);
                       setCopiedLink(true);
                       setTimeout(() => setCopiedLink(false), 2000);

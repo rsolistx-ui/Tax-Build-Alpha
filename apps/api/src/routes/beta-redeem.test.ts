@@ -46,6 +46,16 @@ beforeEach(() => {
 });
 
 describe("redemption activation and audit events are atomic", () => {
+  it("does not expose the retired Fast-Pass session-minting endpoints", async () => {
+    const { betaRoutes } = await import("./beta");
+
+    const create = await betaRoutes.request("/fast-pass/create", { method: "POST" }, testEnv);
+    const claim = await betaRoutes.request("/fast-pass/claim", { method: "POST" }, testEnv);
+
+    expect(create.status).toBe(404);
+    expect(claim.status).toBe(404);
+  });
+
   it("commits the entitlement activation and both required beta audit events in a single db.transaction() call, with no fallible write after", async () => {
     queryMock.mockImplementation(async (sql: string) => {
       if (sql.includes("SELECT id, email, status, expires_at, redeemed_at, beta_days")) {
