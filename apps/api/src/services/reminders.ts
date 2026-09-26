@@ -1,6 +1,6 @@
 import type { Db } from "../db";
-import { addRequestMessage } from "./request-messages";
-import { sendEmail } from "./signature-reminders";
+import { newId } from "../lib/id";
+import { enqueueOutboxStatements } from "./durable-outbox";
 
 type EmailEnv = { RESEND_API_KEY?: string; SENDER_EMAIL?: string; REPLY_TO_EMAIL?: string };
 
@@ -23,16 +23,9 @@ export async function sendRemindersForFirm(db: Db, firmId: string, asOf: Date = 
 
   let sent = 0;
   for (const request of due) {
-    await addRequestMessage(
-      db,
-      request.id,
-      request.firm_id,
-      request.client_id,
-      "system",
-      null,
-      `Reminder: ${request.title} is awaiting your response.${request.due_at ? ` Due ${new Date(request.due_at).toLocaleDateString()}.` : ""}`,
-    );
-    // Email the client too when email is configured; the portal message above is always posted.
+    const reminderText = `Reminder: ${request.title} is awaiting your response.${request.due_at ? ` Due ${new Date(request.due_at).toLocaleDateString()}.` : ""}`;
+    let emailOperation: ReturnType<typeof enqueueOutboxStatements> = [];
+    // Build delivery intent before committing the portal message and reminder schedule.
     if (emailEnv?.RESEND_API_KEY) {
       const [who] = await db.query<{ email: string | null; client_name: string; firm_name: string }>(
         `SELECT c.email, COALESCE(c.legal_name, c.name) AS client_name, f.name AS firm_name FROM clients c JOIN firms f ON f.id = c.firm_id WHERE c.id = $1 AND c.firm_id = $2`,
@@ -40,16 +33,25 @@ export async function sendRemindersForFirm(db: Db, firmId: string, asOf: Date = 
       );
       if (who?.email) {
         const due = request.due_at ? ` It is due ${new Date(request.due_at).toLocaleDateString("en-US")}.` : "";
-        await sendEmail(emailEnv, {
-          to: who.email, fromName: who.firm_name,
-          subject: `${who.firm_name}: reminder, ${request.title}`,
-          text: `Hello ${who.client_name},
+        const subject = `${who.firm_name}: reminder, ${request.title}`;
+        const text = `Hello ${who.client_name},
 
 This is a reminder that we are waiting on: ${request.title}.${due} Please respond through the secure client link we sent you, or reply to this email.
 
-${who.firm_name}`,
-          html: `<p>Hello ${who.client_name.replace(/</g, "&lt;")},</p><p>This is a reminder that we are waiting on: <strong>${request.title.replace(/</g, "&lt;")}</strong>.${due} Please respond through the secure client link we sent you, or reply to this email.</p><p>${who.firm_name.replace(/</g, "&lt;")}</p>`,
-        }).catch(() => false);
+${who.firm_name}`;
+        emailOperation = enqueueOutboxStatements({
+          firmId,
+          ticketNumber: `request-reminder:${request.id}:${request.reminder_count + 1}`,
+          operations: [{
+            kind: "prepared_email",
+            key: "client-email",
+            payload: {
+              to: who.email, subject, text,
+              html: `<p>Hello ${escapeHtml(who.client_name)},</p><p>This is a reminder that we are waiting on: <strong>${escapeHtml(request.title)}</strong>.${due} Please respond through the secure client link we sent you, or reply to this email.</p><p>${escapeHtml(who.firm_name)}</p>`,
+              ticketNumber: `request-reminder:${request.id}`,
+            },
+          }],
+        });
       }
     }
 
@@ -57,13 +59,25 @@ ${who.firm_name}`,
     const nextDelay = Math.min(DEFAULT_REMINDER_DELAY_DAYS * (2 ** request.reminder_count), 30);
     const nextReminderAt = new Date(asOf.getTime() + nextDelay * 24 * 60 * 60 * 1000);
 
-    await db.query(
-      `UPDATE client_requests SET reminder_count = reminder_count + 1, last_reminded_at = NOW(), next_reminder_at = $1, updated_at = NOW() WHERE id = $2 AND firm_id = $3`,
-      [nextReminderAt.toISOString(), request.id, firmId],
-    );
+    await db.transaction([
+      {
+        query: `INSERT INTO request_messages (id, firm_id, request_id, client_id, author_type, author_user_id, body)
+                VALUES ($1, $2, $3, $4, 'system', NULL, $5)`,
+        params: [newId("rmsg"), firmId, request.id, request.client_id, reminderText],
+      },
+      {
+        query: `UPDATE client_requests SET reminder_count = reminder_count + 1, last_reminded_at = NOW(), next_reminder_at = $1, updated_at = NOW() WHERE id = $2 AND firm_id = $3`,
+        params: [nextReminderAt.toISOString(), request.id, firmId],
+      },
+      ...emailOperation,
+    ]);
     sent++;
   }
   return sent;
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
 }
 
 export async function handleReminderCron(env: { DATABASE_URL: string } & EmailEnv): Promise<{ firms: number; remindersSent: number }> {

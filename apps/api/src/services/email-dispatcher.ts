@@ -143,6 +143,21 @@ https://truepost.app`;
     });
   }
 
+  /** Sends a fully-rendered message from the durable outbox. */
+  async sendPreparedEmail(payload: {
+    to: string;
+    subject: string;
+    text: string;
+    html: string;
+    ticketNumber: string;
+    idempotencyKey?: string;
+  }): Promise<EmailDispatchResult> {
+    return this.sendOutboundEmail({
+      to: [payload.to], subject: payload.subject, text: payload.text, html: payload.html,
+      ticketNumber: payload.ticketNumber, draftReply: payload.text, idempotencyKey: payload.idempotencyKey,
+    });
+  }
+
   /**
    * Dispatches an immediate confirmation to the customer when they submit a rule directive request.
    */

@@ -1,4 +1,4 @@
-import type { Db } from "../db";
+import type { Db, DbStatement } from "../db";
 import { newId } from "../lib/id";
 import { generatePortalToken, hashPortalToken } from "./portal";
 
@@ -12,19 +12,28 @@ export async function issueSigningAccessLink(db: Db, input: {
   firmId: string; clientId: string; requestId: string; recipientEmail: string;
   recipientName?: string | null; issuedByUserId: string; ttlHours?: number;
 }): Promise<{ token: string; expiresAt: string }> {
+  const prepared = await prepareSigningAccessLink(input);
+  await db.transaction(prepared.statements);
+  return { token: prepared.token, expiresAt: prepared.expiresAt };
+}
+
+/** Builds the revocation/new-link statements so callers can atomically pair a new link with an outbox delivery. */
+export async function prepareSigningAccessLink(input: {
+  firmId: string; clientId: string; requestId: string; recipientEmail: string;
+  recipientName?: string | null; issuedByUserId: string; ttlHours?: number;
+}): Promise<{ token: string; expiresAt: string; statements: DbStatement[] }> {
   const token = generatePortalToken();
   const tokenHash = await hashPortalToken(token);
   const expiresAt = new Date(Date.now() + (input.ttlHours ?? 168) * 3_600_000).toISOString();
   const email = input.recipientEmail.trim().toLowerCase();
-  await db.transaction([
+  return { token, expiresAt, statements: [
     { query: `UPDATE signature_access_links SET revoked_at=NOW()
        WHERE signature_request_id=$1 AND LOWER(recipient_email)=LOWER($2)
          AND revoked_at IS NULL AND consumed_at IS NULL`, params: [input.requestId, email] },
     { query: `INSERT INTO signature_access_links
        (id,firm_id,client_id,signature_request_id,recipient_email,recipient_name,token_hash,expires_at,issued_by_user_id)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, params: [newId("siglink"), input.firmId, input.clientId, input.requestId, email, input.recipientName ?? null, tokenHash, expiresAt, input.issuedByUserId] },
-  ]);
-  return { token, expiresAt };
+  ] };
 }
 
 export async function resolveSigningAccess(db: Db, token: string): Promise<SigningAccess | null> {

@@ -11,7 +11,8 @@ export type OutboxOperationKind =
   | "rule_client_confirmation"
   | "rule_admin_alert"
   | "rule_admin_telegram"
-  | "rule_activation_confirmation";
+  | "rule_activation_confirmation"
+  | "prepared_email";
 
 type OutboxRow = {
   id: string;
@@ -146,6 +147,7 @@ async function deliverOperation(env: Env, operation: OutboxRow): Promise<{ succe
       return { success: telegram.success && !telegram.simulated, error: telegram.error, messageId: telegram.messageId?.toString() };
     }
     case "rule_activation_confirmation": response = await dispatcher.sendScopedRuleActivationConfirmation(payload as never); break;
+    case "prepared_email": response = await dispatcher.sendPreparedEmail(payload as never); break;
   }
   // A mock is useful in local development, but it is not a delivered
   // customer notification. Keep it pending in production until a provider is
