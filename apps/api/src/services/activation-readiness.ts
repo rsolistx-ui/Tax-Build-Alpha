@@ -41,6 +41,11 @@ export function getActivationReadiness(env: Env): ActivationCapability[] {
       detail: "Add a Resend key and verified sender address before any email delivery claim is made.",
     },
     {
+      capability: "Recoverable signing reminders",
+      state: configured(env.OUTBOX_DELIVERY_KEY_V1) ? "ready" : "setup_required",
+      detail: "Add the versioned signing-delivery encryption key before automatic signature reminders can recover safely after a Worker restart.",
+    },
+    {
       capability: "Live bank feeds",
       state: configured(env.PLAID_CLIENT_ID, env.PLAID_CLIENT_SECRET) || configured(env.TELLER_CLIENT_ID, env.TELLER_CLIENT_SECRET) ? "ready" : "setup_required",
       detail: "Connect either Plaid or Teller, complete their webhook verification, and test a real institution before enabling live feeds.",

@@ -77,7 +77,7 @@ adminRoutes.get("/tickets", async (c) => {
 
 /** Owner-only operational queue for durable notification failures. */
 adminRoutes.get("/outbox", async (c) => {
-  const status = z.enum(["pending", "processing", "delivered", "dead_letter"]).optional().parse(c.req.query("status"));
+  const status = z.enum(["pending", "processing", "delivered", "dead_letter", "cancelled"]).optional().parse(c.req.query("status"));
   const rows = await createDb(c.env).query(
     `SELECT id, firm_id, operation_kind, status, attempt_count, next_attempt_at, claimed_at,
             delivered_at, provider_message_id, last_error, created_at, updated_at

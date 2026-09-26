@@ -17,6 +17,7 @@ describe("getActivationReadiness", () => {
     const capabilities = getActivationReadiness(baseEnv);
     expect(capabilities.find((item) => item.capability === "Telegram operations alerts")?.state).toBe("setup_required");
     expect(capabilities.find((item) => item.capability === "Return e-file submission")?.state).toBe("partner_required");
+    expect(capabilities.find((item) => item.capability === "Recoverable signing reminders")?.state).toBe("setup_required");
   });
 
   it("recognizes a fully configured Turnstile pair only", () => {

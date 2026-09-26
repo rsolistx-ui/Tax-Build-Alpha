@@ -38,6 +38,16 @@ async function runQuery(query) {
 
 const checks = [
   {
+    label: "outbox can record a human-superseded delivery (migration 0087)",
+    query: `SELECT 1 FROM pg_constraint WHERE conname = 'operation_outbox_status_check' AND pg_get_constraintdef(oid) LIKE '%cancelled%'`,
+  },
+  {
+    label: "versioned signing-delivery secret lifecycle (migration 0086)",
+    query: `SELECT 1 FROM information_schema.columns WHERE table_name = 'outbox_delivery_secrets' AND column_name = 'signing_link_id'
+            INTERSECT
+            SELECT 1 FROM information_schema.columns WHERE table_name = 'outbox_delivery_secrets' AND column_name = 'key_version'`,
+  },
+  {
     label: "encrypted outbox delivery secrets (migration 0085)",
     query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'outbox_delivery_secrets'`,
   },

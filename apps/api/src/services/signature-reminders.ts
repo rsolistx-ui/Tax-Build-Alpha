@@ -24,6 +24,9 @@ const MAX_LINKS = 6; // the first link plus five reminders
  */
 export async function runSignatureReminders(db: Db, env: Env, deps: { fetch?: typeof fetch } = {}) {
   if (!env.RESEND_API_KEY) return { sent: 0, skipped: "email_not_configured" as const };
+  // Do not create an automatic reminder we cannot safely resume after a
+  // Worker restart. Existing rows remain visible in the durable outbox.
+  if (!env.OUTBOX_DELIVERY_KEY_V1) return { sent: 0, skipped: "delivery_encryption_not_configured" as const };
   const due = await db.query<{ id: string; firm_id: string; client_id: string; signature_request_id: string; form_type: string; tax_year: number; taxpayer_name: string; taxpayer_email: string; firm_name: string; links: string }>(
     `SELECT ea.id, ea.firm_id, ea.client_id, ea.signature_request_id, ea.form_type, ea.tax_year, ea.taxpayer_name, ea.taxpayer_email, f.name AS firm_name,
             (SELECT COUNT(*) FROM signature_access_links l WHERE l.signature_request_id = ea.signature_request_id)::text AS links

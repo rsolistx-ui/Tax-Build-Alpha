@@ -46,6 +46,10 @@ export type Env = {
   /** Push notifications (Web Push + VAPID). Never hardcoded; set as Worker secrets. */
   VAPID_PUBLIC_KEY: string;
   VAPID_PRIVATE_KEY: string;
+  /** Versioned encryption key for pending signing-delivery tokens. Keep prior versions while any matching outbox row can retry. */
+  OUTBOX_DELIVERY_KEY_V1?: string;
+  /** Retained prior Better Auth secret used only to drain legacy outbox rows during a planned rotation. */
+  OUTBOX_DELIVERY_LEGACY_AUTH_KEY?: string;
   /** Cloudflare Turnstile bot challenge (site key & secret key) */
   CF_TURNSTILE_SITE_KEY?: string;
   CF_TURNSTILE_SECRET_KEY?: string;

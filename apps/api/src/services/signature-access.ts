@@ -17,23 +17,51 @@ export async function issueSigningAccessLink(db: Db, input: {
   return { token: prepared.token, expiresAt: prepared.expiresAt };
 }
 
-/** Builds the revocation/new-link statements so callers can atomically pair a new link with an outbox delivery. */
+/** Builds a new signing link. Delivery jobs can stage it without revoking a usable predecessor. */
 export async function prepareSigningAccessLink(input: {
   firmId: string; clientId: string; requestId: string; recipientEmail: string;
   recipientName?: string | null; issuedByUserId: string; ttlHours?: number;
-}): Promise<{ token: string; expiresAt: string; statements: DbStatement[] }> {
+  /** Delivery retries stage a replacement first and revoke predecessors only after the recipient has it. */
+  revokeExisting?: boolean;
+}): Promise<{ token: string; expiresAt: string; linkId: string; statements: DbStatement[] }> {
   const token = generatePortalToken();
   const tokenHash = await hashPortalToken(token);
   const expiresAt = new Date(Date.now() + (input.ttlHours ?? 168) * 3_600_000).toISOString();
   const email = input.recipientEmail.trim().toLowerCase();
-  return { token, expiresAt, statements: [
-    { query: `UPDATE signature_access_links SET revoked_at=NOW()
+  const linkId = newId("siglink");
+  const statements: DbStatement[] = [];
+  if (input.revokeExisting !== false) statements.push(
+    // A staff-issued replacement cancels only an automatic reminder that has
+    // not staged a bearer link. Once a reminder has staged one, we keep that
+    // link valid through expiry: a stalled Worker may already hold its token.
+    { query: `WITH cancelled AS (
+         UPDATE operation_outbox
+         SET status='cancelled', claim_token=NULL,
+             last_error='Cancelled because a newer signing link was issued',
+             provider_message_id='superseded_by_newer_signing_link', updated_at=NOW()
+         WHERE operation_kind='signature_reminder'
+           AND status IN ('pending','processing')
+           AND NOT EXISTS (
+             SELECT 1 FROM outbox_delivery_secrets s WHERE s.outbox_id=operation_outbox.id
+           )
+            AND payload->>'requestId'=$1
+            AND LOWER(payload->>'taxpayerEmail')=LOWER($2)
+          RETURNING id
+        )
+        UPDATE signature_access_links SET revoked_at=NOW()
        WHERE signature_request_id=$1 AND LOWER(recipient_email)=LOWER($2)
-         AND revoked_at IS NULL AND consumed_at IS NULL`, params: [input.requestId, email] },
+         AND revoked_at IS NULL AND consumed_at IS NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM outbox_delivery_secrets s
+           WHERE s.signing_link_id=signature_access_links.id
+         )`, params: [input.requestId, email] },
+  );
+  statements.push(
     { query: `INSERT INTO signature_access_links
        (id,firm_id,client_id,signature_request_id,recipient_email,recipient_name,token_hash,expires_at,issued_by_user_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, params: [newId("siglink"), input.firmId, input.clientId, input.requestId, email, input.recipientName ?? null, tokenHash, expiresAt, input.issuedByUserId] },
-  ] };
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, params: [linkId, input.firmId, input.clientId, input.requestId, email, input.recipientName ?? null, tokenHash, expiresAt, input.issuedByUserId] },
+  );
+  return { token, expiresAt, linkId, statements };
 }
 
 export async function resolveSigningAccess(db: Db, token: string): Promise<SigningAccess | null> {
