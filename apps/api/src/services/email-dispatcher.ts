@@ -1,5 +1,4 @@
 import type { Env } from "../env";
-import { TelegramNotifierService } from "./telegram-notifier";
 
 export interface RuleAlertPayload {
   ticketNumber: string;
@@ -283,15 +282,6 @@ ${payload.markdownContent}
       </div>
     `;
 
-    void new TelegramNotifierService(this.env)
-      .notifyRuleDirective({
-        userName: payload.userName,
-        title: payload.ruleTitle,
-        directiveText: payload.directiveText,
-        clientName: payload.clientName,
-      })
-      .catch(() => {});
-
     return this.sendOutboundEmail({
       to: adminEmail ? [adminEmail] : [],
       subject,
@@ -347,12 +337,6 @@ ${draftReply}
         </div>
       </div>
     `;
-
-    void new TelegramNotifierService(this.env)
-      .sendMessage(
-        `💬 <b>Truepost Concierge Support Request</b>\n\n<b>From:</b> ${payload.userName} (${payload.userEmail})\n<b>Subject:</b> ${payload.subject}\n<b>Message:</b>\n<i>${payload.message}</i>\n🕒 <code>${new Date().toLocaleString("en-US", { hour12: true })}</code>`
-      )
-      .catch(() => {});
 
     return this.sendOutboundEmail({
       to: adminEmail ? [adminEmail] : [],

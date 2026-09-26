@@ -2,12 +2,15 @@ import { createDb, type Db } from "../db";
 import type { Env } from "../env";
 import { newId } from "../lib/id";
 import { EmailDispatcherService, type RuleAlertPayload, type SupportContactPayload } from "./email-dispatcher";
+import { TelegramNotifierService } from "./telegram-notifier";
 
 export type OutboxOperationKind =
   | "support_client_confirmation"
   | "support_admin_alert"
+  | "support_admin_telegram"
   | "rule_client_confirmation"
   | "rule_admin_alert"
+  | "rule_admin_telegram"
   | "rule_activation_confirmation";
 
 type OutboxRow = {
@@ -17,6 +20,7 @@ type OutboxRow = {
   payload: unknown;
   idempotency_key: string;
   attempt_count: number;
+  claim_token: string;
 };
 
 export type OutboxResult = { claimed: number; delivered: number; retried: number; deadLettered: number };
@@ -50,13 +54,15 @@ export async function processDurableOutbox(env: Env, limit = 20): Promise<Outbox
     try {
       const delivery = await deliverOperation(env, operation);
       if (!delivery.success) throw new Error(delivery.error || "Provider did not accept the operation");
-      await db.query(
+      const completed = await db.query<{ id: string }>(
         `UPDATE operation_outbox
          SET status = 'delivered', delivered_at = NOW(), provider_message_id = $2,
              last_error = NULL, updated_at = NOW()
-         WHERE id = $1 AND status = 'processing'`,
-        [operation.id, delivery.messageId ?? null],
+         WHERE id = $1 AND status = 'processing' AND claim_token = $3
+         RETURNING id`,
+        [operation.id, delivery.messageId ?? null, operation.claim_token],
       );
+      if (!completed.length) continue;
       if (operation.operation_kind === "support_client_confirmation") {
         const ticketNumber = (operation.payload as { ticketNumber?: string }).ticketNumber;
         if (ticketNumber) {
@@ -71,14 +77,16 @@ export async function processDurableOutbox(env: Env, limit = 20): Promise<Outbox
     } catch (error) {
       const deadLetter = operation.attempt_count >= MAX_ATTEMPTS;
       const delay = retryDelaySeconds(operation.attempt_count);
-      await db.query(
+      const released = await db.query<{ id: string }>(
         `UPDATE operation_outbox
          SET status = $2, last_error = $3,
              next_attempt_at = CASE WHEN $2 = 'pending' THEN NOW() + ($4 * INTERVAL '1 second') ELSE next_attempt_at END,
              updated_at = NOW()
-         WHERE id = $1 AND status = 'processing'`,
-        [operation.id, deadLetter ? "dead_letter" : "pending", safeError(error), delay],
+         WHERE id = $1 AND status = 'processing' AND claim_token = $5
+         RETURNING id`,
+        [operation.id, deadLetter ? "dead_letter" : "pending", safeError(error), delay, operation.claim_token],
       );
+      if (!released.length) continue;
       if (deadLetter) result.deadLettered += 1;
       else result.retried += 1;
     }
@@ -90,7 +98,7 @@ async function claimDueOperations(db: Db, limit: number): Promise<OutboxRow[]> {
   const rows = await db.query<OutboxRow>(
     `WITH recovered AS (
        UPDATE operation_outbox
-       SET status = 'pending', claimed_at = NULL, next_attempt_at = NOW(), updated_at = NOW(),
+       SET status = 'pending', claimed_at = NULL, claim_token = NULL, next_attempt_at = NOW(), updated_at = NOW(),
            last_error = COALESCE(last_error, 'Recovered after stale worker claim')
        WHERE status = 'processing' AND claimed_at < NOW() - ($1 * INTERVAL '1 minute')
      ), due AS (
@@ -101,12 +109,17 @@ async function claimDueOperations(db: Db, limit: number): Promise<OutboxRow[]> {
        LIMIT $2
      )
      UPDATE operation_outbox o
-     SET status = 'processing', attempt_count = o.attempt_count + 1, claimed_at = NOW(), updated_at = NOW()
+     SET status = 'processing', attempt_count = o.attempt_count + 1, claimed_at = NOW(),
+         claim_token = md5(o.id || clock_timestamp()::text || random()::text), updated_at = NOW()
      FROM due WHERE o.id = due.id
-     RETURNING o.id, o.firm_id, o.operation_kind, o.payload, o.idempotency_key, o.attempt_count`,
+     RETURNING o.id, o.firm_id, o.operation_kind, o.payload, o.idempotency_key, o.attempt_count, o.claim_token`,
     [STALE_CLAIM_MINUTES, Math.max(1, Math.min(limit, 100))],
   );
   return rows;
+}
+
+export function isDeliveryAccepted(result: { success: boolean; delivered: boolean; simulated: boolean }): boolean {
+  return result.success && result.delivered && !result.simulated;
 }
 
 async function deliverOperation(env: Env, operation: OutboxRow): Promise<{ success: boolean; error?: string; messageId?: string }> {
@@ -116,15 +129,29 @@ async function deliverOperation(env: Env, operation: OutboxRow): Promise<{ succe
   switch (operation.operation_kind) {
     case "support_client_confirmation": response = await dispatcher.sendClientAutoResponse(payload as unknown as SupportContactPayload); break;
     case "support_admin_alert": response = await dispatcher.notifyAdminOfSupportContact(payload as unknown as SupportContactPayload); break;
+    case "support_admin_telegram": {
+      const input = payload as unknown as SupportContactPayload;
+      const telegram = await new TelegramNotifierService(env).sendMessage(
+        `💬 <b>Truepost Concierge Support Request</b>\n\n<b>From:</b> ${escapeTelegramHtml(input.userName)} (${escapeTelegramHtml(input.userEmail)})\n<b>Subject:</b> ${escapeTelegramHtml(input.subject)}\n<b>Message:</b>\n<i>${escapeTelegramHtml(input.message)}</i>`,
+      );
+      return { success: telegram.success && !telegram.simulated, error: telegram.error, messageId: telegram.messageId?.toString() };
+    }
     case "rule_client_confirmation": response = await dispatcher.sendClientRuleRequestAutoResponse(payload as never); break;
     case "rule_admin_alert": response = await dispatcher.notifyAdminOfRuleRequest(payload as unknown as RuleAlertPayload); break;
+    case "rule_admin_telegram": {
+      const input = payload as unknown as RuleAlertPayload;
+      const telegram = await new TelegramNotifierService(env).notifyRuleDirective({
+        userName: input.userName, title: input.ruleTitle, directiveText: input.directiveText, clientName: input.clientName,
+      });
+      return { success: telegram.success && !telegram.simulated, error: telegram.error, messageId: telegram.messageId?.toString() };
+    }
     case "rule_activation_confirmation": response = await dispatcher.sendScopedRuleActivationConfirmation(payload as never); break;
   }
   // A mock is useful in local development, but it is not a delivered
   // customer notification. Keep it pending in production until a provider is
   // configured instead of turning an operational gap into a false success.
   return {
-    success: response.success && response.delivered,
+    success: isDeliveryAccepted(response),
     error: response.simulated ? "Outbound email is not configured" : response.error,
     messageId: response.emailId,
   };
@@ -132,4 +159,8 @@ async function deliverOperation(env: Env, operation: OutboxRow): Promise<{ succe
 
 function safeError(error: unknown): string {
   return error instanceof Error ? error.message.slice(0, 1000) : String(error).slice(0, 1000);
+}
+
+function escapeTelegramHtml(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
 }

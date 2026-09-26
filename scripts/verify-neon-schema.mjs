@@ -38,8 +38,8 @@ async function runQuery(query) {
 
 const checks = [
   {
-    label: "durable operation outbox (migration 0081)",
-    query: `SELECT 1 FROM information_schema.tables WHERE table_name = 'operation_outbox'`,
+    label: "durable operation outbox with fenced claims (migration 0082)",
+    query: `SELECT 1 FROM information_schema.columns WHERE table_name = 'operation_outbox' AND column_name = 'claim_token'`,
   },
   {
     label: "checksum-tracked Neon migration ledger (migration 0080)",

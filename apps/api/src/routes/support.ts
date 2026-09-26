@@ -70,6 +70,7 @@ supportRoutes.post("/contact", async (c) => {
       operations: [
         { kind: "support_client_confirmation", payload: supportPayload, key: "client-confirmation" },
         { kind: "support_admin_alert", payload: supportPayload, key: "admin-alert" },
+        { kind: "support_admin_telegram", payload: supportPayload, key: "admin-telegram" },
       ],
     }),
   ]);
@@ -142,6 +143,7 @@ supportRoutes.post("/request-rule", async (c) => {
       operations: [
         { kind: "rule_client_confirmation", payload: clientConfirmation, key: "client-confirmation" },
         { kind: "rule_admin_alert", payload: adminAlert, key: "admin-alert" },
+        { kind: "rule_admin_telegram", payload: adminAlert, key: "admin-telegram" },
       ],
     }),
   ]);
@@ -161,21 +163,23 @@ supportRoutes.post("/request-rule", async (c) => {
   });
 
   if (automation.status === "activated") {
-    await db.query(
-      `UPDATE client_rule_requests
-       SET status = 'activated', ai_notes = $1, resolved_at = NOW()
-       WHERE id = $2 AND firm_id = $3`,
-      [automation.summary, ticketNumber, firm.id],
-    );
-    await db.transaction(enqueueOutboxStatements({
-      firmId: firm.id,
-      ticketNumber,
-      operations: [{
-        kind: "rule_activation_confirmation",
-        payload: { ticketNumber, userName, userEmail, clientName: body.clientName, summary: automation.summary },
-        key: "activation-confirmation",
-      }],
-    }));
+    await db.transaction([
+      {
+        query: `UPDATE client_rule_requests
+         SET status = 'activated', ai_notes = $1, resolved_at = NOW()
+         WHERE id = $2 AND firm_id = $3`,
+        params: [automation.summary, ticketNumber, firm.id],
+      },
+      ...enqueueOutboxStatements({
+        firmId: firm.id,
+        ticketNumber,
+        operations: [{
+          kind: "rule_activation_confirmation",
+          payload: { ticketNumber, userName, userEmail, clientName: body.clientName, summary: automation.summary },
+          key: "activation-confirmation",
+        }],
+      }),
+    ]);
   } else {
     await db.query(
       `UPDATE client_rule_requests SET ai_notes = $1 WHERE id = $2 AND firm_id = $3`,

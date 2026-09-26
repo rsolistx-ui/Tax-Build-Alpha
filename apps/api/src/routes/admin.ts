@@ -9,6 +9,7 @@ import { ensureFirm } from "../services/firm";
 import { EmailDispatcherService } from "../services/email-dispatcher";
 import { loadBetaMetrics } from "../services/beta-metrics";
 import { TelegramNotifierService } from "../services/telegram-notifier";
+import { processDurableOutbox } from "../services/durable-outbox";
 
 export const adminRoutes = new Hono<{ Bindings: Env; Variables: AuthedVars }>();
 adminRoutes.use("*", requireSession);
@@ -29,6 +30,7 @@ adminRoutes.get("/metrics", async (c) => {
   const [activeRules] = await db.query<any>(`SELECT COUNT(*) as count FROM firm_rules WHERE is_active = true`, []).catch(() => [{}]);
   const [errors] = await db.query<any>(`SELECT COUNT(*) as count FROM audit_events WHERE action IN ('error','failed','exception')`, []).catch(() => [{}]);
   const [syncEvents] = await db.query<any>(`SELECT COUNT(*) as count FROM sync_events WHERE firm_id=$1`, [firm.id]).catch(() => [{}]);
+  const [deadLetterOperations] = await db.query<any>(`SELECT COUNT(*) as count FROM operation_outbox WHERE status = 'dead_letter'`, []);
 
   // Token Burn Telemetry: estimated based on active rules compiled & voice sessions protected
   const tokenMetrics = {
@@ -50,6 +52,7 @@ adminRoutes.get("/metrics", async (c) => {
     activeRules: parseInt(activeRules?.count ?? "0"),
     errors: parseInt(errors?.count ?? "0"),
     syncEvents: parseInt(syncEvents?.count ?? "0"),
+    deadLetterOperations: parseInt(deadLetterOperations?.count ?? "0"),
     tokenMetrics,
   });
 });
@@ -70,6 +73,36 @@ adminRoutes.get("/tickets", async (c) => {
     [],
   ).catch(() => []);
   return c.json({ tickets: rows });
+});
+
+/** Owner-only operational queue for durable notification failures. */
+adminRoutes.get("/outbox", async (c) => {
+  const status = z.enum(["pending", "processing", "delivered", "dead_letter"]).optional().parse(c.req.query("status"));
+  const rows = await createDb(c.env).query(
+    `SELECT id, firm_id, operation_kind, status, attempt_count, next_attempt_at, claimed_at,
+            delivered_at, provider_message_id, last_error, created_at, updated_at
+     FROM operation_outbox
+     WHERE ($1::text IS NULL OR status = $1)
+     ORDER BY CASE WHEN status = 'dead_letter' THEN 0 WHEN status = 'pending' THEN 1 ELSE 2 END, created_at DESC
+     LIMIT 200`,
+    [status ?? null],
+  );
+  return c.json({ operations: rows });
+});
+
+/** Replays a visible dead letter without changing its provider idempotency key. */
+adminRoutes.post("/outbox/:id/retry", async (c) => {
+  const [operation] = await createDb(c.env).query(
+    `UPDATE operation_outbox
+     SET status = 'pending', attempt_count = 0, next_attempt_at = NOW(), claimed_at = NULL,
+         claim_token = NULL, last_error = NULL, updated_at = NOW()
+     WHERE id = $1 AND status = 'dead_letter'
+     RETURNING id, operation_kind, status, attempt_count, next_attempt_at`,
+    [c.req.param("id")],
+  );
+  if (!operation) return c.json({ error: "Dead-letter operation not found" }, 404);
+  c.executionCtx.waitUntil(processDurableOutbox(c.env).catch((error) => console.error("[outbox-retry]", error)));
+  return c.json({ operation });
 });
 
 /**

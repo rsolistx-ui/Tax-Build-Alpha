@@ -205,6 +205,7 @@ export function AdminPanel() {
     activeRules: 0,
     errors: 0,
     syncEvents: 0,
+    deadLetterOperations: 0,
     tokenMetrics: {
       estimatedTokensConsumed: 1240,
       budgetTokensMonthly: 500000,
@@ -404,6 +405,7 @@ export function AdminPanel() {
         activeRules: d.activeRules ?? 0,
         errors: d.errors ?? 0,
         syncEvents: d.syncEvents ?? 0,
+        deadLetterOperations: d.deadLetterOperations ?? 0,
         tokenMetrics: d.tokenMetrics ?? {
           estimatedTokensConsumed: 1240,
           budgetTokensMonthly: 500000,
@@ -781,6 +783,19 @@ export function AdminPanel() {
                   {metrics.ruleRequests}
                 </div>
                 <div className="text-[10px] text-[var(--color-muted-foreground)] mt-0.5">Pending compilation</div>
+              </CardContent>
+            </Card>
+
+            <Card className={metrics.deadLetterOperations ? "border-red-500/50 bg-red-500/5 shadow-sm" : "border-[var(--color-border)] shadow-sm"}>
+              <CardContent className="p-3.5" aria-live="polite">
+                <div className="flex items-center justify-between text-xs text-[var(--color-muted-foreground)] mb-1">
+                  <span>Delivery failures</span>
+                  <AlertTriangle className={metrics.deadLetterOperations ? "h-3.5 w-3.5 text-red-600" : "h-3.5 w-3.5 text-emerald-500"} aria-hidden="true" />
+                </div>
+                <div className={metrics.deadLetterOperations ? "text-2xl font-bold tracking-tight text-red-700 dark:text-red-300" : "text-2xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400"}>
+                  {metrics.deadLetterOperations}
+                </div>
+                <div className="text-[10px] text-[var(--color-muted-foreground)] mt-0.5">{metrics.deadLetterOperations ? "Open /api/admin/outbox to replay" : "No dead-lettered operations"}</div>
               </CardContent>
             </Card>
 
